@@ -16,22 +16,26 @@ contract IndexFactory is Ownable {
     error IndexFactory__UnderlyingAssetNotERC20();
     error IndexFactory__PriceFeedNotAvailable(address priceFeed);
     error IndexFactory__IndexAlreadyExists(address index);
+    error IndexFactory__IsNotIndex();
+    error IndexFactory__IndexAlreadyInitialized();
     error IndexFactory__InvalidPriceFeedAddress();
 
-    address[] public indices;
-    mapping(address => mapping(address => address)) public getIndex;
-    mapping(address => bool) public isIndex;
+    address[] private indexes;
+    mapping(address => mapping(address => address)) private getIndex;
+    mapping(address => bool) private isIndex;
+    mapping(address => bool) private isInitialized;
 
-    constructor(address _adminController) Ownable(_adminController) {}
+    address public immutable i_usdcAddress;
+
+    constructor(address _adminController, address _usdcAddress) Ownable(_adminController) {
+        i_usdcAddress = _usdcAddress;
+    }
 
     function createIndex(
-        string memory _name,
-        string memory _symbol,
         uint256 _feePercentage,
         IndexAsset memory _assetA,
         IndexAsset memory _assetB
     ) public onlyOwner {
-        //CHECK ASSETS ARE NOT THE SAME
         if (_assetA.asset == _assetB.asset) {
             revert IndexFactory__InvalidIndexAssetsAddress();
         }
@@ -48,11 +52,6 @@ contract IndexFactory is Ownable {
             );
         }
 
-        //CHECK AMOUNT OF UNDERLYING ASSETS IS NOT ZERO
-        if (asset0.underlyingInitAmount == 0 ){
-            revert IndexFactory__InvalidIndexAssetsAmount();
-        }
-
         // CHECK WEIGHT PERCENTAGES SUM TO 100
         if (asset0.weightPercentage + asset1.weightPercentage != 100) {
             revert IndexFactory__InvalidIndexAssetsPercentages();
@@ -66,34 +65,65 @@ contract IndexFactory is Ownable {
         _validatePriceFeed(asset0.priceFeed);
         _validatePriceFeed(asset1.priceFeed);
 
-        // CHECK BALANCE OF UNDERLYING ASSET IN THE CONTRACT
-        // TRANSFERFROM USER TO THE CONTRACT THE UNDERLYING ASSET
-        //create2 per prevedere address e inviare fondi
-        bytes memory bytecode = abi.encodePacked(
-            type(Index).creationCode,
-            abi.encode(
-                _name, 
-                _symbol, 
-                asset0.asset, 
-                asset1.asset, 
-                asset0.weightPercentage, 
-                asset1.weightPercentage, 
-                asset0.priceFeed, 
-                asset1.priceFeed, 
-                _feePercentage 
-            )
-        );
-        bytes32 salt = keccak256(abi.encodePacked(asset0.asset, asset1.asset));
-
-        address index;
-        assembly {
-            index := create2(0, add(bytecode, 32), mload(bytecode), salt)
-        }
+        address index = _deployIndex(asset0, asset1, _feePercentage, i_usdcAddress);
 
         getIndex[asset0.asset][asset1.asset] = index;
         isIndex[index] = true;
-        indices.push(index);
+        indexes.push(index);
+    }
 
+    function _deployIndex(
+        IndexAsset memory _asset0,
+        IndexAsset memory _asset1,
+        uint256 _feePercentage,
+        address _usdcAddress
+    ) internal returns (address index) {
+        // prepare data for Index constructor
+        string memory name;
+        string memory symbol;
+        {
+            string memory symbol0 = IERC20Metadata(_asset0.asset).symbol();
+            string memory symbol1 = IERC20Metadata(_asset1.asset).symbol();
+            name = string(abi.encodePacked("Index ", symbol0, "/", symbol1));
+            symbol = string(abi.encodePacked("IDX", symbol0, symbol1));
+        }
+
+        bytes memory bytecode = abi.encodePacked(
+            type(Index).creationCode,
+            abi.encode(
+                name,
+                symbol,
+                msg.sender,
+                _usdcAddress,
+                _asset0.asset,
+                _asset1.asset,
+                _asset0.weightPercentage,
+                _asset1.weightPercentage,
+                _asset0.priceFeed,
+                _asset1.priceFeed,
+                _feePercentage
+            )
+        );
+        bytes32 salt = keccak256(abi.encodePacked(_asset0.asset, _asset1.asset));
+        assembly {
+            index := create2(0, add(bytecode, 32), mload(bytecode), salt)
+        }
+    }
+
+    function initializeIndex(
+        address indexAddress,
+        uint256 underlyingAmount0
+    ) public onlyOwner {
+        if (!isIndex[indexAddress]) {
+            revert IndexFactory__IsNotIndex();
+        }
+
+        if (isInitialized[indexAddress]) {
+            revert IndexFactory__IndexAlreadyInitialized();
+        }
+
+        Index(indexAddress).initialize(underlyingAmount0);
+        isInitialized[indexAddress] = true;
     }
 
     function sortAssets(
@@ -105,6 +135,33 @@ contract IndexFactory is Ownable {
         } else {
             return (_assetB, _assetA);
         }
+    }
+
+    function getAllIndexes() public view returns (address[] memory) {
+        return indexes;
+    }
+
+    // function getIndexByAssets(
+    //     address assetA,
+    //     address assetB
+    // ) public view returns (address index, bool isAlreadyInitialized) {
+    //     (IndexAsset memory asset0, IndexAsset memory asset1) = sortAssets(
+    //         IndexAsset(assetA, 0, 0, address(0)),
+    //         IndexAsset(assetB, 0, 0, address(0))
+    //     );
+    //     index = getIndex[asset0.asset][asset1.asset];
+    //     isAlreadyInitialized = isInitialized[index];
+    //     return (index, isAlreadyInitialized);
+    // }
+
+    function isIndexAddress(address indexAddress) public view returns (bool) {
+        return isIndex[indexAddress];
+    }
+
+    function isIndexInitialized(
+        address indexAddress
+    ) public view returns (bool) {
+        return isInitialized[indexAddress];
     }
 
     /**
