@@ -1,7 +1,9 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-interface IIndex {
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+interface IIndex is IERC20 {
     // Functions
     function initialize(uint256 underlyingAmount0) external;
 
@@ -25,6 +27,8 @@ interface IIndex {
         uint256 _sharesAmount
     ) external view returns (uint256 usdcToReceive);
 
+    function rebalanceIndex() external ;
+
     function getLatestPrice(address _asset) external view returns (uint256);
 
     function getAsset0TotalUsdValue() external view returns (uint256);
@@ -42,9 +46,9 @@ interface IIndex {
             uint8 usdcDecimals
         );
 
-    function getAssetsWeights() external view returns (uint8, uint8);
+    function getAssetsWeights() external view returns (uint112, uint112);
 
-    function getAssetsAmount() external view returns (uint256, uint256);
+    function getAssetsAmount() external view returns (uint112, uint112);
 
     function getFeesInfo()
         external
@@ -61,4 +65,12 @@ interface IIndex {
     function i_asset1PriceFeed() external view returns (address);
 
     function getPercentagePrecision() external pure returns (uint16);
+
+    function collectFees(
+        address _collector
+    ) external returns (uint256 feesCollected);
+
+    function updateWeights(
+        uint256 _newWeightAsset0
+    ) external returns (uint256 implementationTimestamp);
 }

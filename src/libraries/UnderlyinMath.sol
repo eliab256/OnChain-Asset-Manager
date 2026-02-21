@@ -4,13 +4,12 @@ pragma solidity ^0.8.0;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 library UnderlyingMath {
-    
     // function calculateTokenAmountToBalanceIndexStdDecimals(uint256 _amount0USD, uint256 )
 
     function calculateAmount1USDFromAmount0USDAndIndexWeights(
         uint256 _amount0USD,
-        uint8 _weight0,
-        uint8 _weight1
+        uint112 _weight0,
+        uint112 _weight1
     ) internal pure returns (uint256) {
         return (_amount0USD * _weight1) / _weight0;
     }
@@ -45,7 +44,7 @@ library UnderlyingMath {
         uint256 _price,
         uint256 _stdDecimals
     ) internal pure returns (uint256) {
-        return ( _amount * _price ) / (10 ** _stdDecimals);
+        return (_amount * _price) / (10 ** _stdDecimals);
     }
 
     function calculateTokenAmountFromUSDValue(
@@ -70,7 +69,7 @@ library UnderlyingMath {
             return (_amount * (10 ** decimalsDiff), decimalsDiff);
         }
         // implement revert to protect precision loss on the contract
-        if(_targetDecimals < _currentDecimals) {
+        if (_targetDecimals < _currentDecimals) {
             decimalsDiff = _currentDecimals - _targetDecimals;
             return (_amount / (10 ** decimalsDiff), decimalsDiff);
         }

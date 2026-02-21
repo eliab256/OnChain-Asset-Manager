@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
+
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
@@ -8,13 +9,14 @@ import {
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {UnderlyingMath} from "./libraries/UnderlyinMath.sol";
+import {IndexAsset} from "./types.sol";
 
-contract Index is ERC20, Ownable {
+contract Index is ERC20, AccessControl {
     using UnderlyingMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -43,16 +45,20 @@ contract Index is ERC20, Ownable {
 
     uint256 public constant MAX_DELAY = 1 hours;
     uint8 public constant DECIMALS_STANDARD = 18;
-    uint16 public constant PERCENTAGE_PRECISION = 10000; // 4 decimals precision for percentage values
-    uint16 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100 with 4 decimals precision
+    uint112 public constant PERCENTAGE_PRECISION = 10000; // 4 decimals precision for percentage values
+    uint112 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100 with 4 decimals precision
 
-    uint8 internal s_weight0;
-    uint8 internal s_weight1;
+    bytes32 public constant INDEX_MANAGER_ROLE =
+        keccak256("INDEX_MANAGER_ROLE");
+    bytes32 public constant ROUTER_ROLE = keccak256("ROUTER_ROLE");
 
-    uint112 internal s_totalFees;
+    uint112 internal s_weight0;
+    uint112 internal s_weight1;
 
     uint112 internal s_totalToken0Amount;
     uint112 internal s_totalToken1Amount;
+
+    uint112 internal s_totalFees;
 
     // Fee percentage with 4 decimals precision (e.g. 25000 = 2.5%)
     uint16 internal s_feePercentage;
@@ -68,38 +74,40 @@ contract Index is ERC20, Ownable {
     constructor(
         string memory _name,
         string memory _symbol,
-        address _adminController,
+        address _router,
         address _usdcAddress,
-        address _asset0,
-        address _asset1,
-        uint8 _weight0,
-        uint8 _weight1,
-        address _asset0PriceFeed,
-        address _asset1PriceFeed,
+        IndexAsset memory _asset0,
+        IndexAsset memory _asset1,
         uint8 _feePercentage
-    ) ERC20(_name, _symbol) Ownable(_adminController) {
-        i_asset0 = IERC20(_asset0);
-        i_asset1 = IERC20(_asset1);
+    ) ERC20(_name, _symbol) {
+        i_asset0 = IERC20(_asset0.asset);
+        i_asset1 = IERC20(_asset1.asset);
         i_usdc = IERC20(_usdcAddress);
 
-        s_weight0 = _weight0;
-        s_weight1 = _weight1;
+        s_weight0 = _asset0.weightPercentage;
+        s_weight1 = _asset1.weightPercentage;
         i_decimalsUsdc = IERC20Metadata(_usdcAddress).decimals();
 
         s_feePercentage = _feePercentage;
 
-        i_asset0PriceFeed = AggregatorV3Interface(_asset0PriceFeed);
-        i_asset1PriceFeed = AggregatorV3Interface(_asset1PriceFeed);
+        i_asset0PriceFeed = AggregatorV3Interface(_asset0.priceFeed);
+        i_asset1PriceFeed = AggregatorV3Interface(_asset1.priceFeed);
 
-        i_decimals0 = IERC20Metadata(_asset0).decimals();
-        i_decimals1 = IERC20Metadata(_asset1).decimals();
+        i_decimals0 = IERC20Metadata(_asset0.asset).decimals();
+        i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
+
+        grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        grantRole(INDEX_MANAGER_ROLE, msg.sender);
+        grantRole(ROUTER_ROLE, _router);
     }
 
     /**
      * @dev Initializes the index with the specified underlying amount of asset0.
      * @param _underlyingAmount0 The amount (in wei) of asset0 to initialize the index with.
      */
-    function initialize(uint256 _underlyingAmount0) external onlyOwner {
+    function initialize(
+        uint256 _underlyingAmount0
+    ) external onlyRole(INDEX_MANAGER_ROLE) {
         if (s_initialized) {
             revert Index__AlreadyInitialized();
         }
@@ -164,9 +172,9 @@ contract Index is ERC20, Ownable {
         address _to,
         uint256 _usdcAmount,
         uint256 _maxSlippage
-    ) public isInitialized {
+    ) public isInitialized onlyRole(ROUTER_ROLE) {
         // 1. Calculate and subtract fees from the USDC amount
-        (uint256 feeAmount, uint256 netUsdcAmount) = _calculateFees(
+        (uint112 feeAmount, uint256 netUsdcAmount) = _calculateFees(
             _usdcAmount
         );
         s_totalFees += feeAmount;
@@ -180,7 +188,7 @@ contract Index is ERC20, Ownable {
         i_usdc.safeTransferFrom(_to, address(this), _usdcAmount);
 
         // 4. Swap USDC for token0 and token1
-        (uint256 token0Received, uint256 token1received) = _swapWithWeights(
+        (uint112 token0Received, uint112 token1received) = _swapWithWeights(
             netUsdcAmount,
             s_weight0,
             s_weight1
@@ -192,14 +200,12 @@ contract Index is ERC20, Ownable {
         // 5. Calculate new Shares expected and compare with the expected shares calculated before the swap to check if the slippage is acceptable
         uint256 sharesToMint = _mintPreview(netUsdcAmount);
 
-        // 5. Call the mint function to mint shares to the user
+        // 6. Call the mint function to mint shares to the user
         if (sharesToMint < minimumSharesToMint) {
             revert Index__SlippageExceeded();
         } else {
             _mint(_to, sharesToMint);
         }
-
-        // 6. Swap USDC for the underlying assets according to the index weights and update the index balances
     }
 
     function mintPreview(
@@ -234,8 +240,8 @@ contract Index is ERC20, Ownable {
 
     function _calculateFees(
         uint256 _usdcAmount
-    ) internal view returns (uint256 feeAmount, uint256 netUsdcAmount) {
-        feeAmount = (_usdcAmount * s_feePercentage) / MAX_PERCENTAGE;
+    ) internal view returns (uint112 feeAmount, uint256 netUsdcAmount) {
+        feeAmount = uint112((_usdcAmount * s_feePercentage) / MAX_PERCENTAGE);
         netUsdcAmount = _usdcAmount - feeAmount;
     }
 
@@ -249,7 +255,7 @@ contract Index is ERC20, Ownable {
         address _from,
         uint256 _sharesAmount,
         uint256 _maxSlippage
-    ) public isInitialized {
+    ) public isInitialized onlyRole(ROUTER_ROLE) {
         uint256 expectedUsdcAmount = redeemPreview(_sharesAmount);
         uint256 minimumUsdcAmount = (expectedUsdcAmount *
             (MAX_PERCENTAGE - _maxSlippage)) / MAX_PERCENTAGE;
@@ -312,6 +318,46 @@ contract Index is ERC20, Ownable {
         }
 
         return _convertToDecimalStandard(uint256(answer), feed.decimals());
+    }
+
+    function updateWeights(
+        uint112 _newWeightAsset0
+    )
+        external
+        onlyRole(INDEX_MANAGER_ROLE)
+        returns (uint256 implementationTimestamp)
+    {
+        s_weight0 = _newWeightAsset0;
+        s_weight1 = MAX_PERCENTAGE - _newWeightAsset0;
+
+        //need delay before implementing
+        // @audit-info implement delay before implementing new weights
+        // @audit-info implement function
+    }
+
+    function collectFees(
+        address _collector
+    ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
+        feesCollected = s_totalFees;
+        s_totalFees = 0;
+        i_usdc.forceApprove(msg.sender, feesCollected);
+    }
+
+    function rebalanceIndex() external onlyRole(INDEX_MANAGER_ROLE) {
+        // TO BE IMPLEMENTED
+        // @audit-info implement function to rebalance the index according to the current weights of the index
+        // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
+    }
+
+    function _swapWithWeights(
+        uint256 _usdcAmount,
+        uint112 _weight0,
+        uint112 _weight1
+    ) internal returns (uint112 token0Received, uint112 token1received) {
+        // TO BE IMPLEMENTED
+        // @audit-info implement function to swap USDC for token0 and token1 according to the weights of the index
+        // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
+        // @audit-info the function should return the amount of token0 and token1 received from the swap
     }
 
     /**
@@ -411,11 +457,11 @@ contract Index is ERC20, Ownable {
         return (i_decimals0, i_decimals1, i_decimalsUsdc);
     }
 
-    function getAssetsWeights() public view returns (uint8, uint8) {
+    function getAssetsWeights() public view returns (uint112, uint112) {
         return (s_weight0, s_weight1);
     }
 
-    function getAssetsAmount() public view returns (uint256, uint256) {
+    function getAssetsAmount() public view returns (uint112, uint112) {
         return (s_totalToken0Amount, s_totalToken1Amount);
     }
 
@@ -427,7 +473,7 @@ contract Index is ERC20, Ownable {
         return (s_feePercentage, s_totalFees);
     }
 
-    function getPercentagePrecision() public pure returns (uint16) {
+    function getPercentagePrecision() public pure returns (uint112) {
         return PERCENTAGE_PRECISION;
     }
 }
