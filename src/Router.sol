@@ -8,7 +8,7 @@ import {IRouter} from "./Interface/IRouter.sol";
 import "./errors/RouterErrors.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Router is IRouter, ReentrancyGuard {
+contract Router is ReentrancyGuard {
     IIndexManager private immutable i_IndexManager;
     IERC20 private immutable i_usdc;
 

@@ -7,7 +7,6 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface IIndex is IERC20, IERC20Metadata {
-    
     // Functions
     function initialize(uint256 _underlyingAmount0) external;
 
@@ -54,7 +53,7 @@ interface IIndex is IERC20, IERC20Metadata {
             uint256 totalUsdValue
         );
 
-    function getEffectiveWeights()
+    function getAssetsEffectiveWeights()
         external
         view
         returns (uint256 effectiveWeight0, uint256 effectiveWeight1);

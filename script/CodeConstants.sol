@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-abstract contract CodeConstant {
+abstract contract CodeConstants {
     // Chain IDs
     uint256 public constant SEPOLIA_CHAIN_ID = 11155111;
     uint256 public constant ANVIL_CHAIN_ID = 31337;
@@ -23,4 +23,10 @@ abstract contract CodeConstant {
         0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43;
     address public constant LINK_USD_PRICEFEED_SEPOLIA =
         0xc59E3633BAAC79493d908e63626716e204A45EdF;
+
+    // deployer accounts
+    address public constant SEPOLIA_DEPLOYER =
+        0xB7bC9D74681eB832902d1B7464F695F6F9546de7;
+    address public constant ANVIL_DEPLOYER =
+        0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 }

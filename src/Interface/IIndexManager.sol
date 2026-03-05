@@ -4,6 +4,8 @@ pragma solidity ^0.8.0;
 import {IndexAsset} from "../types.sol";
 
 interface IIndexManager {
+    function setRouterAddress(address _newRouter) external;
+    
     function createIndex(
         uint256 feePercentage,
         IndexAsset memory assetA,

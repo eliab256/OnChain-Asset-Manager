@@ -53,14 +53,17 @@ contract IndexManager is IIndexManager, AccessControl {
         _;
     }
 
-    constructor(address _usdcAddress, address _router) {
+    constructor(address _usdcAddress) {
         i_usdc = IERC20(_usdcAddress);
-        i_router = _router;
 
         grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         grantRole(ASSET_MANAGER_ROLE, msg.sender);
         grantRole(FEE_COLLECTOR_ROLE, msg.sender);
         grantRole(REBALANCER_ROLE, msg.sender);
+    }
+
+    function setRouterAddress(address _newRouter) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        i_router = _newRouter;
     }
 
     /**

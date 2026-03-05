@@ -5,8 +5,9 @@ import {Script} from "forge-std/Script.sol";
 import {IndexManager} from "../src/IndexManager.sol";
 import {Router} from "../src/Router.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
+import {CodeConstants} from "../src/libraries/CodeConstants.sol";
 
-contract DeployPeriphery is Script {
+contract DeployPeriphery is Script, CodeConstants {
 
     IndexManager public indexManager;
     Router public router;

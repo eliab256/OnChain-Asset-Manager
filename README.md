@@ -143,3 +143,9 @@ Timelock governance
 Upgradeability via proxy
 
 Ma NON mettere upgradeability in v1 se vuoi tenere il design pulito.
+
+
+
+
+forge install uniswap/v4-core
+forge install uniswap/v4-periphery

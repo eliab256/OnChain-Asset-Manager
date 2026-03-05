@@ -37,6 +37,7 @@ contract Index is IIndex, ERC20, AccessControl {
     AggregatorV3Interface internal immutable i_asset0PriceFeed;
     AggregatorV3Interface internal immutable i_asset1PriceFeed;
 
+    uint256 public constant GRACE_PERIOD = 1 days;
     uint256 public constant MAX_DELAY = 1 hours;
     uint8 public constant DECIMALS_STANDARD = 18;
     uint112 public constant PERCENTAGE_PRECISION = 10000; // 4 decimals precision for percentage values
@@ -48,6 +49,9 @@ contract Index is IIndex, ERC20, AccessControl {
 
     uint112 internal s_weight0;
     uint112 internal s_weight1;
+    uint112 internal constant WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
+    uint112 internal constant MAX_WEIGHT = 100 * WEIGHT_PRECISION; // 100% with 4 decimals precision
+    uint112 internal constant REBALANCE_TRESHHOLD = 3 * WEIGHT_PRECISION; // 3% with 4 decimals precision, if the effective weight of an asset deviates from its target weight by more than this threshold, the index can be rebalanced
 
     //reserves standardized to 18 decimals for easier calculations, convert to token decimals when transferring to user
     uint112 internal s_token0Reserve;
@@ -116,10 +120,6 @@ contract Index is IIndex, ERC20, AccessControl {
             _underlyingAmount0
         );
 
-        //prices already standardized to 18 decimals
-        uint256 underlyingAsset1Price = getLatestPrice(address(i_asset1));
-        uint256 underlyingAsset0Price = getLatestPrice(address(i_asset0));
-
         //underlying0amount input converted to 18 decimals standard
         uint112 underlyingAmount0 = _convertToDecimalStandard(
             _underlyingAmount0,
@@ -129,21 +129,21 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 underlying0UsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
                 underlyingAmount0,
-                underlyingAsset0Price,
+                getLatestPrice(address(i_asset0)),
                 DECIMALS_STANDARD
             );
 
         uint256 underlying1UsdValue = UnderlyingMath
-            .calculateAmount1USDFromAmount0USDAndIndexWeights(
+            .calculateAmount1UsdFromAmount0UsdAndIndexWeights(
                 underlying0UsdValue,
                 s_weight0,
                 s_weight1
             );
 
         uint112 underlyingAmount1 = UnderlyingMath
-            .calculateTokenAmountFromUSDValue(
+            .calculateTokenAmountFromUsdValue(
                 underlying1UsdValue,
-                underlyingAsset1Price,
+                getLatestPrice(address(i_asset1)),
                 DECIMALS_STANDARD
             )
             .toUint112();
@@ -196,7 +196,7 @@ contract Index is IIndex, ERC20, AccessControl {
             ,
             ,
             uint256 initialTotalAssetUsdValue
-        ) = _intitFunctionValues();
+        ) = _initFunctionValues();
         uint256 expectedShares = _mintPreview(
             netUsdcAmount,
             initialTotalAssetUsdValue
@@ -257,7 +257,7 @@ contract Index is IIndex, ERC20, AccessControl {
             netUsdcAmount,
             i_decimalsUsdc
         );
-        (, , , , , , uint256 totalAssetUsdValue) = _intitFunctionValues();
+        (, , , , , , uint256 totalAssetUsdValue) = _initFunctionValues();
         uint256 sharesToMint = _mintPreview(
             netUsdcAmountStdDecimals,
             totalAssetUsdValue
@@ -411,6 +411,7 @@ contract Index is IIndex, ERC20, AccessControl {
         //need delay before implementing
         // @audit-info implement delay before implementing new weights
         // @audit-info implement function
+        // @audit-info after the delay call rebalance function to rebalance the index according to the new weights
     }
 
     function collectFees(
@@ -421,13 +422,73 @@ contract Index is IIndex, ERC20, AccessControl {
         i_usdc.forceApprove(msg.sender, feesCollected);
     }
 
-    function rebalanceIndex() external onlyRole(INDEX_MANAGER_ROLE) {
-        // TO BE IMPLEMENTED
+    function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) {
+        // all values are in 18 decimals standard for easier calculations
+        (
+            uint256 priceToken0,
+            uint256 priceToken1,
+            uint112 initialToken0Reserve,
+            uint112 initialToken1Reserve,
+            uint256 token0UsdValue,
+            uint256 token1UsdValue,
+            uint256 totalAssetUsdValue
+        ) = _initFunctionValues();
+
+        //get effective weights before rebalance
+        (
+            uint112 weight0Before,
+            uint112 weight1Before
+        ) = _getAssetsEffectiveWights(
+                token0UsdValue,
+                token1UsdValue,
+                totalAssetUsdValue
+            );
+
+        // check if rebalance is needed, if the effective weight of an asset deviates from its target weight by more than the threshold, the index can be rebalanced
+        if (
+            weight0Before < s_weight0 + REBALANCE_TRESHHOLD ||
+            weight0Before > s_weight0 - REBALANCE_TRESHHOLD
+        ) {
+            revert Index__RebalanceNotNeeded();
+        }
+
+        // calculate the amount of token0 or token1 to swap to rebalance the index according to the target weights of the index
+        (uint256 amount0ToSwap, uint256 amount1ToSwap) = UnderlyingMath
+            .calculateRebalanceAmounts(
+                totalAssetUsdValue,
+                token0UsdValue,
+                token1UsdValue,
+                s_weight0,
+                s_weight1,
+                priceToken0,
+                priceToken1,
+                DECIMALS_STANDARD
+            );
+
+        //conditional swap
+        if (amount0ToSwap > 0) {
+            // swap token0 for token1
+        } else {
+            // swap token1 for token0
+        }
+
+        //update reserves
+        // emit event
+
         // @audit-info implement function to rebalance the index according to the current weights of the index
         // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
     }
-
-    function _intitFunctionValues()
+    /**
+     * @dev Initializes the function values to avoid multiple external calls and storage reads.
+     * @return priceToken0 The price of token0 in USD with 18 decimals.
+     * @return priceToken1 The price of token1 in USD with 18 decimals.
+     * @return initialToken0Reserve The initial reserve of token0.
+     * @return initialToken1Reserve The initial reserve of token1.
+     * @return token0UsdValue The USD value of token0.
+     * @return token1UsdValue The USD value of token1.
+     * @return totalAssetUsdValue The total USD value of the assets in the index.
+     */
+    function _initFunctionValues()
         internal
         view
         returns (
@@ -475,7 +536,7 @@ contract Index is IIndex, ERC20, AccessControl {
      * @dev Used to convert the price from the feed to a standard 18 decimals format.
      * @dev Converts a number to a standard 18 decimals format.
      * @param _amount The amount to convert.
-     * @param _currentDecimals The current decimals of the token.    grep -n "remappings" -A200 foundry.toml | sed -n '/remappings/{n;:a;/]/q;p; n; ba}' | tr -d '", ' > remappings.txt
+     * @param _currentDecimals The current decimals of the token.
      * @return The converted number in 18 decimals format.
      */
     function _convertToDecimalStandard(
@@ -509,7 +570,6 @@ contract Index is IIndex, ERC20, AccessControl {
         if (_tokenDecimals == DECIMALS_STANDARD) {
             convertedAmount = _amount;
         }
-
         if (_tokenDecimals < DECIMALS_STANDARD) {
             (convertedAmount, ) = UnderlyingMath.convertToSpecificDecimal(
                 _amount,
@@ -555,7 +615,7 @@ contract Index is IIndex, ERC20, AccessControl {
         totalUsdValue = asset0TotalUsdValue + asset1TotalUsdValue;
     }
 
-    function getEffectiveWeights()
+    function getAssetsEffectiveWeights()
         public
         view
         returns (uint256 effectiveWeight0, uint256 effectiveWeight1)
@@ -565,6 +625,23 @@ contract Index is IIndex, ERC20, AccessControl {
             uint256 asset1TotalUsdValue,
             uint256 totalUsdValue
         ) = getAssetsUsdValue();
+
+        (effectiveWeight0, effectiveWeight1) = _getAssetsEffectiveWights(
+            asset0TotalUsdValue,
+            asset1TotalUsdValue,
+            totalUsdValue
+        );
+    }
+
+    function _getAssetsEffectiveWights(
+        uint256 token0UsdValue,
+        uint256 token1UsdValue,
+        uint256 totalAssetUsdValue
+    )
+        internal
+        pure
+        returns (uint112 effectiveWeight0, uint112 effectiveWeight1)
+    {
         // a = totalAsset0
         // b = totalAsset1
         // c = totalValue (a + b)
@@ -572,12 +649,12 @@ contract Index is IIndex, ERC20, AccessControl {
         // y = effectiveWeight1
         // a : c = x : 100 => x = (a * 100) / c
         // b : c = y : 100 => y = (b * 100) / c
-        effectiveWeight0 =
-            (asset0TotalUsdValue * MAX_PERCENTAGE) /
-            totalUsdValue;
-        effectiveWeight1 =
-            (asset1TotalUsdValue * MAX_PERCENTAGE) /
-            totalUsdValue;
+        effectiveWeight0 = SafeCast.toUint112(
+            (token0UsdValue * MAX_PERCENTAGE) / totalAssetUsdValue
+        );
+        effectiveWeight1 = SafeCast.toUint112(
+            (token1UsdValue * MAX_PERCENTAGE) / totalAssetUsdValue
+        );
     }
 
     function getAssetsAndUsdcDecimals()
