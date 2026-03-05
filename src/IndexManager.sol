@@ -1,9 +1,11 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
+import "./errors/IndexManagerErrors.sol";
+import "./events/IndexManagerEvents.sol";
 import {IndexAsset} from "./types.sol";
 import {
     IERC20Metadata
@@ -14,50 +16,8 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIndex} from "./Interface/IIndex.sol";
 
-contract IndexManager is AccessControl {
+contract IndexManager is IIndexManager, AccessControl {
     using SafeERC20 for IERC20;
-
-    event IndexCreated(
-        address indexed indexAddress,
-        address indexed asset0,
-        address indexed asset1,
-        address assetManager
-    );
-
-    event IndexInitialized(
-        address indexed indexAddress,
-        address indexed assetManager
-    );
-    event IndexRebalanced(
-        address indexed indexAddress,
-        address indexed rebalancer
-    );
-    event IndexWeightsChanged(
-        address indexed indexAddress,
-        address indexed assetManager,
-        uint112 oldWeightAsset0,
-        uint112 oldWeightAsset1,
-        uint112 newWeightAsset0,
-        uint112 newWeightAsset1,
-        uint256 implementationTimestamp
-    );
-    event FeesCollected(
-        address indexed indexAddress,
-        address indexed feeCollector,
-        uint256 feeAmount
-    );
-
-    error IndexManager__InvalidIndexAssetsAddress();
-    error IndexManager__InvalidIndexAssetsAmount();
-    error IndexManager__InvalidIndexAssetsPercentages();
-    error IndexManager__UnderlyingAssetNotERC20();
-    error IndexManager__PriceFeedNotAvailable(address priceFeed);
-    error IndexManager__IndexAlreadyExists(address index);
-    error IndexManager__IsNotIndex();
-    error IndexManager__IndexAlreadyInitialized();
-    error IndexManager__InvalidPriceFeedAddress();
-    error IndexManager__NotIndexInitialized();
-    error IndexManager__InvalidPercentage();
 
     bytes32 public constant ASSET_MANAGER_ROLE =
         keccak256("ASSET_MANAGER_ROLE");
@@ -68,6 +28,7 @@ contract IndexManager is AccessControl {
     uint112 public constant MAX_PERCENTAGE = 1000000; // 100% with 4 decimals
 
     address[] private indexes;
+    address[] private initializedIndexes;
     mapping(address => mapping(address => address)) private getIndex;
     mapping(address => bool) private isIndex;
     mapping(address => bool) private isInitialized;
@@ -78,6 +39,16 @@ contract IndexManager is AccessControl {
     modifier isIndexInitialized(address indexAddress) {
         if (!isInitialized[indexAddress]) {
             revert IndexManager__NotIndexInitialized();
+        }
+        _;
+    }
+
+    modifier areIndexesInitialized(address[] calldata indexAddresses) {
+        uint256 length = indexAddresses.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (!isInitialized[indexAddresses[i]]) {
+                revert IndexManager__NotIndexInitialized();
+            }
         }
         _;
     }
@@ -109,10 +80,7 @@ contract IndexManager is AccessControl {
             revert IndexManager__InvalidIndexAssetsAddress();
         }
 
-        (address tokenAsset0, address tokenAsset1) = sortAssets(
-            _assetA.asset,
-            _assetB.asset
-        );
+        (address tokenAsset0, ) = sortAssets(_assetA.asset, _assetB.asset);
 
         IndexAsset memory asset0;
         IndexAsset memory asset1;
@@ -161,42 +129,6 @@ contract IndexManager is AccessControl {
         emit IndexCreated(index, asset0.asset, asset1.asset, msg.sender);
     }
 
-    function _deployIndex(
-        IndexAsset memory _asset0,
-        IndexAsset memory _asset1,
-        uint256 _feePercentage,
-        address _usdcAddress
-    ) internal returns (address index) {
-        // prepare data for Index constructor
-        string memory name;
-        string memory symbol;
-        {
-            string memory symbol0 = IERC20Metadata(_asset0.asset).symbol();
-            string memory symbol1 = IERC20Metadata(_asset1.asset).symbol();
-            name = string(abi.encodePacked("Index ", symbol0, "/", symbol1));
-            symbol = string(abi.encodePacked("IDX", symbol0, symbol1));
-        }
-
-        bytes memory bytecode = abi.encodePacked(
-            type(Index).creationCode,
-            abi.encode(
-                name,
-                symbol,
-                i_router,
-                _usdcAddress,
-                _asset0,
-                _asset1,
-                _feePercentage
-            )
-        );
-        bytes32 salt = keccak256(
-            abi.encodePacked(_asset0.asset, _asset1.asset)
-        );
-        assembly {
-            index := create2(0, add(bytecode, 32), mload(bytecode), salt)
-        }
-    }
-
     function initializeIndex(
         address _indexAddress,
         uint256 _underlyingAmount0
@@ -212,6 +144,7 @@ contract IndexManager is AccessControl {
             revert IndexManager__IndexAlreadyInitialized();
         }
         isInitialized[_indexAddress] = true;
+        initializedIndexes.push(_indexAddress);
 
         Index(_indexAddress).initialize(_underlyingAmount0);
 
@@ -224,6 +157,30 @@ contract IndexManager is AccessControl {
         IIndex(_indexAddress).rebalanceIndex();
 
         emit IndexRebalanced(_indexAddress, msg.sender);
+    }
+
+    /**
+     * @notice Allows to rebalance multiple indexes in a single transaction, instead of having to call rebalanceIndex multiple times.
+     * @notice Less Gas efficient than rebalanceAllIndexes, because check if is initialized for each index.
+     * @dev If one of the call fails, the entire transaction will revert
+     */
+    function rebalanceMultipleIndexes(
+        address[] calldata _indexAddresses
+    ) public onlyRole(REBALANCER_ROLE) areIndexesInitialized(_indexAddresses) {
+        uint256 length = _indexAddresses.length;
+        for (uint256 i = 0; i < length; i++) {
+            IIndex(_indexAddresses[i]).rebalanceIndex();
+            emit IndexRebalanced(_indexAddresses[i], msg.sender);
+        }
+    }
+
+    function rebalanceAllIndexes() public onlyRole(REBALANCER_ROLE) {
+        uint256 length = initializedIndexes.length;
+        for (uint256 i = 0; i < length; i++) {
+            address indexAddress = initializedIndexes[i];
+            IIndex(indexAddress).rebalanceIndex();
+            emit IndexRebalanced(indexAddress, msg.sender);
+        }
     }
 
     function changeWeights(
@@ -269,6 +226,39 @@ contract IndexManager is AccessControl {
     }
 
     /**
+     * @notice Allows to collect fees from specific indexes in a single transaction, instead of having to call collectFees multiple times.
+     * @notice Less Gas efficient than collectFeesFromAllIndexes, because check if is initialized for each index.
+     * @dev If one of the call fails, the entire transaction will revert
+     */
+    function collectFeesFromMultipleIndexes(
+        address[] calldata _indexAddresses
+    )
+        public
+        onlyRole(FEE_COLLECTOR_ROLE)
+        areIndexesInitialized(_indexAddresses)
+    {
+        uint256 length = _indexAddresses.length;
+        for (uint256 i = 0; i < length; i++) {
+            address indexAddress = _indexAddresses[i];
+            IIndex index = IIndex(indexAddress);
+            uint256 feeAmount = index.collectFees(msg.sender);
+            i_usdc.safeTransferFrom(indexAddress, msg.sender, feeAmount);
+            emit FeesCollected(indexAddress, msg.sender, feeAmount);
+        }
+    }
+
+    function collectFeesFromAllIndexes() public onlyRole(FEE_COLLECTOR_ROLE) {
+        uint256 length = initializedIndexes.length;
+        for (uint256 i = 0; i < length; i++) {
+            address indexAddress = initializedIndexes[i];
+            IIndex index = IIndex(indexAddress);
+            uint256 feeAmount = index.collectFees(msg.sender);
+            i_usdc.safeTransferFrom(indexAddress, msg.sender, feeAmount);
+            emit FeesCollected(indexAddress, msg.sender, feeAmount);
+        }
+    }
+
+    /**
      * @dev Sorts two asset addresses to ensure consistent ordering.
      * @dev Used to maintain a consistent order of assets in the indexes
      * @param _assetAddressB The address of the second asset
@@ -284,35 +274,6 @@ contract IndexManager is AccessControl {
         } else {
             return (_assetAddressB, _assetAddressA);
         }
-    }
-
-    /**
-     * @dev Returns the index address for a given pair of underlying assets, or address(0) if no index exists for that pair
-     * The function sorts the asset addresses to ensure consistent ordering, so the caller can provide them in any order.
-     * It then looks up the index address in the getIndex mapping using the sorted asset addresses as keys.
-     * If an index exists for that pair of assets, its address is returned; otherwise, address(0) is returned to indicate
-     * that no index exists for that asset pair.
-     * @param _assetAddressA The address of the first underlying asset
-     * @param _assetAddressB The address of the second underlying asset
-     * @return index The address of the index contract for the given pair of underlying assets, or address(0) if no index exists for that pair
-     */
-    function getIndexByAssetsAddresses(
-        address _assetAddressA,
-        address _assetAddressB
-    ) public view returns (address index) {
-        (address asset0, address asset1) = sortAssets(
-            _assetAddressA,
-            _assetAddressB
-        );
-        index = getIndex[asset0][asset1];
-    }
-
-    /**
-     * @dev Returns all index addresses managed by the index manager
-     * @return address[] An array of all index addresses
-     */
-    function getAllIndexes() public view returns (address[] memory) {
-        return indexes;
     }
 
     /**
@@ -333,6 +294,42 @@ contract IndexManager is AccessControl {
         address indexAddress
     ) public view returns (bool) {
         return isInitialized[indexAddress];
+    }
+
+    function _deployIndex(
+        IndexAsset memory _asset0,
+        IndexAsset memory _asset1,
+        uint256 _feePercentage,
+        address _usdcAddress
+    ) internal returns (address index) {
+        // prepare data for Index constructor
+        string memory name;
+        string memory symbol;
+        {
+            string memory symbol0 = IERC20Metadata(_asset0.asset).symbol();
+            string memory symbol1 = IERC20Metadata(_asset1.asset).symbol();
+            name = string(abi.encodePacked("Index ", symbol0, "/", symbol1));
+            symbol = string(abi.encodePacked("IDX", symbol0, symbol1));
+        }
+
+        bytes memory bytecode = abi.encodePacked(
+            type(Index).creationCode,
+            abi.encode(
+                name,
+                symbol,
+                i_router,
+                _usdcAddress,
+                _asset0,
+                _asset1,
+                _feePercentage
+            )
+        );
+        bytes32 salt = keccak256(
+            abi.encodePacked(_asset0.asset, _asset1.asset)
+        );
+        assembly {
+            index := create2(0, add(bytecode, 32), mload(bytecode), salt)
+        }
     }
 
     /**
@@ -381,5 +378,34 @@ contract IndexManager is AccessControl {
 
     function getRouterAddress() public view returns (address) {
         return i_router;
+    }
+
+    /**
+     * @dev Returns the index address for a given pair of underlying assets, or address(0) if no index exists for that pair
+     * The function sorts the asset addresses to ensure consistent ordering, so the caller can provide them in any order.
+     * It then looks up the index address in the getIndex mapping using the sorted asset addresses as keys.
+     * If an index exists for that pair of assets, its address is returned; otherwise, address(0) is returned to indicate
+     * that no index exists for that asset pair.
+     * @param _assetAddressA The address of the first underlying asset
+     * @param _assetAddressB The address of the second underlying asset
+     * @return index The address of the index contract for the given pair of underlying assets, or address(0) if no index exists for that pair
+     */
+    function getIndexByAssetsAddresses(
+        address _assetAddressA,
+        address _assetAddressB
+    ) public view returns (address index) {
+        (address asset0, address asset1) = sortAssets(
+            _assetAddressA,
+            _assetAddressB
+        );
+        index = getIndex[asset0][asset1];
+    }
+
+    /**
+     * @dev Returns all index addresses managed by the index manager
+     * @return address[] An array of all index addresses
+     */
+    function getAllIndexes() public view returns (address[] memory) {
+        return indexes;
     }
 }

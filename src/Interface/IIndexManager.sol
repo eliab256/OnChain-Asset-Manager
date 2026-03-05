@@ -19,10 +19,22 @@ interface IIndexManager {
 
     function changeWeights(
         address indexAddress,
-        uint256 newWeightAsset0
+        uint112 newWeightAsset0
     ) external;
 
     function collectFees(address indexAddress) external;
+
+    function rebalanceMultipleIndexes(
+        address[] calldata indexAddresses
+    ) external;
+
+    function rebalanceAllIndexes() external;
+
+    function collectFeesFromMultipleIndexes(
+        address[] calldata indexAddresses
+    ) external;
+
+    function collectFeesFromAllIndexes() external;
 
     function sortAssets(
         address assetAddressA,
@@ -43,4 +55,6 @@ interface IIndexManager {
     ) external view returns (bool);
 
     function getUsdcAddress() external view returns (address);
+
+    function getRouterAddress() external view returns (address);
 }

@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IIndex} from "./Interface/IIndex.sol";
+import "./errors/IndexErrors.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -10,38 +12,30 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {UnderlyingMath} from "./libraries/UnderlyinMath.sol";
+import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
+import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset} from "./types.sol";
 
-contract Index is ERC20, AccessControl {
+contract Index is IIndex, ERC20, AccessControl {
     using UnderlyingMath for uint256;
+    using SharesMath for uint256;
+    using SafeCast for uint256;
     using SafeERC20 for IERC20;
 
-    error Index__AssetNotSupported();
-    error Index__PriceFeedNotAvailable();
-    error Index__PriceFeedRoundStale();
-    error Index__PriceIsStale();
-    error Index__AlreadyInitialized();
-    error Index__InvalidUnderlyingAmount();
-    error Index__NotInitialized();
-    error Index__DecimalsStandardLowerThanCurrent();
-    error Index__DecimalsNotCorrect();
-    error Index__TransferFailed(address token, uint256 amount);
-    error Index__SlippageExceeded();
-
-    IERC20 public immutable i_asset0;
-    IERC20 public immutable i_asset1;
-    IERC20 public immutable i_usdc;
+    IERC20 internal immutable i_asset0;
+    IERC20 internal immutable i_asset1;
+    IERC20 internal immutable i_usdc;
 
     uint8 internal immutable i_decimals0;
     uint8 internal immutable i_decimals1;
     uint8 internal immutable i_decimalsUsdc;
 
-    AggregatorV3Interface public immutable i_asset0PriceFeed;
-    AggregatorV3Interface public immutable i_asset1PriceFeed;
+    AggregatorV3Interface internal immutable i_asset0PriceFeed;
+    AggregatorV3Interface internal immutable i_asset1PriceFeed;
 
     uint256 public constant MAX_DELAY = 1 hours;
     uint8 public constant DECIMALS_STANDARD = 18;
@@ -55,13 +49,14 @@ contract Index is ERC20, AccessControl {
     uint112 internal s_weight0;
     uint112 internal s_weight1;
 
-    uint112 internal s_totalToken0Amount;
-    uint112 internal s_totalToken1Amount;
+    //reserves standardized to 18 decimals for easier calculations, convert to token decimals when transferring to user
+    uint112 internal s_token0Reserve;
+    uint112 internal s_token1Reserve;
 
     uint112 internal s_totalFees;
 
     // Fee percentage with 4 decimals precision (e.g. 25000 = 2.5%)
-    uint16 internal s_feePercentage;
+    uint32 internal s_feePercentage;
     bool internal s_initialized;
 
     modifier isInitialized() {
@@ -78,7 +73,7 @@ contract Index is ERC20, AccessControl {
         address _usdcAddress,
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
-        uint8 _feePercentage
+        uint32 _feePercentage
     ) ERC20(_name, _symbol) {
         i_asset0 = IERC20(_asset0.asset);
         i_asset1 = IERC20(_asset1.asset);
@@ -86,7 +81,6 @@ contract Index is ERC20, AccessControl {
 
         s_weight0 = _asset0.weightPercentage;
         s_weight1 = _asset1.weightPercentage;
-        i_decimalsUsdc = IERC20Metadata(_usdcAddress).decimals();
 
         s_feePercentage = _feePercentage;
 
@@ -95,6 +89,7 @@ contract Index is ERC20, AccessControl {
 
         i_decimals0 = IERC20Metadata(_asset0.asset).decimals();
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
+        i_decimalsUsdc = IERC20Metadata(_usdcAddress).decimals();
 
         grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         grantRole(INDEX_MANAGER_ROLE, msg.sender);
@@ -126,10 +121,10 @@ contract Index is ERC20, AccessControl {
         uint256 underlyingAsset0Price = getLatestPrice(address(i_asset0));
 
         //underlying0amount input converted to 18 decimals standard
-        uint256 underlyingAmount0 = _convertToDecimalStandard(
+        uint112 underlyingAmount0 = _convertToDecimalStandard(
             _underlyingAmount0,
             i_decimals0
-        );
+        ).toUint112();
 
         uint256 underlying0UsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
@@ -145,142 +140,220 @@ contract Index is ERC20, AccessControl {
                 s_weight1
             );
 
-        uint256 underlyingAmount1 = UnderlyingMath
+        uint112 underlyingAmount1 = UnderlyingMath
             .calculateTokenAmountFromUSDValue(
                 underlying1UsdValue,
                 underlyingAsset1Price,
                 DECIMALS_STANDARD
-            );
+            )
+            .toUint112();
 
         //convert underlyingAmount1 from 18 decimals standard to token decimals if necessary
-        underlyingAmount1 = _convertFromStdDecimalsToTokenDecimals(
-            underlyingAmount1,
-            i_decimals1
-        );
+        uint256 underlyingAmount1TokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                underlyingAmount1,
+                i_decimals1
+            );
 
-        i_asset1.safeTransferFrom(msg.sender, address(this), underlyingAmount1);
+        i_asset1.safeTransferFrom(
+            msg.sender,
+            address(this),
+            underlyingAmount1TokenDecimals
+        );
 
         // Mint the initial shares to the initializer
         // All Values are in 18 decimals standard, so we can directly sum the USD values of the underlying assets to calculate the initial shares to mint
         uint256 initialShares = underlying0UsdValue + underlying1UsdValue;
         _mint(msg.sender, initialShares);
 
+        s_token0Reserve = underlyingAmount0;
+        s_token1Reserve = underlyingAmount1;
         s_initialized = true;
     }
 
     function mintShares(
         address _to,
-        uint256 _usdcAmount,
-        uint256 _maxSlippage
+        uint256 _usdcAmountIn,
+        uint256 _maxTolerance
     ) public isInitialized onlyRole(ROUTER_ROLE) {
+        // 1. Transfer USDC from the user to the index
+        i_usdc.safeTransferFrom(_to, address(this), _usdcAmountIn);
+
         // 1. Calculate and subtract fees from the USDC amount
-        (uint112 feeAmount, uint256 netUsdcAmount) = _calculateFees(
-            _usdcAmount
+        uint256 _usdcAmountInNormalized = _convertToDecimalStandard(
+            _usdcAmountIn,
+            i_decimalsUsdc
         );
-        s_totalFees += feeAmount;
+        (uint112 feeAmount, uint256 netUsdcAmount) = _calculateFees(
+            _usdcAmountInNormalized
+        );
 
         // 2. Calculate the amount of shares to mint.
-        uint256 expectedShares = _mintPreview(netUsdcAmount);
+        (
+            uint256 priceToken0,
+            uint256 priceToken1,
+            ,
+            ,
+            ,
+            ,
+            uint256 initialTotalAssetUsdValue
+        ) = _intitFunctionValues();
+        uint256 expectedShares = _mintPreview(
+            netUsdcAmount,
+            initialTotalAssetUsdValue
+        );
         uint256 minimumSharesToMint = (expectedShares *
-            (MAX_PERCENTAGE - _maxSlippage)) / MAX_PERCENTAGE;
-
-        // 3. Transfer USDC from the user to the index
-        i_usdc.safeTransferFrom(_to, address(this), _usdcAmount);
+            (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
 
         // 4. Swap USDC for token0 and token1
+        // @audit-issue check if call chainlink
+        // @audit-issue make the swap aim to rebalance the index
         (uint112 token0Received, uint112 token1received) = _swapWithWeights(
             netUsdcAmount,
             s_weight0,
             s_weight1
         );
 
-        s_totalToken0Amount += token0Received;
-        s_totalToken1Amount += token1received;
+        // 5. Calculate new Shares expected and compare with the expected shares calculated before the swap to check if the tolerance is acceptable
+        uint256 token0ReceivedUsdValue = UnderlyingMath
+            .calculateUSDValueOfTokenAmountStdDecimals(
+                token0Received,
+                priceToken0,
+                DECIMALS_STANDARD
+            );
+        uint256 token1ReceivedUsdValue = UnderlyingMath
+            .calculateUSDValueOfTokenAmountStdDecimals(
+                token1received,
+                priceToken1,
+                DECIMALS_STANDARD
+            );
 
-        // 5. Calculate new Shares expected and compare with the expected shares calculated before the swap to check if the slippage is acceptable
-        uint256 sharesToMint = _mintPreview(netUsdcAmount);
+        uint256 sharesToMint = _mintPreview(
+            token0ReceivedUsdValue + token1ReceivedUsdValue,
+            initialTotalAssetUsdValue
+        );
 
         // 6. Call the mint function to mint shares to the user
         if (sharesToMint < minimumSharesToMint) {
-            revert Index__SlippageExceeded();
+            revert Index__ToleranceExceeded();
         } else {
+            s_totalFees += feeAmount;
+            s_token0Reserve += token0Received;
+            s_token1Reserve += token1received;
             _mint(_to, sharesToMint);
         }
     }
 
-    function mintPreview(
-        uint256 _usdcAmount
-    ) public view isInitialized returns (uint256 sharesToMint) {
-        (, uint256 netUsdcAmount) = _calculateFees(_usdcAmount);
+    // @audit-issue check ottimizzazioni initFunctionValues
+    function minMintPreview(
+        uint256 _usdcAmountIn,
+        uint256 _maxTolerance
+    ) public view isInitialized returns (uint256 minimumSharesToMint) {
+        uint256 _usdcAmountInNormalized = _convertToDecimalStandard(
+            _usdcAmountIn,
+            i_decimalsUsdc
+        );
+        (, uint256 netUsdcAmount) = _calculateFees(_usdcAmountInNormalized);
         uint256 netUsdcAmountStdDecimals = _convertToDecimalStandard(
             netUsdcAmount,
             i_decimalsUsdc
         );
-        sharesToMint = _mintPreview(netUsdcAmountStdDecimals);
+        (, , , , , , uint256 totalAssetUsdValue) = _intitFunctionValues();
+        uint256 sharesToMint = _mintPreview(
+            netUsdcAmountStdDecimals,
+            totalAssetUsdValue
+        );
+
+        minimumSharesToMint =
+            (sharesToMint * (MAX_PERCENTAGE - _maxTolerance)) /
+            MAX_PERCENTAGE;
     }
 
     function _mintPreview(
-        uint256 _usdcAmount
+        uint256 _usdcAmountIn,
+        uint256 _totalAssetUsdValueBefore
     ) internal view returns (uint256 sharesToMint) {
-        uint256 totalAssetUsdValue = getTotalAssetUsdValue();
         uint256 usdcAmountStdDecimals = _convertToDecimalStandard(
-            _usdcAmount,
+            _usdcAmountIn,
             i_decimalsUsdc
         );
 
-        if (totalAssetUsdValue == 0) {
-            sharesToMint = usdcAmountStdDecimals;
-        } else {
-            uint256 totalShares = totalSupply();
-            sharesToMint =
-                (usdcAmountStdDecimals * totalShares) /
-                totalAssetUsdValue;
-        }
-    }
-
-    function _calculateFees(
-        uint256 _usdcAmount
-    ) internal view returns (uint112 feeAmount, uint256 netUsdcAmount) {
-        feeAmount = uint112((_usdcAmount * s_feePercentage) / MAX_PERCENTAGE);
-        netUsdcAmount = _usdcAmount - feeAmount;
+        uint256 totalShares = totalSupply();
+        sharesToMint = usdcAmountStdDecimals
+            .calculateSharesToMintFromUsdcAmount(
+                _totalAssetUsdValueBefore,
+                totalShares
+            );
     }
 
     /**
      * @dev Redeems the specified amount of shares for the underlying assets.
      * @param _from The address of the user redeeming the shares, it's necessary to let router use this function.
      * @param _sharesAmount The amount of shares to redeem (in wei).
-     * @param _maxSlippage The maximum acceptable slippage (in basis points).
+     * @param _maxTolerance The maximum acceptable tolerance (in basis points).
      */
     function redeem(
         address _from,
         uint256 _sharesAmount,
-        uint256 _maxSlippage
+        uint256 _maxTolerance
     ) public isInitialized onlyRole(ROUTER_ROLE) {
-        uint256 expectedUsdcAmount = redeemPreview(_sharesAmount);
-        uint256 minimumUsdcAmount = (expectedUsdcAmount *
-            (MAX_PERCENTAGE - _maxSlippage)) / MAX_PERCENTAGE;
-        // 1. Calculate the amount of Token0 and Token1 need to be swapped to USDC to redeem the shares and update the index balances
-
-        // if (expectedUsdcAmount < minimumUsdcAmount) {
-        //     revert Index__SlippageExceeded();
-        // }
-        _burn(_from, _sharesAmount);
-        i_usdc.safeTransfer(_from, expectedUsdcAmount);
+        // @audit-issue implement redeem function
+        // uint256 expectedUsdcAmount = redeemPreview(_sharesAmount);
+        // uint256 minimumUsdcAmount = (expectedUsdcAmount *
+        //     (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
+        // // 1. Calculate the amount of Token0 and Token1 need to be swapped to USDC to redeem the shares and update the index balances
+        // // if (expectedUsdcAmount < minimumUsdcAmount) {
+        // //     revert Index__SlippageExceeded();
+        // // }
+        // _burn(_from, _sharesAmount);
+        // i_usdc.safeTransfer(_from, expectedUsdcAmount);
     }
 
-    function redeemPreview(
-        uint256 _sharesAmount
-    ) public view isInitialized returns (uint256 usdcToReceive) {
-        uint256 totalShares = totalSupply();
-        uint256 totalAssetUsdValue = getTotalAssetUsdValue();
+    function minRedeemPreview(
+        uint256 _sharesAmountIn,
+        uint256 _maxTolerance
+    ) public view isInitialized returns (uint256 minUsdcToReceive) {
+        (, , uint256 totalAssetUsdValue) = getAssetsUsdValue();
+        uint256 usdcAmountBeforeFees = _redeemPreview(
+            _sharesAmountIn,
+            totalAssetUsdValue
+        );
 
-        uint256 usdcAmountStdDecimals = (_sharesAmount * totalAssetUsdValue) /
-            totalShares;
+        (, uint256 netUsdcAmount) = _calculateFees(usdcAmountBeforeFees);
 
-        usdcToReceive = _convertFromStdDecimalsToTokenDecimals(
-            usdcAmountStdDecimals,
+        //Usdc amount to receive with 18 decimals precision
+        uint256 minUsdcToReceiveEighteenDecimals = (netUsdcAmount *
+            (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
+
+        // Convert minUsdcToReceive from 18 decimals standard to USDC decimals
+        minUsdcToReceive = _convertFromStdDecimalsToTokenDecimals(
+            minUsdcToReceiveEighteenDecimals,
             i_decimalsUsdc
         );
+    }
+
+    /**
+     * @dev Previews the amount of USDC to receive for a given amount of shares.
+     * @param _sharesAmountIn The amount of shares to redeem (in wei).
+     * @param _totalAssetUsdValueBefore The total asset USD value before redemption.
+     * @return usdcToReceiveBeforeFees The amount of USDC to receive before fees (in 18 decimals).
+     */
+    function _redeemPreview(
+        uint256 _sharesAmountIn,
+        uint256 _totalAssetUsdValueBefore
+    ) internal view returns (uint256 usdcToReceiveBeforeFees) {
+        uint256 totalShares = totalSupply();
+        usdcToReceiveBeforeFees = _sharesAmountIn.calculateShareValueInUsd(
+            _totalAssetUsdValueBefore,
+            totalShares
+        );
+    }
+
+    function _calculateFees(
+        uint256 _usdcAmountIn
+    ) internal view returns (uint112 feeAmount, uint256 netUsdcAmount) {
+        feeAmount = ((_usdcAmountIn * s_feePercentage) / MAX_PERCENTAGE)
+            .toUint112();
+        netUsdcAmount = _usdcAmountIn - feeAmount;
     }
 
     /**
@@ -317,7 +390,12 @@ contract Index is ERC20, AccessControl {
             revert Index__PriceIsStale();
         }
 
-        return _convertToDecimalStandard(uint256(answer), feed.decimals());
+        uint256 priceNormalized = _convertToDecimalStandard(
+            uint256(answer),
+            feed.decimals()
+        );
+
+        return priceNormalized;
     }
 
     function updateWeights(
@@ -349,6 +427,38 @@ contract Index is ERC20, AccessControl {
         // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
     }
 
+    function _intitFunctionValues()
+        internal
+        view
+        returns (
+            uint256 priceToken0,
+            uint256 priceToken1,
+            uint112 initialToken0Reserve,
+            uint112 initialToken1Reserve,
+            uint256 token0UsdValue,
+            uint256 token1UsdValue,
+            uint256 totalAssetUsdValue
+        )
+    {
+        priceToken0 = getLatestPrice(address(i_asset0));
+        priceToken1 = getLatestPrice(address(i_asset1));
+        initialToken0Reserve = s_token0Reserve;
+        initialToken1Reserve = s_token1Reserve;
+        token0UsdValue = UnderlyingMath
+            .calculateUSDValueOfTokenAmountStdDecimals(
+                initialToken0Reserve,
+                priceToken0,
+                DECIMALS_STANDARD
+            );
+        token1UsdValue = UnderlyingMath
+            .calculateUSDValueOfTokenAmountStdDecimals(
+                initialToken1Reserve,
+                priceToken1,
+                DECIMALS_STANDARD
+            );
+        totalAssetUsdValue = token0UsdValue + token1UsdValue;
+    }
+
     function _swapWithWeights(
         uint256 _usdcAmount,
         uint112 _weight0,
@@ -356,6 +466,7 @@ contract Index is ERC20, AccessControl {
     ) internal returns (uint112 token0Received, uint112 token1received) {
         // TO BE IMPLEMENTED
         // @audit-info implement function to swap USDC for token0 and token1 according to the weights of the index
+        // @audit-info set usdc decimals to token decimals before send to swap
         // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
         // @audit-info the function should return the amount of token0 and token1 received from the swap
     }
@@ -409,44 +520,64 @@ contract Index is ERC20, AccessControl {
         }
     }
 
-    function getAsset0TotalUsdValue()
+    /**
+     * @dev Gets the total USD value of the underlying assets in the index.
+     * @dev Makes two calls to the price feed, unnecessary for internal functions
+     * @return asset0TotalUsdValue The total USD value of asset0 in the index.
+     * @return asset1TotalUsdValue The total USD value of asset1 in the index.
+     * @return totalUsdValue The total USD value of the index.
+     */
+    function getAssetsUsdValue()
         public
         view
-        returns (uint256 asset0TotalUsdValue)
+        returns (
+            uint256 asset0TotalUsdValue,
+            uint256 asset1TotalUsdValue,
+            uint256 totalUsdValue
+        )
     {
-        (uint112 asset0Amount, ) = getAssetsAmount();
+        (uint112 asset0Amount, uint112 asset1Amount) = getAssetsAmount();
         uint256 asset0Price = getLatestPrice(address(i_asset0));
+        uint256 asset1Price = getLatestPrice(address(i_asset1));
+
         asset0TotalUsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
-                _convertToDecimalStandard(asset0Amount, i_decimals0),
+                asset0Amount,
                 asset0Price,
                 DECIMALS_STANDARD
             );
-    }
-
-    function getAsset1TotalUsdValue()
-        public
-        view
-        returns (uint256 asset1TotalUsdValue)
-    {
-        (, uint112 asset1Amount) = getAssetsAmount();
-        uint256 asset1Price = getLatestPrice(address(i_asset1));
         asset1TotalUsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
-                _convertToDecimalStandard(asset1Amount, i_decimals1),
+                asset1Amount,
                 asset1Price,
                 DECIMALS_STANDARD
             );
+        totalUsdValue = asset0TotalUsdValue + asset1TotalUsdValue;
     }
 
-    function getTotalAssetUsdValue()
+    function getEffectiveWeights()
         public
         view
-        returns (uint256 totalUsdValue)
+        returns (uint256 effectiveWeight0, uint256 effectiveWeight1)
     {
-        uint256 asset0UsdValue = getAsset0TotalUsdValue();
-        uint256 asset1UsdValue = getAsset1TotalUsdValue();
-        totalUsdValue = asset0UsdValue + asset1UsdValue;
+        (
+            uint256 asset0TotalUsdValue,
+            uint256 asset1TotalUsdValue,
+            uint256 totalUsdValue
+        ) = getAssetsUsdValue();
+        // a = totalAsset0
+        // b = totalAsset1
+        // c = totalValue (a + b)
+        // x = effectiveWeight0
+        // y = effectiveWeight1
+        // a : c = x : 100 => x = (a * 100) / c
+        // b : c = y : 100 => y = (b * 100) / c
+        effectiveWeight0 =
+            (asset0TotalUsdValue * MAX_PERCENTAGE) /
+            totalUsdValue;
+        effectiveWeight1 =
+            (asset1TotalUsdValue * MAX_PERCENTAGE) /
+            totalUsdValue;
     }
 
     function getAssetsAndUsdcDecimals()
@@ -462,13 +593,21 @@ contract Index is ERC20, AccessControl {
     }
 
     function getAssetsAmount() public view returns (uint112, uint112) {
-        return (s_totalToken0Amount, s_totalToken1Amount);
+        return (s_token0Reserve, s_token1Reserve);
+    }
+
+    function getAsset0() public view returns (address) {
+        return address(i_asset0);
+    }
+
+    function getAsset1() public view returns (address) {
+        return address(i_asset1);
     }
 
     function getFeesInfo()
         public
         view
-        returns (uint16 feePercentage, uint112 totalFees)
+        returns (uint32 feePercentage, uint112 totalFees)
     {
         return (s_feePercentage, s_totalFees);
     }
