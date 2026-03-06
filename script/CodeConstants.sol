@@ -19,10 +19,14 @@ abstract contract CodeConstants {
     // Pricefeeds Asset/USD Contracts
     address public constant WETH_USD_PRICEFEED_SEPOLIA =
         0x694AA1769357215DE4FAC081bf1f309aDC325306;
+    address public constant USDC_USD_PRICEFEED_SEPOLIA =
+        0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E;
     address public constant WBTC_USD_PRICEFEED_SEPOLIA =
         0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43;
     address public constant LINK_USD_PRICEFEED_SEPOLIA =
         0xc59E3633BAAC79493d908e63626716e204A45EdF;
+
+    uint8 public constant PRICE_FEED_DECIMALS = 8;
 
     // deployer accounts
     address public constant SEPOLIA_DEPLOYER =

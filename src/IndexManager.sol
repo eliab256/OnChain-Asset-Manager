@@ -27,29 +27,21 @@ contract IndexManager is IIndexManager, AccessControl {
 
     uint112 public constant MAX_PERCENTAGE = 1000000; // 100% with 4 decimals
 
-    address[] private indexes;
-    address[] private initializedIndexes;
-    mapping(address => mapping(address => address)) private getIndex;
-    mapping(address => bool) private isIndex;
-    mapping(address => bool) private isInitialized;
-
+    address[] private s_indexes;
+    address[] private s_initializedIndexes;
+    mapping(address => mapping(address => address)) private s_getIndex;
+    mapping(address => bool) private s_isIndex;
+    mapping(address => bool) private s_isInitialized;
     IERC20 internal immutable i_usdc;
-    address internal immutable i_router;
+    address internal s_router;
 
     modifier isIndexInitialized(address indexAddress) {
-        if (!isInitialized[indexAddress]) {
-            revert IndexManager__NotIndexInitialized();
-        }
+        _isIndexInitialized(indexAddress);
         _;
     }
 
     modifier areIndexesInitialized(address[] calldata indexAddresses) {
-        uint256 length = indexAddresses.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (!isInitialized[indexAddresses[i]]) {
-                revert IndexManager__NotIndexInitialized();
-            }
-        }
+        _areIndexesInitialized(indexAddresses);
         _;
     }
 
@@ -62,8 +54,10 @@ contract IndexManager is IIndexManager, AccessControl {
         grantRole(REBALANCER_ROLE, msg.sender);
     }
 
-    function setRouterAddress(address _newRouter) public onlyRole(DEFAULT_ADMIN_ROLE) {
-        i_router = _newRouter;
+    function setRouterAddress(
+        address _newRouter
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        s_router = _newRouter;
     }
 
     /**
@@ -78,7 +72,14 @@ contract IndexManager is IIndexManager, AccessControl {
         uint256 _feePercentage,
         IndexAsset memory _assetA,
         IndexAsset memory _assetB
-    ) public onlyRole(ASSET_MANAGER_ROLE) {
+    )
+        public
+        onlyRole(ASSET_MANAGER_ROLE)
+        returns (address index, address token0, address token1)
+    {
+        if (s_router == address(0)) {
+            revert IndexManager__RouterAddressNotSet();
+        }
         if (_assetA.asset == _assetB.asset) {
             revert IndexManager__InvalidIndexAssetsAddress();
         }
@@ -97,9 +98,9 @@ contract IndexManager is IIndexManager, AccessControl {
         }
 
         // CHECK INDEX IS NOT ALREADY CREATED
-        if (getIndex[asset0.asset][asset1.asset] != address(0)) {
+        if (s_getIndex[asset0.asset][asset1.asset] != address(0)) {
             revert IndexManager__IndexAlreadyExists(
-                getIndex[asset0.asset][asset1.asset]
+                s_getIndex[asset0.asset][asset1.asset]
             );
         }
 
@@ -118,18 +119,14 @@ contract IndexManager is IIndexManager, AccessControl {
         _validatePriceFeed(asset0.priceFeed);
         _validatePriceFeed(asset1.priceFeed);
 
-        address index = _deployIndex(
-            asset0,
-            asset1,
-            _feePercentage,
-            address(i_usdc)
-        );
+        index = _deployIndex(asset0, asset1, _feePercentage, address(i_usdc));
 
-        getIndex[asset0.asset][asset1.asset] = index;
-        isIndex[index] = true;
-        indexes.push(index);
+        s_getIndex[asset0.asset][asset1.asset] = index;
+        s_isIndex[index] = true;
+        s_indexes.push(index);
 
         emit IndexCreated(index, asset0.asset, asset1.asset, msg.sender);
+        return (index, asset0.asset, asset1.asset);
     }
 
     function initializeIndex(
@@ -139,15 +136,15 @@ contract IndexManager is IIndexManager, AccessControl {
         if (_underlyingAmount0 == 0) {
             revert IndexManager__InvalidIndexAssetsAmount();
         }
-        if (!isIndex[_indexAddress]) {
+        if (!s_isIndex[_indexAddress]) {
             revert IndexManager__IsNotIndex();
         }
 
-        if (isInitialized[_indexAddress]) {
+        if (s_isInitialized[_indexAddress]) {
             revert IndexManager__IndexAlreadyInitialized();
         }
-        isInitialized[_indexAddress] = true;
-        initializedIndexes.push(_indexAddress);
+        s_isInitialized[_indexAddress] = true;
+        s_initializedIndexes.push(_indexAddress);
 
         Index(_indexAddress).initialize(_underlyingAmount0);
 
@@ -178,9 +175,9 @@ contract IndexManager is IIndexManager, AccessControl {
     }
 
     function rebalanceAllIndexes() public onlyRole(REBALANCER_ROLE) {
-        uint256 length = initializedIndexes.length;
+        uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
-            address indexAddress = initializedIndexes[i];
+            address indexAddress = s_initializedIndexes[i];
             IIndex(indexAddress).rebalanceIndex();
             emit IndexRebalanced(indexAddress, msg.sender);
         }
@@ -251,9 +248,9 @@ contract IndexManager is IIndexManager, AccessControl {
     }
 
     function collectFeesFromAllIndexes() public onlyRole(FEE_COLLECTOR_ROLE) {
-        uint256 length = initializedIndexes.length;
+        uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
-            address indexAddress = initializedIndexes[i];
+            address indexAddress = s_initializedIndexes[i];
             IIndex index = IIndex(indexAddress);
             uint256 feeAmount = index.collectFees(msg.sender);
             i_usdc.safeTransferFrom(indexAddress, msg.sender, feeAmount);
@@ -285,7 +282,7 @@ contract IndexManager is IIndexManager, AccessControl {
      * @return bool True if the address is a valid index, false otherwise
      */
     function isIndexAddress(address indexAddress) public view returns (bool) {
-        return isIndex[indexAddress];
+        return s_isIndex[indexAddress];
     }
 
     /**
@@ -296,7 +293,24 @@ contract IndexManager is IIndexManager, AccessControl {
     function checkIsIndexInitialized(
         address indexAddress
     ) public view returns (bool) {
-        return isInitialized[indexAddress];
+        return s_isInitialized[indexAddress];
+    }
+
+    function _isIndexInitialized(address indexAddress) internal view {
+        if (!s_isInitialized[indexAddress]) {
+            revert IndexManager__NotIndexInitialized();
+        }
+    }
+
+    function _areIndexesInitialized(
+        address[] calldata indexAddresses
+    ) internal view {
+        uint256 length = indexAddresses.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (!s_isInitialized[indexAddresses[i]]) {
+                revert IndexManager__NotIndexInitialized();
+            }
+        }
     }
 
     function _deployIndex(
@@ -320,7 +334,7 @@ contract IndexManager is IIndexManager, AccessControl {
             abi.encode(
                 name,
                 symbol,
-                i_router,
+                s_router,
                 _usdcAddress,
                 _asset0,
                 _asset1,
@@ -380,7 +394,7 @@ contract IndexManager is IIndexManager, AccessControl {
     }
 
     function getRouterAddress() public view returns (address) {
-        return i_router;
+        return s_router;
     }
 
     /**
@@ -401,7 +415,7 @@ contract IndexManager is IIndexManager, AccessControl {
             _assetAddressA,
             _assetAddressB
         );
-        index = getIndex[asset0][asset1];
+        index = s_getIndex[asset0][asset1];
     }
 
     /**
@@ -409,6 +423,6 @@ contract IndexManager is IIndexManager, AccessControl {
      * @return address[] An array of all index addresses
      */
     function getAllIndexes() public view returns (address[] memory) {
-        return indexes;
+        return s_indexes;
     }
 }

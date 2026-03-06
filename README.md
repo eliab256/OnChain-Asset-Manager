@@ -144,8 +144,9 @@ Upgradeability via proxy
 
 Ma NON mettere upgradeability in v1 se vuoi tenere il design pulito.
 
+possibili implementazioni future:
 
-
+- etf a 3 assets
 
 forge install uniswap/v4-core
 forge install uniswap/v4-periphery

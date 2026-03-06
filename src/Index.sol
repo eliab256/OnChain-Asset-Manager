@@ -64,9 +64,7 @@ contract Index is IIndex, ERC20, AccessControl {
     bool internal s_initialized;
 
     modifier isInitialized() {
-        if (!s_initialized) {
-            revert Index__NotInitialized();
-        }
+        _isInitialized();
         _;
     }
 
@@ -329,6 +327,12 @@ contract Index is IIndex, ERC20, AccessControl {
             minUsdcToReceiveEighteenDecimals,
             i_decimalsUsdc
         );
+    }
+
+    function _isInitialized() internal view{
+        if (!s_initialized) {
+            revert Index__NotInitialized();
+        }
     }
 
     /**

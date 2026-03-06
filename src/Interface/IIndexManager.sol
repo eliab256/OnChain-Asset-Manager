@@ -10,7 +10,7 @@ interface IIndexManager {
         uint256 feePercentage,
         IndexAsset memory assetA,
         IndexAsset memory assetB
-    ) external;
+    ) external returns (address index, address token0, address token1);
 
     function initializeIndex(
         address indexAddress,

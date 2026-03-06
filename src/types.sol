@@ -6,3 +6,10 @@ struct IndexAsset {
     uint112 weightPercentage; // With 4 decimals, e.g. 50000 = 5%
     address priceFeed;
 }
+
+enum TokenAvailable {
+    WETH,
+    USDC,
+    WBTC,
+    LINK
+}

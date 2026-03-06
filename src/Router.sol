@@ -4,32 +4,33 @@ pragma solidity ^0.8.0;
 import {IIndex} from "./Interface/IIndex.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    SafeERC20
+} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IRouter} from "./Interface/IRouter.sol";
 import "./errors/RouterErrors.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {
+    ReentrancyGuard
+} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract Router is ReentrancyGuard {
     IIndexManager private immutable i_IndexManager;
     IERC20 private immutable i_usdc;
 
+    using SafeERC20 for IERC20;
+
     modifier validIndex(address _indexAddress) {
-        if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {
-            revert Router__InvalidIndexAddress();
-        }
+        _validIndex(_indexAddress);
         _;
     }
 
     modifier validAmount(uint256 _amount) {
-        if (_amount == 0) {
-            revert Router__InvalidAmounts();
-        }
+        _validAmount(_amount);
         _;
     }
 
     modifier validTolerance(uint256 _tolerance) {
-        if (_tolerance >= 10000 || _tolerance == 0) {
-            revert Router__InvalidTolerance();
-        }
+        _validTolerance(_tolerance);
         _;
     }
 
@@ -41,15 +42,7 @@ contract Router is ReentrancyGuard {
         uint256 _amount,
         uint256 _tolerance
     ) {
-        if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {
-            revert Router__InvalidIndexAddress();
-        }
-        if (_amount == 0) {
-            revert Router__InvalidAmounts();
-        }
-        if (_tolerance >= 10000 || _tolerance == 0) {
-            revert Router__InvalidTolerance();
-        }
+        _validInputs(_indexAddress, _amount, _tolerance);
         _;
     }
 
@@ -69,7 +62,11 @@ contract Router is ReentrancyGuard {
         address _indexAddress,
         uint256 _usdcAmount,
         uint256 _maxTolerance
-    ) public validInputs(_indexAddress, _usdcAmount, _maxTolerance) nonReentrant {
+    )
+        public
+        validInputs(_indexAddress, _usdcAmount, _maxTolerance)
+        nonReentrant
+    {
         _buyShares(_indexAddress, _usdcAmount, 0, _maxTolerance);
     }
 
@@ -85,7 +82,11 @@ contract Router is ReentrancyGuard {
         address _indexAddress,
         uint256 _sharesAmount,
         uint256 _maxTolerance
-    ) public validInputs(_indexAddress, _sharesAmount, _maxTolerance) nonReentrant {
+    )
+        public
+        validInputs(_indexAddress, _sharesAmount, _maxTolerance)
+        nonReentrant
+    {
         _buyShares(_indexAddress, 0, _sharesAmount, _maxTolerance);
     }
 
@@ -100,7 +101,11 @@ contract Router is ReentrancyGuard {
         address _indexAddress,
         uint256 _sharesAmount,
         uint256 _maxTolerance
-    ) public validInputs(_indexAddress, _sharesAmount, _maxTolerance) nonReentrant {
+    )
+        public
+        validInputs(_indexAddress, _sharesAmount, _maxTolerance)
+        nonReentrant
+    {
         _sellShares(_indexAddress, 0, _sharesAmount, _maxTolerance);
     }
 
@@ -115,7 +120,11 @@ contract Router is ReentrancyGuard {
         address _indexAddress,
         uint256 _usdcAmount,
         uint256 _maxTolerance
-    ) public validInputs(_indexAddress, _usdcAmount, _maxTolerance) nonReentrant {
+    )
+        public
+        validInputs(_indexAddress, _usdcAmount, _maxTolerance)
+        nonReentrant
+    {
         _sellShares(_indexAddress, _usdcAmount, 0, _maxTolerance);
     }
 
@@ -136,7 +145,6 @@ contract Router is ReentrancyGuard {
         // used for buyMinAmountOfSharesForUsdc
         if (_sharesAmount > 0) {
             //  @audit-info implement for buyMinAmountOfSharesForUsdc: calculate how much USDC is needed for the desired shares, then approve and call mintShares
-            
             // 1. index contract need allowance to transfer USDC from user
             // 2.
         }
@@ -169,13 +177,13 @@ contract Router is ReentrancyGuard {
             //ndex.redeem(address(this), maxSharesToBurn, _maxTolerance);
 
             // 5. Transfer USDC to user
-            i_usdc.transfer(msg.sender, _usdcAmount);
+            i_usdc.safeTransfer(msg.sender, _usdcAmount);
         }
 
         // used for sellExactAmountOfSharesForUsdc
         if (_sharesAmount > 0) {
             // @audit-issue change transfer logic to optimize gas
-            IERC20(_indexAddress).transferFrom(
+            IERC20(_indexAddress).safeTransferFrom(
                 msg.sender,
                 address(this),
                 _sharesAmount
@@ -185,7 +193,7 @@ contract Router is ReentrancyGuard {
 
             // Transfer all received USDC to user
             uint256 usdcBalance = i_usdc.balanceOf(address(this));
-            i_usdc.transfer(msg.sender, usdcBalance);
+            i_usdc.safeTransfer(msg.sender, usdcBalance);
         }
     }
 
@@ -214,9 +222,7 @@ contract Router is ReentrancyGuard {
         returns (uint256 maxUsdcAmount)
     {
         IIndex index = IIndex(_indexAddress);
-
     }
-
 
     /**
      * @notice Tolerace is used on net USDC amount, protocol fees are applied on input USDC
@@ -225,7 +231,7 @@ contract Router is ReentrancyGuard {
      * This is the inverse of redeemPreview: given shares, calculate USDC, then apply fees and tolerance to get minimum USDC to receive.
      * @param _indexAddress The address of the index.
      * @param _sharesAmount The amount of shares to redeem.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%). 
+     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).
      * @return minUsdcAmount The minimum amount of USDC to receive after fees and tolerance (in token decimals, 6 for USDC).
      */
     function getMinUsdcAmountFromRedeemExactShares(
@@ -251,7 +257,7 @@ contract Router is ReentrancyGuard {
         uint256 _sharesAmount
     ) internal view returns (uint256 usdcNeeded) {
         IIndex index = IIndex(_indexAddress);
-        (, , uint256 totalAssetUsdValue )= index.getAssetsUsdValue();
+        (, , uint256 totalAssetUsdValue) = index.getAssetsUsdValue();
         uint256 totalShares = index.totalSupply();
 
         if (totalShares == 0) {
@@ -280,7 +286,7 @@ contract Router is ReentrancyGuard {
         uint256 _usdcAmount
     ) internal view returns (uint256 sharesNeeded) {
         IIndex index = IIndex(_indexAddress);
-        (,,uint256 totalAssetUsdValue) = index.getAssetsUsdValue();
+        (, , uint256 totalAssetUsdValue) = index.getAssetsUsdValue();
         uint256 totalShares = index.totalSupply();
 
         // Formula: sharesNeeded = (usdcAmount * totalShares) / totalAssetValue
@@ -288,6 +294,33 @@ contract Router is ReentrancyGuard {
         sharesNeeded = (_usdcAmount * totalShares) / totalAssetUsdValue;
     }
 
+    function _validAmount(uint256 _amount) internal pure {
+        if (_amount == 0) {
+            revert Router__InvalidAmounts();
+        }
+    }
+
+    function _validIndex(address _indexAddress) internal view {
+        if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {
+            revert Router__InvalidIndexAddress();
+        }
+    }
+
+    function _validTolerance(uint256 _tolerance) internal pure {
+        if (_tolerance >= 10000 || _tolerance == 0) {
+            revert Router__InvalidTolerance();
+        }
+    }
+
+    function _validInputs(
+        address _indexAddress,
+        uint256 _amount,
+        uint256 _tolerance
+    ) internal view {
+        _validIndex(_indexAddress);
+        _validAmount(_amount);
+        _validTolerance(_tolerance);
+    }
     /**
      * @notice Returns the address of the IndexManager contract used by the router.
      * @return The address of the IndexManager contract.
@@ -296,10 +329,10 @@ contract Router is ReentrancyGuard {
         return address(i_IndexManager);
     }
 
-   /**
-    * @notice Returns the address of the USDC token used by the router.
-    * @return The address of the USDC token.
-    */
+    /**
+     * @notice Returns the address of the USDC token used by the router.
+     * @return The address of the USDC token.
+     */
     function getUsdc() external view returns (address) {
         return address(i_usdc);
     }
