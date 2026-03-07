@@ -9,41 +9,24 @@ interface IRouter {
         uint256 _maxTolerance
     ) external;
 
-    function buyMinAmountOfSharesForUsdc(
-        address _indexAddress,
-        uint256 _sharesAmount,
-        uint256 _maxTolerance
-    ) external;
-
     function sellExactAmountOfSharesForUsdc(
         address _indexAddress,
         uint256 _sharesAmount,
         uint256 _maxTolerance
     ) external;
 
-    function sellSharesForMinUsdcAmount(
-        address _indexAddress,
-        uint256 _usdcAmount,
-        uint256 _maxTolerance
-    ) external;
-
-    function getMinMintSharesAmountForExactUsdc(
-        address _indexAddress,
-        uint256 _usdcAmount,
-        uint256 _maxTolerance
-    ) external view returns (uint256 minSharesAmount);
-
-    function getMaxUsdcAmountToMintExactShares(
-        address _indexAddress,
-        uint256 _sharesAmount,
-        uint256 _maxTolerance
-    ) external view returns (uint256 maxUsdcAmount);
-
-    function getMinUsdcAmountFromRedeemExactShares(
+    // View functions
+    function getMinRedeemPreview(
         address _indexAddress,
         uint256 _sharesAmount,
         uint256 _maxTolerance
     ) external view returns (uint256 minUsdcAmount);
+
+    function getMinMintPreview(
+        address _indexAddress,
+        uint256 _usdcAmount,
+        uint256 _maxTolerance
+    ) external view returns (uint256 minSharesAmount);
 
     // Getter functions
     function getIndexManager() external view returns (address);

@@ -8,10 +8,13 @@ import {IndexManager} from "../src/IndexManager.sol";
 import {HelperConfig, TokenConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {IndexAsset, TokenAvailable} from "../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract DeployAndInitNewIndex is Script {
     IndexManager public indexManager;
     HelperConfig public helperConfig;
+
+    using SafeERC20 for IERC20;
 
     function run(
         HelperConfig _helperConfig,
@@ -67,8 +70,8 @@ contract DeployAndInitNewIndex is Script {
             initialToken1Deposit = type(uint256).max; // approve max for the token with variable deposit to simplify testing
         }
 
-        IERC20(token0).approve(address(indexManager), initialToken0Deposit);
-        IERC20(token1).approve(address(indexManager), initialToken1Deposit);
+        IERC20(token0).forceApprove(address(indexManager), initialToken0Deposit);
+        IERC20(token1).forceApprove(address(indexManager), initialToken1Deposit);
         // initialize new index
         indexManager.initializeIndex(newIndex, initialToken0Deposit);
         vm.stopBroadcast();

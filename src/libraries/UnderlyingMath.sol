@@ -143,5 +143,11 @@ library UnderlyingMath {
         }
     }
 
+    function calculateSwapDFromUsdcAmount(uint256 _usdcAmount, uint112 _weight0, uint112 _weight1) internal pure returns (uint256 amountToSwapToToken0, uint256 amountToSwapToToken1) {
+        amountToSwapToToken0 = (_usdcAmount * _weight0) / (_weight0 + _weight1);
+        amountToSwapToToken1 = (_usdcAmount * _weight1) / (_weight0 + _weight1);
+      
+    }
+
 
 }

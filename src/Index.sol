@@ -19,6 +19,7 @@ import {
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset} from "./types.sol";
+import {console} from "forge-std/console.sol";
 
 contract Index is IIndex, ERC20, AccessControl {
     using UnderlyingMath for uint256;
@@ -40,8 +41,8 @@ contract Index is IIndex, ERC20, AccessControl {
     uint256 public constant GRACE_PERIOD = 1 days;
     uint256 public constant MAX_DELAY = 1 hours;
     uint8 public constant DECIMALS_STANDARD = 18;
-    uint112 public constant PERCENTAGE_PRECISION = 10000; // 4 decimals precision for percentage values
-    uint112 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_PRECISION; // 100 with 4 decimals precision
+    uint112 public constant PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
+    uint112 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION; // 100 with 4 decimals precision
 
     bytes32 public constant INDEX_MANAGER_ROLE =
         keccak256("INDEX_MANAGER_ROLE");
@@ -191,24 +192,21 @@ contract Index is IIndex, ERC20, AccessControl {
             uint256 priceToken1,
             ,
             ,
-            ,
-            ,
+            uint256 token0UsdValueBefore,
+            uint256 token1UsdValueBefore,
             uint256 initialTotalAssetUsdValue
         ) = _initFunctionValues();
-        uint256 expectedShares = _mintPreview(
-            netUsdcAmount,
-            initialTotalAssetUsdValue
-        );
-        uint256 minimumSharesToMint = (expectedShares *
-            (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
 
         // 4. Swap USDC for token0 and token1
         // @audit-issue check if call chainlink
         // @audit-issue make the swap aim to rebalance the index
-        (uint112 token0Received, uint112 token1received) = _swapWithWeights(
+        (uint112 token0Received, uint112 token1received) = _swapFromUsdcWithWeights(
             netUsdcAmount,
-            s_weight0,
-            s_weight1
+            token0UsdValueBefore,
+            token1UsdValueBefore,
+                initialTotalAssetUsdValue,
+                priceToken0,
+                priceToken1
         );
 
         // 5. Calculate new Shares expected and compare with the expected shares calculated before the swap to check if the tolerance is acceptable
@@ -224,21 +222,30 @@ contract Index is IIndex, ERC20, AccessControl {
                 priceToken1,
                 DECIMALS_STANDARD
             );
+        uint256 sharesToMint;
 
-        uint256 sharesToMint = _mintPreview(
-            token0ReceivedUsdValue + token1ReceivedUsdValue,
-            initialTotalAssetUsdValue
-        );
+        {
+            uint256 expectedShares = _mintPreview(
+                netUsdcAmount,
+                initialTotalAssetUsdValue
+            );
+            uint256 minimumSharesToMint = (expectedShares *
+                (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
 
-        // 6. Call the mint function to mint shares to the user
-        if (sharesToMint < minimumSharesToMint) {
-            revert Index__ToleranceExceeded();
-        } else {
-            s_totalFees += feeAmount;
-            s_token0Reserve += token0Received;
-            s_token1Reserve += token1received;
-            _mint(_to, sharesToMint);
+            sharesToMint = _mintPreview(
+                token0ReceivedUsdValue + token1ReceivedUsdValue,
+                initialTotalAssetUsdValue
+            );
+
+            // 6. Call the mint function to mint shares to the user
+            if (sharesToMint < minimumSharesToMint) {
+                revert Index__ToleranceExceeded();
+            }
         }
+        s_totalFees += feeAmount;
+        s_token0Reserve += token0Received;
+        s_token1Reserve += token1received;
+        _mint(_to, sharesToMint);
     }
 
     // @audit-issue check ottimizzazioni initFunctionValues
@@ -270,17 +277,11 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 _usdcAmountIn,
         uint256 _totalAssetUsdValueBefore
     ) internal view returns (uint256 sharesToMint) {
-        uint256 usdcAmountStdDecimals = _convertToDecimalStandard(
-            _usdcAmountIn,
-            i_decimalsUsdc
-        );
-
         uint256 totalShares = totalSupply();
-        sharesToMint = usdcAmountStdDecimals
-            .calculateSharesToMintFromUsdcAmount(
-                _totalAssetUsdValueBefore,
-                totalShares
-            );
+        sharesToMint = _usdcAmountIn.calculateSharesToMintFromUsdcAmount(
+            _totalAssetUsdValueBefore,
+            totalShares
+        );
     }
 
     /**
@@ -295,15 +296,23 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 _maxTolerance
     ) public isInitialized onlyRole(ROUTER_ROLE) {
         // @audit-issue implement redeem function
-        // uint256 expectedUsdcAmount = redeemPreview(_sharesAmount);
+         (uint256 priceToken0,
+            uint256 priceToken1,
+            uint112 initialToken0Reserve,
+            uint112 initialToken1Reserve,
+            uint256 token0UsdValue,
+            uint256 token1UsdValue,
+            uint256 totalAssetUsdValue) = _initFunctionValues();
+        
+        //uint256 expectedUsdcAmount = redeemPreview(_sharesAmount);
         // uint256 minimumUsdcAmount = (expectedUsdcAmount *
         //     (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
         // // 1. Calculate the amount of Token0 and Token1 need to be swapped to USDC to redeem the shares and update the index balances
         // // if (expectedUsdcAmount < minimumUsdcAmount) {
         // //     revert Index__SlippageExceeded();
         // // }
-        // _burn(_from, _sharesAmount);
-        // i_usdc.safeTransfer(_from, expectedUsdcAmount);
+        _burn(_from, _sharesAmount);
+        //i_usdc.safeTransfer(_from, expectedUsdcAmount);
     }
 
     function minRedeemPreview(
@@ -327,12 +336,6 @@ contract Index is IIndex, ERC20, AccessControl {
             minUsdcToReceiveEighteenDecimals,
             i_decimalsUsdc
         );
-    }
-
-    function _isInitialized() internal view{
-        if (!s_initialized) {
-            revert Index__NotInitialized();
-        }
     }
 
     /**
@@ -431,28 +434,20 @@ contract Index is IIndex, ERC20, AccessControl {
         (
             uint256 priceToken0,
             uint256 priceToken1,
-            uint112 initialToken0Reserve,
-            uint112 initialToken1Reserve,
-            uint256 token0UsdValue,
+            ,
+            ,
+            /*uint112 initialToken0Reserve*/ /*uint112 initialToken1Reserve*/ uint256 token0UsdValue,
             uint256 token1UsdValue,
             uint256 totalAssetUsdValue
         ) = _initFunctionValues();
 
         //get effective weights before rebalance
-        (
-            uint112 weight0Before,
-            uint112 weight1Before
-        ) = _getAssetsEffectiveWights(
-                token0UsdValue,
-                token1UsdValue,
-                totalAssetUsdValue
-            );
-
-        // check if rebalance is needed, if the effective weight of an asset deviates from its target weight by more than the threshold, the index can be rebalanced
-        if (
-            weight0Before < s_weight0 + REBALANCE_TRESHHOLD ||
-            weight0Before > s_weight0 - REBALANCE_TRESHHOLD
-        ) {
+        bool rebalanceNeeded = _checkIfRebalanceNeeded(
+            token0UsdValue,
+            token1UsdValue,
+            totalAssetUsdValue
+        );
+        if (!rebalanceNeeded) {
             revert Index__RebalanceNotNeeded();
         }
 
@@ -472,6 +467,7 @@ contract Index is IIndex, ERC20, AccessControl {
         //conditional swap
         if (amount0ToSwap > 0) {
             // swap token0 for token1
+
         } else {
             // swap token1 for token0
         }
@@ -481,6 +477,27 @@ contract Index is IIndex, ERC20, AccessControl {
 
         // @audit-info implement function to rebalance the index according to the current weights of the index
         // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
+    }
+
+    function _checkIfRebalanceNeeded(
+        uint256 _token0UsdValue,
+        uint256 _token1UsdValue,
+        uint256 _totalAssetUsdValue
+    ) internal view returns (bool) {
+        (uint112 weight0, ) = _getAssetsEffectiveWights(
+            _token0UsdValue,
+            _token1UsdValue,
+            _totalAssetUsdValue
+        );
+
+        if (
+            weight0 < s_weight0 + REBALANCE_TRESHHOLD ||
+            weight0 > s_weight0 - REBALANCE_TRESHHOLD
+        ) {
+            return false;
+        } else {
+            return true;
+        }
     }
     /**
      * @dev Initializes the function values to avoid multiple external calls and storage reads.
@@ -524,12 +541,24 @@ contract Index is IIndex, ERC20, AccessControl {
         totalAssetUsdValue = token0UsdValue + token1UsdValue;
     }
 
-    function _swapWithWeights(
+    function _swapFromUsdcWithWeights(
         uint256 _usdcAmount,
-        uint112 _weight0,
-        uint112 _weight1
+        uint256 _token0UsdValueBefore,
+        uint256 _token1UsdValueBefore,
+        uint256 _totalAssetUsdValueBefore,
+        uint256 _priceToken0,
+        uint256 _priceToken1
     ) internal returns (uint112 token0Received, uint112 token1received) {
         // TO BE IMPLEMENTED
+        bool rebalanceNeeded = _checkIfRebalanceNeeded(_token0UsdValueBefore, _token1UsdValueBefore, _totalAssetUsdValueBefore);
+        uint256 amount0ToSwap; // 18 decimals
+        uint256 amount1ToSwap;  // 18 decimals
+        if(!rebalanceNeeded){
+            // swap according to index weights
+        } else {
+            (uint112 EffectiveWeight0, uint112 EffectiveWeight1) = _getAssetsEffectiveWights(_token0UsdValueBefore, _token1UsdValueBefore, _totalAssetUsdValueBefore);
+            // swap according to rebalance needs
+        }
         // @audit-info implement function to swap USDC for token0 and token1 according to the weights of the index
         // @audit-info set usdc decimals to token decimals before send to swap
         // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
@@ -581,6 +610,12 @@ contract Index is IIndex, ERC20, AccessControl {
                 _tokenDecimals
             );
             return convertedAmount;
+        }
+    }
+
+    function _isInitialized() internal view {
+        if (!s_initialized) {
+            revert Index__NotInitialized();
         }
     }
 
@@ -694,6 +729,10 @@ contract Index is IIndex, ERC20, AccessControl {
     }
 
     function getPercentagePrecision() public pure returns (uint112) {
-        return PERCENTAGE_PRECISION;
+        return PERCENTAGE_FEE_PRECISION;
+    }
+
+    function getWeightPrecision() public pure returns (uint112) {
+        return WEIGHT_PRECISION;
     }
 }
