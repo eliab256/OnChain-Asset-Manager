@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IIndex} from "./Interface/IIndex.sol";
+import "./events/IndexEvents.sol";
 import "./errors/IndexErrors.sol";
 import {
     IERC20Metadata
@@ -50,9 +51,13 @@ contract Index is IIndex, ERC20, AccessControl {
 
     uint112 internal s_weight0;
     uint112 internal s_weight1;
+    uint112 internal s_pendingWeight0;
+    uint112 internal s_pendingWeight1;
+    uint256 internal s_weightUpdateExecutableAt; // timestamp after which the pending weights can be implemented
+    uint256 internal constant WEIGHT_UPDATE_DELAY = 2 days; // timelock duration
     uint112 internal constant WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
     uint112 internal constant MAX_WEIGHT = 100 * WEIGHT_PRECISION; // 100% with 4 decimals precision
-    uint112 internal constant REBALANCE_TRESHHOLD = 3 * WEIGHT_PRECISION; // 3% with 4 decimals precision, if the effective weight of an asset deviates from its target weight by more than this threshold, the index can be rebalanced
+    uint112 internal constant REBALANCE_THRESHOLD = 3 * WEIGHT_PRECISION; // 3% with 4 decimals precision, if the effective weight of an asset deviates from its target weight by more than this threshold, the index can be rebalanced
 
     //reserves standardized to 18 decimals for easier calculations, convert to token decimals when transferring to user
     uint112 internal s_token0Reserve;
@@ -119,6 +124,10 @@ contract Index is IIndex, ERC20, AccessControl {
             _underlyingAmount0
         );
 
+        (uint112 weight0, uint112 weight1) = getAssetsWeights();
+
+         // all values are converted to 18 decimals standard for easier calculations
+
         //underlying0amount input converted to 18 decimals standard
         uint112 underlyingAmount0 = _convertToDecimalStandard(
             _underlyingAmount0,
@@ -135,8 +144,8 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 underlying1UsdValue = UnderlyingMath
             .calculateAmount1UsdFromAmount0UsdAndIndexWeights(
                 underlying0UsdValue,
-                s_weight0,
-                s_weight1
+                weight0,
+                weight1
             );
 
         uint112 underlyingAmount1 = UnderlyingMath
@@ -167,6 +176,14 @@ contract Index is IIndex, ERC20, AccessControl {
         s_token0Reserve = underlyingAmount0;
         s_token1Reserve = underlyingAmount1;
         s_initialized = true;
+
+        emit IndexInitialized(
+            underlyingAmount0,
+            underlyingAmount1,
+            underlying0UsdValue,
+            underlying1UsdValue,
+            initialShares
+        );
     }
 
     function mintShares(
@@ -174,103 +191,159 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 _usdcAmountIn,
         uint256 _maxTolerance
     ) public isInitialized onlyRole(ROUTER_ROLE) {
-        // 1. Transfer USDC from the user to the index
+        //Transfer USDC from the user to the index
         i_usdc.safeTransferFrom(_to, address(this), _usdcAmountIn);
 
-        // 1. Calculate and subtract fees from the USDC amount
-        uint256 _usdcAmountInNormalized = _convertToDecimalStandard(
-            _usdcAmountIn,
-            i_decimalsUsdc
-        );
-        (uint112 feeAmount, uint256 netUsdcAmount) = _calculateFees(
-            _usdcAmountInNormalized
-        );
-
-        // 2. Calculate the amount of shares to mint.
-        (
-            uint256 priceToken0,
-            uint256 priceToken1,
-            ,
-            ,
-            uint256 token0UsdValueBefore,
-            uint256 token1UsdValueBefore,
-            uint256 initialTotalAssetUsdValue
-        ) = _initFunctionValues();
-
-        // 4. Swap USDC for token0 and token1
-        // @audit-issue check if call chainlink
-        // @audit-issue make the swap aim to rebalance the index
-        (uint112 token0Received, uint112 token1received) = _swapFromUsdcWithWeights(
-            netUsdcAmount,
-            token0UsdValueBefore,
-            token1UsdValueBefore,
-                initialTotalAssetUsdValue,
-                priceToken0,
-                priceToken1
-        );
-
-        // 5. Calculate new Shares expected and compare with the expected shares calculated before the swap to check if the tolerance is acceptable
-        uint256 token0ReceivedUsdValue = UnderlyingMath
-            .calculateUSDValueOfTokenAmountStdDecimals(
-                token0Received,
-                priceToken0,
-                DECIMALS_STANDARD
+        uint256 netUsdcAmount;
+        // Scope 1: Process fees
+        {
+            uint256 usdcAmountInNormalized = _convertToDecimalStandard(
+                _usdcAmountIn,
+                i_decimalsUsdc
             );
-        uint256 token1ReceivedUsdValue = UnderlyingMath
-            .calculateUSDValueOfTokenAmountStdDecimals(
-                token1received,
-                priceToken1,
-                DECIMALS_STANDARD
-            );
-        uint256 sharesToMint;
+
+            uint112 feeAmount;
+            (feeAmount, netUsdcAmount) = _calculateFees(usdcAmountInNormalized);
+            s_totalFees += feeAmount;
+        }
+
+        uint256 initialTotalAssetUsdValue;
+        uint256 token0ReceivedUsdValue;
+        uint256 token1ReceivedUsdValue;
+        uint112 token0Received;
+        uint112 token1Received;
+
+        // Scope 2:
 
         {
-            uint256 expectedShares = _mintPreview(
-                netUsdcAmount,
-                initialTotalAssetUsdValue
-            );
-            uint256 minimumSharesToMint = (expectedShares *
-                (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
+            // 2.1 get price feeds and reserves
+            (
+                uint256 priceToken0,
+                uint256 priceToken1,
+                ,
+                ,
+                uint256 token0UsdValueBefore,
+                uint256 token1UsdValueBefore,
+                uint256 totalAssetUsdValueBefore
+            ) = _initFunctionValues();
 
-            sharesToMint = _mintPreview(
-                token0ReceivedUsdValue + token1ReceivedUsdValue,
-                initialTotalAssetUsdValue
-            );
+            initialTotalAssetUsdValue = totalAssetUsdValueBefore;
 
-            // 6. Call the mint function to mint shares to the user
-            if (sharesToMint < minimumSharesToMint) {
-                revert Index__ToleranceExceeded();
-            }
+            // 2.2 calculate the amount of token0 and token1 to buy with the net USDC amount and swap USDC for token0 and token1
+            // @audit-issue make the swap aim to rebalance the index
+            (
+                 token0Received,
+                 token1Received
+            ) = _swapFromUsdcWithWeights(
+                    netUsdcAmount,
+                    token0UsdValueBefore,
+                    token1UsdValueBefore,
+                    totalAssetUsdValueBefore,
+                    priceToken0,
+                    priceToken1
+                );
+
+            // 2.3 calculate the USD value of the received token0 and token1
+            token0ReceivedUsdValue = UnderlyingMath
+                .calculateUSDValueOfTokenAmountStdDecimals(
+                    token0Received,
+                    priceToken0,
+                    DECIMALS_STANDARD
+                );
+            token1ReceivedUsdValue = UnderlyingMath
+                .calculateUSDValueOfTokenAmountStdDecimals(
+                    token1Received,
+                    priceToken1,
+                    DECIMALS_STANDARD
+                );
+
+            // 2.4  update reserves
+            s_token0Reserve += token0Received;
+            s_token1Reserve += token1Received;
         }
-        s_totalFees += feeAmount;
-        s_token0Reserve += token0Received;
-        s_token1Reserve += token1received;
+
+        // 3. Calculate new Shares expected and compare with the expected shares calculated before the swap to check if the tolerance is acceptable
+        (
+            uint256 sharesToMint,
+            bool toleranceExceeded
+        ) = _calculateShareToMintAndValidateTolerance(
+                netUsdcAmount,
+                _maxTolerance,
+                initialTotalAssetUsdValue,
+                token0ReceivedUsdValue,
+                token1ReceivedUsdValue
+            );
+
+        // 4. If the tolerance is acceptable, mint the shares to the user, otherwise revert the transaction
+        if (toleranceExceeded) {
+            revert Index__ToleranceExceeded();
+        }
         _mint(_to, sharesToMint);
+
+        // 5.  Emit mint event
+        emit Deposit(
+            _to,
+            _usdcAmountIn,
+            sharesToMint,
+            token0Received,
+            token1Received
+        );
     }
 
-    // @audit-issue check ottimizzazioni initFunctionValues
+    function _calculateShareToMintAndValidateTolerance(
+        uint256 _usdcAmountIn,
+        uint256 _maxTolerance,
+        uint256 _totalAssetUsdValueBefore,
+        uint256 token0ReceivedUsdValue,
+        uint256 token1ReceivedUsdValue
+    ) internal view returns (uint256 sharesToMint, bool toleranceExceeded) {
+        uint256 expectedShares = _mintPreview(
+            _usdcAmountIn,
+            _totalAssetUsdValueBefore
+        );
+        uint256 minimumSharesToMint = (expectedShares *
+            (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
+
+        sharesToMint = _mintPreview(
+            token0ReceivedUsdValue + token1ReceivedUsdValue,
+            _totalAssetUsdValueBefore
+        );
+
+        if (sharesToMint < minimumSharesToMint) {
+            return (0, true);
+        } else {
+            return (sharesToMint, false);
+        }
+    }
+
+    /**
+     * @dev Previews the amount of shares to mint for a given USDC amount and tolerance.
+     * @param _usdcAmountIn The amount of USDC to mint shares with (in token decimals).
+     * @param _maxTolerance The maximum acceptable tolerance (in basis points).
+     * @return minimumSharesToMint The minimum amount of shares to mint (in wei) after applying the fees and the tolerance.
+     */
     function minMintPreview(
         uint256 _usdcAmountIn,
         uint256 _maxTolerance
     ) public view isInitialized returns (uint256 minimumSharesToMint) {
+        // 1. Standadize USDC amount to 18 decimals
         uint256 _usdcAmountInNormalized = _convertToDecimalStandard(
             _usdcAmountIn,
             i_decimalsUsdc
         );
+        // 2. Calculate net USDC amount after protocol fees
         (, uint256 netUsdcAmount) = _calculateFees(_usdcAmountInNormalized);
-        uint256 netUsdcAmountStdDecimals = _convertToDecimalStandard(
-            netUsdcAmount,
-            i_decimalsUsdc
-        );
+
+        //3. Calculate the minimum amomount of value can be lost during swaps from USDC to underlying tokens
+        uint256 minimumUsdAmount = (netUsdcAmount *
+            (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
+
+        //4. Calculate the amount of shares to mint with the minimum USD amount after fees and tolerance, based on the current index state
         (, , , , , , uint256 totalAssetUsdValue) = _initFunctionValues();
-        uint256 sharesToMint = _mintPreview(
-            netUsdcAmountStdDecimals,
+        minimumSharesToMint = _mintPreview(
+            minimumUsdAmount,
             totalAssetUsdValue
         );
-
-        minimumSharesToMint =
-            (sharesToMint * (MAX_PERCENTAGE - _maxTolerance)) /
-            MAX_PERCENTAGE;
     }
 
     function _mintPreview(
@@ -296,23 +369,88 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 _maxTolerance
     ) public isInitialized onlyRole(ROUTER_ROLE) {
         // @audit-issue implement redeem function
-         (uint256 priceToken0,
+        (
+            uint256 priceToken0,
             uint256 priceToken1,
             uint112 initialToken0Reserve,
             uint112 initialToken1Reserve,
             uint256 token0UsdValue,
             uint256 token1UsdValue,
-            uint256 totalAssetUsdValue) = _initFunctionValues();
-        
-        //uint256 expectedUsdcAmount = redeemPreview(_sharesAmount);
-        // uint256 minimumUsdcAmount = (expectedUsdcAmount *
-        //     (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
-        // // 1. Calculate the amount of Token0 and Token1 need to be swapped to USDC to redeem the shares and update the index balances
-        // // if (expectedUsdcAmount < minimumUsdcAmount) {
-        // //     revert Index__SlippageExceeded();
-        // // }
+            uint256 totalAssetUsdValue
+        ) = _initFunctionValues();
+
+        // 1. Calculate USD value of the shares to redeem based on totalUSDvalue and total shares supply
+        uint256 sharesBurnUsdValue = _sharesAmount.calculateShareValueInUsd(
+            totalAssetUsdValue,
+            totalSupply()
+        );
+
+        uint112 token0AmountToRedeem;
+        uint112 token1AmountToRedeem;
+        // 2. Get asset weights and calculate the amount of token0 and token1 to swap based on the current index state and the USD value of the shares to redeem
+
+        // 3. Swap token0 and token1 for USDC according to the weights of the index, calculate the total amount of USDC received from the swap
+
+        // 4. Scope:
+        uint256 netUsdcAmount;
+        {
+            // 4.1. Normalize USDC amount received to 18 decimals standard for easier calculations
+            uint256 usdcReceivedNormalized = _convertToDecimalStandard(
+                0, // @audit-issue replace with the USDC amount received from the swap
+                i_decimalsUsdc
+            );
+            // 4.2. Calculate protocol fees on the USDC amount received from the swap
+            uint112 feeAmount;
+            (feeAmount, netUsdcAmount) = _calculateFees(usdcReceivedNormalized);
+            s_totalFees += feeAmount;
+        }
+
+        // 5. Scope
+        bool toleranceExceeded;
+        {
+            // 5.1. Subtract protocol fees from the usdc expected amount
+            (, uint256 netExpectedUsdcAmount) = _calculateFees(
+                sharesBurnUsdValue
+            );
+
+            // 5.2. Calculate the minimum amount of USDC to receive after applying the maximum tolerance
+            uint256 minNetAmountAcceptable = (netExpectedUsdcAmount *
+                (MAX_PERCENTAGE - _maxTolerance)) / MAX_PERCENTAGE;
+
+            // 5.3. Compare USDC received with the expected USDC amount (netUsdcAmount) and tolerance
+            if (netUsdcAmount < minNetAmountAcceptable) {
+                toleranceExceeded = true;
+            } else {
+                toleranceExceeded = false;
+            }
+        }
+        // 6. if the tolerance is acceptable, continue with the redeem, otherwise revert the transaction
+        if (toleranceExceeded) {
+            revert Index__ToleranceExceeded();
+        }
+        // 7. Update reserves
+        // @audit-issue update reserves
+            s_token0Reserve -= token0AmountToRedeem;
+            s_token1Reserve -= token1AmountToRedeem;
+
+        // 8. Convert USDC to its decimals before transfer
+        uint256 netUsdcAmountTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                netUsdcAmount,
+                i_decimalsUsdc
+            );
+
+        // 9. Burn the shares from the user and transfer the USDC to the user
+        i_usdc.safeTransfer(_from, netUsdcAmountTokenDecimals);
         _burn(_from, _sharesAmount);
-        //i_usdc.safeTransfer(_from, expectedUsdcAmount);
+
+        // 10. Emit burn event 
+        emit Withdrawal(
+            _from,
+            _sharesAmount,
+            token0AmountToRedeem,
+            token1AmountToRedeem,
+            netUsdcAmountTokenDecimals
+        );
     }
 
     function minRedeemPreview(
@@ -355,6 +493,13 @@ contract Index is IIndex, ERC20, AccessControl {
         );
     }
 
+    /**
+     * @notice Assume USDC amount is already converted to 18 decimals standard before calling this function
+     * @dev Calculates the fees for a given USDC amount.
+     * @param _usdcAmountIn The amount of USDC to calculate fees for (in 18 decimals).
+     * @return feeAmount The calculated fee amount (in 18 decimals).
+     * @return netUsdcAmount The net USDC amount after deducting fees (in 18 decimals).
+     */
     function _calculateFees(
         uint256 _usdcAmountIn
     ) internal view returns (uint112 feeAmount, uint256 netUsdcAmount) {
@@ -405,20 +550,60 @@ contract Index is IIndex, ERC20, AccessControl {
         return priceNormalized;
     }
 
-    function updateWeights(
+    function proposeUpdateWeights(
         uint112 _newWeightAsset0
     )
         external
         onlyRole(INDEX_MANAGER_ROLE)
         returns (uint256 implementationTimestamp)
     {
-        s_weight0 = _newWeightAsset0;
-        s_weight1 = MAX_PERCENTAGE - _newWeightAsset0;
+        if (
+            s_weightUpdateExecutableAt != 0 &&
+            block.timestamp < s_weightUpdateExecutableAt
+        ) {
+            revert Index__PendingWeightUpdate();
+        }
 
-        //need delay before implementing
-        // @audit-info implement delay before implementing new weights
-        // @audit-info implement function
-        // @audit-info after the delay call rebalance function to rebalance the index according to the new weights
+        bool invalidWeight0 = _newWeightAsset0 >
+            s_weight0 + REBALANCE_THRESHOLD ||
+            _newWeightAsset0 + REBALANCE_THRESHOLD < s_weight0 ||
+            _newWeightAsset0 >= MAX_WEIGHT ||
+            _newWeightAsset0 == 0;
+        if (invalidWeight0) {
+            revert Index__InvalidWeight();
+        }
+
+        s_pendingWeight0 = _newWeightAsset0;
+        s_pendingWeight1 = MAX_PERCENTAGE - _newWeightAsset0;
+        s_weightUpdateExecutableAt = block.timestamp + WEIGHT_UPDATE_DELAY;
+
+        emit WeightsUpdateProposed(
+            s_pendingWeight0,
+            s_pendingWeight1,
+            s_weightUpdateExecutableAt
+        );
+    }
+
+    function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
+        if (
+            s_weightUpdateExecutableAt == 0 ||
+            block.timestamp < s_weightUpdateExecutableAt
+        ) {
+            revert Index__PendingWeightUpdate();
+        }
+
+        s_weight0 = s_pendingWeight0;
+        s_weight1 = s_pendingWeight1;
+
+        // reset pending weights and executable timestamp
+        s_pendingWeight0 = 0;
+        s_pendingWeight1 = 0;
+        s_weightUpdateExecutableAt = 0;
+
+        // rebalance index with new weights
+        rebalanceIndex();
+
+        emit IndexWeightsUpdated(s_weight0, s_weight1, block.timestamp);
     }
 
     function collectFees(
@@ -427,16 +612,18 @@ contract Index is IIndex, ERC20, AccessControl {
         feesCollected = s_totalFees;
         s_totalFees = 0;
         i_usdc.forceApprove(msg.sender, feesCollected);
+
+        emit FeesCollected(_collector, feesCollected);
     }
 
     function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) {
         // all values are in 18 decimals standard for easier calculations
         (
             uint256 priceToken0,
-            uint256 priceToken1,
-            ,
-            ,
-            /*uint112 initialToken0Reserve*/ /*uint112 initialToken1Reserve*/ uint256 token0UsdValue,
+            uint256 priceToken1, 
+            /*uint112 initialToken0Reserve*/ ,
+            /*uint112 initialToken1Reserve*/,
+            uint256 token0UsdValue,
             uint256 token1UsdValue,
             uint256 totalAssetUsdValue
         ) = _initFunctionValues();
@@ -452,13 +639,14 @@ contract Index is IIndex, ERC20, AccessControl {
         }
 
         // calculate the amount of token0 or token1 to swap to rebalance the index according to the target weights of the index
+        (uint112 weight0, uint112 weight1) = getAssetsWeights();
         (uint256 amount0ToSwap, uint256 amount1ToSwap) = UnderlyingMath
             .calculateRebalanceAmounts(
                 totalAssetUsdValue,
                 token0UsdValue,
                 token1UsdValue,
-                s_weight0,
-                s_weight1,
+                weight0,
+                weight1,
                 priceToken0,
                 priceToken1,
                 DECIMALS_STANDARD
@@ -467,7 +655,6 @@ contract Index is IIndex, ERC20, AccessControl {
         //conditional swap
         if (amount0ToSwap > 0) {
             // swap token0 for token1
-
         } else {
             // swap token1 for token0
         }
@@ -491,8 +678,8 @@ contract Index is IIndex, ERC20, AccessControl {
         );
 
         if (
-            weight0 < s_weight0 + REBALANCE_TRESHHOLD ||
-            weight0 > s_weight0 - REBALANCE_TRESHHOLD
+            weight0 < s_weight0 + REBALANCE_THRESHOLD ||
+            weight0 > s_weight0 - REBALANCE_THRESHOLD
         ) {
             return false;
         } else {
@@ -550,13 +737,24 @@ contract Index is IIndex, ERC20, AccessControl {
         uint256 _priceToken1
     ) internal returns (uint112 token0Received, uint112 token1received) {
         // TO BE IMPLEMENTED
-        bool rebalanceNeeded = _checkIfRebalanceNeeded(_token0UsdValueBefore, _token1UsdValueBefore, _totalAssetUsdValueBefore);
+        bool rebalanceNeeded = _checkIfRebalanceNeeded(
+            _token0UsdValueBefore,
+            _token1UsdValueBefore,
+            _totalAssetUsdValueBefore
+        );
         uint256 amount0ToSwap; // 18 decimals
-        uint256 amount1ToSwap;  // 18 decimals
-        if(!rebalanceNeeded){
+        uint256 amount1ToSwap; // 18 decimals
+        if (!rebalanceNeeded) {
             // swap according to index weights
         } else {
-            (uint112 EffectiveWeight0, uint112 EffectiveWeight1) = _getAssetsEffectiveWights(_token0UsdValueBefore, _token1UsdValueBefore, _totalAssetUsdValueBefore);
+            (
+                uint112 EffectiveWeight0,
+                uint112 EffectiveWeight1
+            ) = _getAssetsEffectiveWights(
+                    _token0UsdValueBefore,
+                    _token1UsdValueBefore,
+                    _totalAssetUsdValueBefore
+                );
             // swap according to rebalance needs
         }
         // @audit-info implement function to swap USDC for token0 and token1 according to the weights of the index

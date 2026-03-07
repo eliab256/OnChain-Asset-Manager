@@ -183,7 +183,7 @@ contract IndexManager is IIndexManager, AccessControl {
         }
     }
 
-    function changeWeights(
+    function proposeNewWeights(
         address _indexAddress,
         uint112 _newWeightAsset0 // With 4 decimals, e.g. 50000 = 5%
     ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
@@ -196,9 +196,11 @@ contract IndexManager is IIndexManager, AccessControl {
             .getAssetsWeights();
         uint112 newWeightAsset1 = MAX_PERCENTAGE - _newWeightAsset0;
 
-        uint256 implementationTimestamp = index.updateWeights(_newWeightAsset0);
+        uint256 implementationTimestamp = index.proposeUpdateWeights(
+            _newWeightAsset0
+        );
 
-        emit IndexWeightsChanged(
+        emit NewIndexWeightsProposed(
             _indexAddress,
             msg.sender,
             oldWeightAsset0,
@@ -207,6 +209,76 @@ contract IndexManager is IIndexManager, AccessControl {
             newWeightAsset1,
             implementationTimestamp
         );
+    }
+
+    function executeWeightUpdate(
+        address _indexAddress
+    ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
+        IIndex index = IIndex(_indexAddress);
+        index.executeWeightUpdate();
+    }
+
+    function executeWeightUpdateForMultipleIndexes(
+        address[] calldata _indexAddresses
+    )
+        public
+        onlyRole(ASSET_MANAGER_ROLE)
+        areIndexesInitialized(_indexAddresses)
+    {
+        uint256 length = _indexAddresses.length;
+        for (uint256 i = 0; i < length; i++) {
+            _executeSingleWeightUpdate(_indexAddresses[i]);
+        }
+    }
+
+    function executeWeightUpdateForAllindexes()
+        public
+        onlyRole(ASSET_MANAGER_ROLE)
+    {
+        uint256 length = s_initializedIndexes.length;
+        for (uint256 i = 0; i < length; i++) {
+            (bool success, string memory reason) = _executeSingleWeightUpdate(
+                s_initializedIndexes[i]
+            );
+            if (!success) {
+                emit WeightUpdateFailed(s_initializedIndexes[i], reason);
+            } else {
+                emit WeightUpdateExecuted(s_initializedIndexes[i]);
+            }
+        }
+    }
+
+    function executeWeightUpdateForAllIndexes()
+        public
+        onlyRole(ASSET_MANAGER_ROLE)
+    {
+        uint256 length = s_initializedIndexes.length;
+        for (uint256 i = 0; i < length; i++) {
+            _executeSingleWeightUpdate(s_initializedIndexes[i]);
+            (bool success, string memory reason) = _executeSingleWeightUpdate(
+                s_initializedIndexes[i]
+            );
+            if (!success) {
+                emit WeightUpdateFailed(s_initializedIndexes[i], reason);
+            } else {
+                emit WeightUpdateExecuted(s_initializedIndexes[i]);
+            }
+        }
+    }
+    // @audit-info fare post linkedin su trycatch e revert
+    function _executeSingleWeightUpdate(
+        address _indexAddress
+    ) internal returns (bool success, string memory reason) {
+        IIndex index = IIndex(_indexAddress);
+        try index.executeWeightUpdate() {
+            success = true;
+        } catch Error(string memory _reason) {
+            reason = _reason;
+            success = false;
+        } catch {
+            reason = "Unknown error";
+            success = false;
+        }
     }
 
     /**

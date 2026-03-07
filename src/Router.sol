@@ -52,6 +52,7 @@ contract Router is ReentrancyGuard {
     }
 
     /**
+     * @notice Set Allowance to the index contract to spend Usdc
      * @notice buy exact amount of Usdc and receive shares, tolerance is used to protect users from front-running and price manipulation.
      * @notice If the amount of shares received is less than the minimum amount calculated with tolerance, the transaction will revert.
      * @param _indexAddress The address of the index.
@@ -71,6 +72,8 @@ contract Router is ReentrancyGuard {
     }
 
     /**
+     * @notice Set Allowance to the index contract to spend Shares
+     * @notice MaxTolerance is used to revert the transaction if the tolerance is too high, protecting users from front-running and price manipulation.
      * @notice Sells an exact amount of shares for USDC, tolerance is used to protect users from front-running and price manipulation.
      * @notice If the amount of USDC received is less than the minimum amount calculated with tolerance, the transaction will revert.
      * @param _indexAddress The address of the index.
@@ -88,36 +91,45 @@ contract Router is ReentrancyGuard {
     {
         _sellShares(_indexAddress, _sharesAmount, _maxTolerance);
     }
-
+    /**
+     * @notice User set Allowance to the index contract to spend Usdc
+     * @notice Buy exact amount of Usdc and receive shares, tolerance is used to protect users from front-running and price manipulation.
+     * @notice If the amount of shares received is less than the minimum amount calculated with tolerance, the transaction will revert.
+     * @dev This function may appear superfluous in the current implementation, as it only wraps a direct preview calculation.
+     *   It has been deliberately kept as a separate internal layer to simplify the management of potentially more complex minting
+     *   logic in future iterations (e.g. dynamic fee tiers, multi-asset routing, conditional share pricing).
+     * @param _indexAddress The address of the index.
+     * @param _usdcAmount The amount of USDC to spend.
+     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).
+     */
     function _buyShares(
         address _indexAddress,
         uint256 _usdcAmount,
         uint256 _maxTolerance
     ) internal {
         IIndex index = IIndex(_indexAddress);
-        i_usdc.approve(_indexAddress, _usdcAmount);
-        //@audit-info insex call transferFrom routerContract
         index.mintShares(msg.sender, _usdcAmount, _maxTolerance);
     }
 
+    /**
+     * @notice User set Allowance to the index contract to spend Shares
+     * @notice MaxTolerance is used to revert the transaction if the tolerance is too high, protecting users from front-running and price manipulation.
+     * @notice Sells an exact amount of shares for USDC, tolerance is used to protect users from front-running and price manipulation.
+     * @notice If the amount of USDC received is less than the minimum amount calculated with tolerance, the transaction will revert.
+     * @dev This function may appear superfluous in the current implementation, as it only wraps a direct preview calculation.
+     *   It has been deliberately kept as a separate internal layer to simplify the management of potentially more complex minting
+     *   logic in future iterations (e.g. dynamic fee tiers, multi-asset routing, conditional share pricing).
+     * @param _indexAddress The address of the index.
+     * @param _sharesAmount The amount of shares to sell.
+     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).
+     */
     function _sellShares(
         address _indexAddress,
         uint256 _sharesAmount,
         uint256 _maxTolerance
     ) internal {
         IIndex index = IIndex(_indexAddress);
-        // @audit-issue change transfer logic to optimize gas
-        IERC20(_indexAddress).safeTransferFrom(
-            msg.sender,
-            address(this),
-            _sharesAmount
-        );
-        IERC20(_indexAddress).approve(_indexAddress, _sharesAmount);
-        index.redeem(address(this), _sharesAmount, _maxTolerance);
-
-        // Transfer all received USDC to user
-        uint256 usdcBalance = i_usdc.balanceOf(address(this));
-        i_usdc.safeTransfer(msg.sender, usdcBalance);
+        index.redeem(msg.sender, _sharesAmount, _maxTolerance);
     }
 
     /**
@@ -153,6 +165,9 @@ contract Router is ReentrancyGuard {
      *     99USDC    * (100% - 5%)        = 94.05USDC after tolerance
      * usdcAfterFees * (1 - maxTolerance) = usdcAfterFeesAndTolerance
      * sharesAmount = (usdcAfterFeesAndTolerance * totalShares) / totalAsset
+     * @param _indexAddress The address of the index.
+     * @param _usdcAmount The amount of USDC to spend.
+     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).
      */
     function getMinMintPreview(
         address _indexAddress,
@@ -206,41 +221,3 @@ contract Router is ReentrancyGuard {
         return address(i_usdc);
     }
 }
-
-// /**
-//  * @notice MaxTolerance is used to revert the transaction if the tolerance is too high, protecting users from front-running and price manipulation.
-//  * @dev Buys given amount of shares for a  max USDC amount.
-//  * @param _indexAddress The address of the index.
-//  * @param _sharesAmount The amount of shares to buy.
-//  * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).
-//  */
-// function buyExactAmountOfSharesForUsdc(
-//     address _indexAddress,
-//     uint256 _sharesAmount,
-//     uint256 _maxTolerance
-// )
-//     public
-//     validInputs(_indexAddress, _sharesAmount, _maxTolerance)
-//     nonReentrant
-// {
-//     _buyShares(_indexAddress, 0, _sharesAmount, _maxTolerance);
-// }
-
-//     /**
-//  * @notice Is sellMin and not sellExact because we can't guarantee the exact amount of USDC received for a given shares amount, due to tolerance.
-//  * @notice MaxTolerance is used to revert the transaction if the tolerance is too high, protecting users from front-running and price manipulation.
-//  * @param _indexAddress The address of the index.
-//  * @param _usdcAmount The amount of USDC to receive.
-//  * @param _maxTolerance The maximum tolerance allowed.
-//  */
-// function sellSharesForExactUsdcAmount(
-//     address _indexAddress,
-//     uint256 _usdcAmount,
-//     uint256 _maxTolerance
-// )
-//     public
-//     validInputs(_indexAddress, _usdcAmount, _maxTolerance)
-//     nonReentrant
-// {
-//     _sellShares(_indexAddress, _usdcAmount, 0, _maxTolerance);
-// }

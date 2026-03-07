@@ -5,7 +5,7 @@ import {IndexAsset} from "../types.sol";
 
 interface IIndexManager {
     function setRouterAddress(address _newRouter) external;
-    
+
     function createIndex(
         uint256 feePercentage,
         IndexAsset memory assetA,
@@ -19,18 +19,26 @@ interface IIndexManager {
 
     function rebalanceIndex(address indexAddress) external;
 
-    function changeWeights(
-        address indexAddress,
-        uint112 newWeightAsset0
-    ) external;
-
-    function collectFees(address indexAddress) external;
-
     function rebalanceMultipleIndexes(
         address[] calldata indexAddresses
     ) external;
 
     function rebalanceAllIndexes() external;
+
+    function proposeNewWeights(
+        address indexAddress,
+        uint112 newWeightAsset0
+    ) external;
+
+    function executeWeightUpdate(address indexAddress) external;
+
+    function executeWeightUpdateForMultipleIndexes(
+        address[] calldata indexAddresses
+    ) external;
+
+    function executeWeightUpdateForAllIndexes() external;
+
+    function collectFees(address indexAddress) external;
 
     function collectFeesFromMultipleIndexes(
         address[] calldata indexAddresses
@@ -43,18 +51,18 @@ interface IIndexManager {
         address assetAddressB
     ) external pure returns (address token0, address token1);
 
+    function isIndexAddress(address indexAddress) external view returns (bool);
+
+    function checkIsIndexInitialized(
+        address indexAddress
+    ) external view returns (bool);
+
     function getAllIndexes() external view returns (address[] memory);
 
     function getIndexByAssetsAddresses(
         address assetAddressA,
         address assetAddressB
     ) external view returns (address index);
-
-    function isIndexAddress(address indexAddress) external view returns (bool);
-
-    function checkIsIndexInitialized(
-        address indexAddress
-    ) external view returns (bool);
 
     function getUsdcAddress() external view returns (address);
 

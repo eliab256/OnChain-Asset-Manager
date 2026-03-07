@@ -13,3 +13,5 @@ error Index__DecimalsNotCorrect();
 error Index__TransferFailed(address token, uint256 amount);
 error Index__ToleranceExceeded();
 error Index__RebalanceNotNeeded();
+error Index__InvalidWeight();
+error Index__PendingWeightUpdate();

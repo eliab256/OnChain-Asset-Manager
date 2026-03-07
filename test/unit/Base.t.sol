@@ -57,20 +57,20 @@ contract BaseTest is Test {
         deployerPeriphery = new DeployPeriphery();
         deployAndInitNewIndex = new DeployAndInitNewIndex();
 
-        (indexManager, router, helperConfig, deployer) = deployerPeriphery
+        (indexManager, router, /*helperConfig*/, deployer) = deployerPeriphery
             .run();
 
-        (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
-            .getAssetTokenMocks();
-        (
-            mockWethPriceFeed,
-            mockUsdcPriceFeed,
-            mockWbtcPriceFeed,
-            mockLinkPriceFeed
-        ) = helperConfig.getPriceFeedMocks();
+        // (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
+        //     .getAssetTokenMocks();
+        // (
+        //     mockWethPriceFeed,
+        //     mockUsdcPriceFeed,
+        //     mockWbtcPriceFeed,
+        //     mockLinkPriceFeed
+        // ) = helperConfig.getPriceFeedMocks();
 
-        feeCollector = helperConfig.getFeeCollector();
-        rebalancer = helperConfig.getRebalancer();
+        // feeCollector = helperConfig.getFeeCollector();
+        // rebalancer = helperConfig.getRebalancer();
 
         vm.label(deployer, "assetManager");
         vm.label(feeCollector, "feeCollector");
