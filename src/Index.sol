@@ -611,7 +611,7 @@ contract Index is IIndex, ERC20, AccessControl {
     ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
         feesCollected = s_totalFees;
         s_totalFees = 0;
-        i_usdc.forceApprove(msg.sender, feesCollected);
+        i_usdc.safeTransfer(_collector, feesCollected);
 
         emit FeesCollected(_collector, feesCollected);
     }

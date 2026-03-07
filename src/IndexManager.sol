@@ -34,6 +34,7 @@ contract IndexManager is IIndexManager, AccessControl {
     mapping(address => bool) private s_isInitialized;
     IERC20 internal immutable i_usdc;
     address internal s_router;
+    uint256 private s_totalFeesCollected;
 
     modifier isIndexInitialized(address indexAddress) {
         _isIndexInitialized(indexAddress);
@@ -54,10 +55,16 @@ contract IndexManager is IIndexManager, AccessControl {
         grantRole(REBALANCER_ROLE, msg.sender);
     }
 
+    /**
+     * @notice Sets the address of the router contract.
+     * @param _newRouter The address of the new router contract.
+     */
     function setRouterAddress(
         address _newRouter
     ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         s_router = _newRouter;
+
+        emit RouterAddressSet(_newRouter, msg.sender);
     }
 
     /**
@@ -129,6 +136,11 @@ contract IndexManager is IIndexManager, AccessControl {
         return (index, asset0.asset, asset1.asset);
     }
 
+    /**
+     * @notice Initializes the specified index with the given underlying amount.
+     * @param _indexAddress The address of the index to initialize.
+     * @param _underlyingAmount0 The amount of the first underlying asset to initialize the index with.
+     */
     function initializeIndex(
         address _indexAddress,
         uint256 _underlyingAmount0
@@ -154,35 +166,60 @@ contract IndexManager is IIndexManager, AccessControl {
     function rebalanceIndex(
         address _indexAddress
     ) public isIndexInitialized(_indexAddress) onlyRole(REBALANCER_ROLE) {
-        IIndex(_indexAddress).rebalanceIndex();
-
-        emit IndexRebalanced(_indexAddress, msg.sender);
+        (bool success, string memory reason) = _rebalanceSingleIndex(_indexAddress);
+        if (!success) {
+            emit IndexRebalanceFailed(_indexAddress, reason);
+        } else {
+            emit IndexRebalanced(_indexAddress, msg.sender);
+        }
     }
 
     /**
      * @notice Allows to rebalance multiple indexes in a single transaction, instead of having to call rebalanceIndex multiple times.
      * @notice Less Gas efficient than rebalanceAllIndexes, because check if is initialized for each index.
      * @dev If one of the call fails, the entire transaction will revert
+     * @param _indexAddresses An array of index addresses to rebalance.
      */
     function rebalanceMultipleIndexes(
         address[] calldata _indexAddresses
     ) public onlyRole(REBALANCER_ROLE) areIndexesInitialized(_indexAddresses) {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
-            IIndex(_indexAddresses[i]).rebalanceIndex();
-            emit IndexRebalanced(_indexAddresses[i], msg.sender);
+            (bool success, string memory reason) = _rebalanceSingleIndex(
+                _indexAddresses[i]
+            );
+            if (!success) {
+                emit IndexRebalanceFailed(_indexAddresses[i], reason);
+            } else {
+                emit IndexRebalanced(_indexAddresses[i], msg.sender);
+            }
         }
     }
 
+    /**
+     * @notice Rebalances all initialized indexes.
+     * @dev Less Gas efficient than rebalanceMultipleIndexes, because check if is initialized for each index.
+     */
     function rebalanceAllIndexes() public onlyRole(REBALANCER_ROLE) {
         uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
             address indexAddress = s_initializedIndexes[i];
-            IIndex(indexAddress).rebalanceIndex();
-            emit IndexRebalanced(indexAddress, msg.sender);
+            (bool success, string memory reason) = _rebalanceSingleIndex(
+                indexAddress
+            );
+            if (!success) {
+                emit IndexRebalanceFailed(indexAddress, reason);
+            } else {
+                emit IndexRebalanced(indexAddress, msg.sender);
+            }
         }
     }
 
+    /**
+     * @notice Proposes new weights for the specified index.
+     * @param _indexAddress The address of the index to propose new weights for.
+     * @param _newWeightAsset0 The new weight for the first asset, with 4 decimals (e.g., 50000 = 5%).
+     */
     function proposeNewWeights(
         address _indexAddress,
         uint112 _newWeightAsset0 // With 4 decimals, e.g. 50000 = 5%
@@ -211,13 +248,28 @@ contract IndexManager is IIndexManager, AccessControl {
         );
     }
 
+    /**
+     * @notice Executes the weight update for the specified index.
+     * @param _indexAddress The address of the index to execute the weight update for.
+     */
     function executeWeightUpdate(
         address _indexAddress
     ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
-        IIndex index = IIndex(_indexAddress);
-        index.executeWeightUpdate();
+        (bool success, string memory reason) = _executeSingleWeightUpdate(
+            _indexAddress
+        );
+        if (!success) {
+            emit WeightUpdateFailed(_indexAddress, reason);
+        } else {
+            emit WeightUpdateExecuted(_indexAddress);
+        }
     }
 
+    /**
+     * @notice Executes the weight update for multiple indexes.
+     * @dev If one of the call fails, the entire transaction will not revert
+     * @param _indexAddresses An array of index addresses to execute the weight update for.
+     */
     function executeWeightUpdateForMultipleIndexes(
         address[] calldata _indexAddresses
     )
@@ -231,30 +283,16 @@ contract IndexManager is IIndexManager, AccessControl {
         }
     }
 
-    function executeWeightUpdateForAllindexes()
-        public
-        onlyRole(ASSET_MANAGER_ROLE)
-    {
-        uint256 length = s_initializedIndexes.length;
-        for (uint256 i = 0; i < length; i++) {
-            (bool success, string memory reason) = _executeSingleWeightUpdate(
-                s_initializedIndexes[i]
-            );
-            if (!success) {
-                emit WeightUpdateFailed(s_initializedIndexes[i], reason);
-            } else {
-                emit WeightUpdateExecuted(s_initializedIndexes[i]);
-            }
-        }
-    }
-
+    /**
+     * @notice Executes the weight update for all initialized indexes.
+     * @dev If one of the call fails, the entire transaction will not revert
+     */
     function executeWeightUpdateForAllIndexes()
         public
         onlyRole(ASSET_MANAGER_ROLE)
     {
         uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
-            _executeSingleWeightUpdate(s_initializedIndexes[i]);
             (bool success, string memory reason) = _executeSingleWeightUpdate(
                 s_initializedIndexes[i]
             );
@@ -263,21 +301,6 @@ contract IndexManager is IIndexManager, AccessControl {
             } else {
                 emit WeightUpdateExecuted(s_initializedIndexes[i]);
             }
-        }
-    }
-    // @audit-info fare post linkedin su trycatch e revert
-    function _executeSingleWeightUpdate(
-        address _indexAddress
-    ) internal returns (bool success, string memory reason) {
-        IIndex index = IIndex(_indexAddress);
-        try index.executeWeightUpdate() {
-            success = true;
-        } catch Error(string memory _reason) {
-            reason = _reason;
-            success = false;
-        } catch {
-            reason = "Unknown error";
-            success = false;
         }
     }
 
@@ -288,13 +311,17 @@ contract IndexManager is IIndexManager, AccessControl {
     function collectFees(
         address _indexAddress
     ) public isIndexInitialized(_indexAddress) onlyRole(FEE_COLLECTOR_ROLE) {
-        IIndex index = IIndex(_indexAddress);
-
-        //This Function set allowance and approve this contract, returns fees amount to be collected
-        uint256 feeAmount = index.collectFees(msg.sender);
-        i_usdc.safeTransferFrom(_indexAddress, msg.sender, feeAmount);
-
-        emit FeesCollected(_indexAddress, msg.sender, feeAmount);
+        (
+            uint256 feeAmount,
+            bool success,
+            string memory reason
+        ) = _collectFeesFroSingleIndex(_indexAddress, msg.sender);
+        if (success) {
+            s_totalFeesCollected += feeAmount;
+            emit FeesCollected(_indexAddress, msg.sender, feeAmount);
+        } else {
+            emit FeesCollectionFailed(_indexAddress, msg.sender, reason);
+        }
     }
 
     /**
@@ -310,24 +337,46 @@ contract IndexManager is IIndexManager, AccessControl {
         areIndexesInitialized(_indexAddresses)
     {
         uint256 length = _indexAddresses.length;
+        uint256 totalFeesCollected = 0;
         for (uint256 i = 0; i < length; i++) {
             address indexAddress = _indexAddresses[i];
-            IIndex index = IIndex(indexAddress);
-            uint256 feeAmount = index.collectFees(msg.sender);
-            i_usdc.safeTransferFrom(indexAddress, msg.sender, feeAmount);
-            emit FeesCollected(indexAddress, msg.sender, feeAmount);
+            (
+                uint256 feeAmount,
+                bool success,
+                string memory reason
+            ) = _collectFeesFroSingleIndex(indexAddress, msg.sender);
+            if (success) {
+                totalFeesCollected += feeAmount;
+                emit FeesCollected(indexAddress, msg.sender, feeAmount);
+            } else {
+                emit FeesCollectionFailed(indexAddress, msg.sender, reason);
+            }
         }
+        s_totalFeesCollected += totalFeesCollected;
     }
 
+    /**
+     * @notice Collects fees from all initialized indexes and transfers them to the caller.
+     * @dev If one of the call fails, the entire transaction will not revert
+     */
     function collectFeesFromAllIndexes() public onlyRole(FEE_COLLECTOR_ROLE) {
         uint256 length = s_initializedIndexes.length;
+        uint256 totalFeesCollected = 0;
         for (uint256 i = 0; i < length; i++) {
             address indexAddress = s_initializedIndexes[i];
-            IIndex index = IIndex(indexAddress);
-            uint256 feeAmount = index.collectFees(msg.sender);
-            i_usdc.safeTransferFrom(indexAddress, msg.sender, feeAmount);
-            emit FeesCollected(indexAddress, msg.sender, feeAmount);
+            (
+                uint256 feeAmount,
+                bool success,
+                string memory reason
+            ) = _collectFeesFroSingleIndex(indexAddress, msg.sender);
+            if (success) {
+                totalFeesCollected += feeAmount;
+                emit FeesCollected(indexAddress, msg.sender, feeAmount);
+            } else {
+                emit FeesCollectionFailed(indexAddress, msg.sender, reason);
+            }
         }
+        s_totalFeesCollected += totalFeesCollected;
     }
 
     /**
@@ -368,12 +417,20 @@ contract IndexManager is IIndexManager, AccessControl {
         return s_isInitialized[indexAddress];
     }
 
+    /**
+     * @dev Checks if an index is initialized and reverts if it is not
+     * @param indexAddress Address of the index to check
+     */
     function _isIndexInitialized(address indexAddress) internal view {
         if (!s_isInitialized[indexAddress]) {
             revert IndexManager__NotIndexInitialized();
         }
     }
 
+    /**
+     * @dev Checks if multiple indexes are initialized and reverts if any of them are not
+     * @param indexAddresses Addresses of the indexes to check
+     */
     function _areIndexesInitialized(
         address[] calldata indexAddresses
     ) internal view {
@@ -385,6 +442,14 @@ contract IndexManager is IIndexManager, AccessControl {
         }
     }
 
+    /**
+     * @dev Deploys a new index contract with the specified assets, fee percentage, and USDC address.
+     * @param _asset0 The first asset of the index.
+     * @param _asset1 The second asset of the index.
+     * @param _feePercentage The fee percentage for the index.
+     * @param _usdcAddress The address of the USDC token.
+     * @return index The address of the newly deployed index contract.
+     */
     function _deployIndex(
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
@@ -458,6 +523,80 @@ contract IndexManager is IIndexManager, AccessControl {
     }
 
     /**
+     * @notice This function is used internally by rebalanceMultipleIndexes and rebalanceAllIndexes to handle rebalance for each index, allowing for error handling 
+     * on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
+     * @dev Rebalances a single index and returns whether it was successful and the reason if it failed.
+     * @param _indexAddress The address of the index to rebalance.
+     * @return success A boolean indicating whether the rebalance was successful.
+     * @return reason A string containing the reason for failure if the rebalance was not successful, or "Unknown error" if the reason could not be determined.
+     */
+    function _rebalanceSingleIndex(
+        address _indexAddress
+    ) internal returns (bool success, string memory reason) {
+        try IIndex(_indexAddress).rebalanceIndex() {
+            return (true, "");
+        } catch Error(string memory _reason) {
+            return (false, _reason);
+        } catch {
+            return (false, "Unknown error");
+        }
+    }
+
+    /**
+     * @notice Collects fees from a single index and transfers them to the specified fee collector address.
+     * @notice This function is used internally by collectFeesFromMultipleIndexes and collectFeesFromAllIndexes to handle fee collection for each index, allowing for error handling on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
+     * @param _indexAddress The address of the index from which to collect fees.
+     * @param _feeCollector The address to which the collected fees should be transferred.
+     * @return feeAmount The amount of fees collected from the index.
+     * @return success A boolean indicating whether the fee collection and transfer were successful.
+     * @return reason A string containing the reason for failure if the fee collection or transfer was not successful, or "Unknown error" if the reason could not be determined.
+     */
+    // @audit-info fare post linkedin su trycatch e revert
+    function _collectFeesFroSingleIndex(
+        address _indexAddress,
+        address _feeCollector
+    ) internal returns (uint256 feeAmount, bool success, string memory reason) {
+        IIndex index = IIndex(_indexAddress);
+        try index.collectFees(_feeCollector) returns (uint256 collectedFees) {
+            feeAmount = collectedFees;
+            success = true;
+            reason = "";
+        } catch Error(string memory _reason) {
+            feeAmount = 0;
+            success = false;
+            reason = _reason;
+        } catch {
+            feeAmount = 0;
+            success = false;
+            reason = "Unknown error";
+        }
+    }
+
+    /**
+     * @dev Executes the weight update for a single index and returns whether it was successful and the reason if it failed.
+     * @param _indexAddress The address of the index to execute the weight update for.
+     * @return success A boolean indicating whether the weight update was successful.
+     * @return reason A string containing the reason for failure if the weight update was not successful, or "Unknown error" if the reason could not be determined.
+     * @notice This function uses try-catch to handle potential errors during the execution of the weight update. If an error occurs, it captures the error message and returns it along with a success flag set to false. If the call succeeds, it returns true with an empty reason.
+     * @notice This approach allows the contract to attempt weight updates on multiple indexes without reverting the entire transaction if one of them fails, while still providing feedback on which updates were successful and which were not.
+     */
+    // @audit-info fare post linkedin su trycatch e revert
+    function _executeSingleWeightUpdate(
+        address _indexAddress
+    ) internal returns (bool success, string memory reason) {
+        IIndex index = IIndex(_indexAddress);
+        try index.executeWeightUpdate() {
+            success = true;
+        } catch Error(string memory _reason) {
+            reason = _reason;
+            success = false;
+        } catch {
+            reason = "Unknown error";
+            success = false;
+        }
+    }
+
+    /**
      * @dev Returns the address of the USDC token used by the index manager
      * @return address The address of the USDC token
      */
@@ -465,6 +604,10 @@ contract IndexManager is IIndexManager, AccessControl {
         return address(i_usdc);
     }
 
+    /**
+     * @dev Returns the address of the router used by the index manager
+     * @return address The address of the router
+     */
     function getRouterAddress() public view returns (address) {
         return s_router;
     }
@@ -496,5 +639,13 @@ contract IndexManager is IIndexManager, AccessControl {
      */
     function getAllIndexes() public view returns (address[] memory) {
         return s_indexes;
+    }
+
+    /**
+     * @dev Returns the total fees collected by the index manager
+     * @return uint256 The total fees collected
+     */
+    function getTotalFeesCollected() public view returns (uint256) {
+        return s_totalFeesCollected;
     }
 }
