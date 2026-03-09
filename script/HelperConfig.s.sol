@@ -9,9 +9,9 @@ import {AssetTokenMock} from "../test/mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
-import {IndexAsset, TokenAvailable} from "../src/types.sol";
+import {IndexAsset, AssetAvailable} from "../src/types.sol";
 
-struct TokenConfig {
+struct AssetConfig {
     address token;
     address priceFeed;
 }
@@ -29,8 +29,8 @@ contract HelperConfig is CodeConstants, Script {
 
     NetworkConfig public activeNetworkConfig;
 
-    mapping(TokenAvailable => mapping(uint256 => TokenConfig))
-        public tokenConfigByChainId;
+    mapping(AssetAvailable => mapping(uint256 => AssetConfig))
+        public assetConfigByChainId;
 
     /**
      * @notice Initializes HelperConfig and sets active network configuration based on current chain
@@ -54,40 +54,40 @@ contract HelperConfig is CodeConstants, Script {
         return activeNetworkConfig;
     }
 
-    function getActiveTokenConfig(
-        TokenAvailable token
-    ) public view returns (TokenConfig memory) {
-        return tokenConfigByChainId[token][block.chainid];
+    function getActiveAssetConfig(
+        AssetAvailable asset
+    ) public view returns (AssetConfig memory) {
+        return assetConfigByChainId[asset][block.chainid];
     }
     /**
      * @notice Returns network configuration for Sepolia testnet
      * @return NetworkConfig Configuration struct with Sepolia testnet parameters
      */
     function getSepoliaConfig() public returns (NetworkConfig memory) {
-        tokenConfigByChainId[TokenAvailable.USDC][
+        assetConfigByChainId[AssetAvailable.USDC][
             SEPOLIA_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: USDC_SEPOLIA,
             priceFeed: USDC_USD_PRICEFEED_SEPOLIA
         });
 
-        tokenConfigByChainId[TokenAvailable.WETH][
+        assetConfigByChainId[AssetAvailable.WETH][
             SEPOLIA_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: WETH_SEPOLIA,
             priceFeed: WETH_USD_PRICEFEED_SEPOLIA
         });
 
-        tokenConfigByChainId[TokenAvailable.WBTC][
+        assetConfigByChainId[AssetAvailable.WBTC][
             SEPOLIA_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: WBTC_SEPOLIA,
             priceFeed: WBTC_USD_PRICEFEED_SEPOLIA
         });
 
-        tokenConfigByChainId[TokenAvailable.LINK][
+        assetConfigByChainId[AssetAvailable.LINK][
             SEPOLIA_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: LINK_SEPOLIA,
             priceFeed: LINK_USD_PRICEFEED_SEPOLIA
         });
@@ -139,30 +139,30 @@ contract HelperConfig is CodeConstants, Script {
             int256(7 * 10 ** PRICE_FEED_DECIMALS)
         );
 
-        tokenConfigByChainId[TokenAvailable.USDC][
+        assetConfigByChainId[AssetAvailable.USDC][
             ANVIL_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: address(mockUsdc),
             priceFeed: address(mockUsdcPriceFeed)
         });
 
-        tokenConfigByChainId[TokenAvailable.WETH][
+        assetConfigByChainId[AssetAvailable.WETH][
             ANVIL_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: address(mockWeth),
             priceFeed: address(mockWethPriceFeed)
         });
 
-        tokenConfigByChainId[TokenAvailable.WBTC][
+        assetConfigByChainId[AssetAvailable.WBTC][
             ANVIL_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: address(mockWbtc),
             priceFeed: address(mockWbtcPriceFeed)
         });
 
-        tokenConfigByChainId[TokenAvailable.LINK][
+        assetConfigByChainId[AssetAvailable.LINK][
             ANVIL_CHAIN_ID
-        ] = TokenConfig({
+        ] = AssetConfig({
             token: address(mockLink),
             priceFeed: address(mockLinkPriceFeed)
         });
@@ -212,17 +212,17 @@ contract HelperConfig is CodeConstants, Script {
         view
         returns (AssetTokenMock, MockUSDC, AssetTokenMock, AssetTokenMock)
     {
-        TokenConfig memory usdcConfig = getActiveTokenConfig(
-            TokenAvailable.USDC
+        AssetConfig memory usdcConfig = getActiveAssetConfig(
+            AssetAvailable.USDC
         );
-        TokenConfig memory wethConfig = getActiveTokenConfig(
-            TokenAvailable.WETH
+        AssetConfig memory wethConfig = getActiveAssetConfig(
+            AssetAvailable.WETH
         );
-        TokenConfig memory wbtcConfig = getActiveTokenConfig(
-            TokenAvailable.WBTC
+        AssetConfig memory wbtcConfig = getActiveAssetConfig(
+            AssetAvailable.WBTC
         );
-        TokenConfig memory linkConfig = getActiveTokenConfig(
-            TokenAvailable.LINK
+        AssetConfig memory linkConfig = getActiveAssetConfig(
+            AssetAvailable.LINK
         );
 
         return (
@@ -243,17 +243,17 @@ contract HelperConfig is CodeConstants, Script {
             MockV3Aggregator
         )
     {
-        TokenConfig memory usdcConfig = getActiveTokenConfig(
-            TokenAvailable.USDC
+        AssetConfig memory usdcConfig = getActiveAssetConfig(
+            AssetAvailable.USDC
         );
-        TokenConfig memory wethConfig = getActiveTokenConfig(
-            TokenAvailable.WETH
+        AssetConfig memory wethConfig = getActiveAssetConfig(
+            AssetAvailable.WETH
         );
-        TokenConfig memory wbtcConfig = getActiveTokenConfig(
-            TokenAvailable.WBTC
+        AssetConfig memory wbtcConfig = getActiveAssetConfig(
+            AssetAvailable.WBTC
         );
-        TokenConfig memory linkConfig = getActiveTokenConfig(
-            TokenAvailable.LINK
+        AssetConfig memory linkConfig = getActiveAssetConfig(
+            AssetAvailable.LINK
         );
 
         return (

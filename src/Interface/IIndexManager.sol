@@ -67,4 +67,6 @@ interface IIndexManager {
     function getUsdcAddress() external view returns (address);
 
     function getRouterAddress() external view returns (address);
+
+    function getTotalFeesCollected() external view returns (uint256);
 }

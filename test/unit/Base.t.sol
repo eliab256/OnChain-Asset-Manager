@@ -14,7 +14,7 @@ import {AssetTokenMock} from "../mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
-import {IndexAsset, TokenAvailable} from "../../src/types.sol";
+import {IndexAsset, AssetAvailable} from "../../src/types.sol";
 
 contract BaseTest is Test {
     DeployPeriphery public deployerPeriphery;

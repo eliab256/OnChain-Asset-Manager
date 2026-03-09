@@ -27,4 +27,13 @@ library SharesMath {
                 _totalShares;
         }
     }
+
+    function calculateNetAmountFromTolerance(
+        uint256 _amount,
+        uint256 _tolerance,
+        uint256 _maxPercentage
+    ) internal pure returns (uint256 netAmount) {
+        netAmount = (_amount * (_maxPercentage - _tolerance)) /
+            _maxPercentage;
+    }
 }

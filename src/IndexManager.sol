@@ -580,7 +580,6 @@ contract IndexManager is IIndexManager, AccessControl {
      * @notice This function uses try-catch to handle potential errors during the execution of the weight update. If an error occurs, it captures the error message and returns it along with a success flag set to false. If the call succeeds, it returns true with an empty reason.
      * @notice This approach allows the contract to attempt weight updates on multiple indexes without reverting the entire transaction if one of them fails, while still providing feedback on which updates were successful and which were not.
      */
-    // @audit-info fare post linkedin su trycatch e revert
     function _executeSingleWeightUpdate(
         address _indexAddress
     ) internal returns (bool success, string memory reason) {
