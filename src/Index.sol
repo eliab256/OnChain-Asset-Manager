@@ -38,6 +38,7 @@ contract Index is IIndex, ERC20, AccessControl {
 
     AggregatorV3Interface internal immutable i_asset0PriceFeed;
     AggregatorV3Interface internal immutable i_asset1PriceFeed;
+    AggregatorV3Interface internal immutable i_usdcPriceFeed;
 
     uint256 public constant GRACE_PERIOD = 1 days;
     uint256 public constant MAX_DELAY = 1 hours;
@@ -79,6 +80,7 @@ contract Index is IIndex, ERC20, AccessControl {
         string memory _symbol,
         address _router,
         address _usdcAddress,
+        address _usdcPricefeed,
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
         uint32 _feePercentage
@@ -94,6 +96,7 @@ contract Index is IIndex, ERC20, AccessControl {
 
         i_asset0PriceFeed = AggregatorV3Interface(_asset0.priceFeed);
         i_asset1PriceFeed = AggregatorV3Interface(_asset1.priceFeed);
+        i_usdcPriceFeed = AggregatorV3Interface(_usdcPricefeed);
 
         i_decimals0 = IERC20Metadata(_asset0.asset).decimals();
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
@@ -200,6 +203,7 @@ contract Index is IIndex, ERC20, AccessControl {
         (
             initState.priceAsset0,
             initState.priceAsset1,
+            initState.priceUsdc,
             initState.initialAsset0Reserve,
             initState.initialAsset1Reserve,
             initState.asset0UsdValue,
@@ -210,11 +214,13 @@ contract Index is IIndex, ERC20, AccessControl {
         // Scope 2: Process fees
         uint256 netUsdcAmount;
         {
+            // 2.1 Normalize USDC amount to 18 decimals standard for easier calculations
             uint256 usdcAmountInNormalized = _convertToDecimalStandard(
                 _usdcAmountIn,
                 i_decimalsUsdc
             );
 
+            // 2.2 Calculate protocol fees on the USDC amount to mint shares and update total fees accrued
             uint112 feeAmount;
             (feeAmount, netUsdcAmount) = _calculateFees(usdcAmountInNormalized);
             s_totalFees += feeAmount;
@@ -239,6 +245,7 @@ contract Index is IIndex, ERC20, AccessControl {
                 uint256 usdcAmount0ToSwap,
                 uint256 usdcAmount1ToSwap
             ) = UnderlyingMath.calculateDepositAllocationInUsd(
+                    // @audit-info conviene calcolare effective weight dentro la library?
                     initState.totalAssetUsdValue,
                     netUsdcAmount,
                     weight0,
@@ -293,14 +300,14 @@ contract Index is IIndex, ERC20, AccessControl {
             }
         }
 
-        // 5 Mint shares to the user
+        // 5. Mint shares to the user
         _mint(_to, sharesToMint);
 
-        // 6  update reserves
+        // 6. Update reserves
         s_asset0Reserve += asset0Received;
         s_asset1Reserve += asset1Received;
 
-        // 7  Emit mint event
+        // 7. Emit mint event
         emit Deposit(
             _to,
             _usdcAmountIn,
@@ -359,7 +366,7 @@ contract Index is IIndex, ERC20, AccessControl {
             .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
 
         //4. Calculate the amount of shares to mint with the minimum USD amount after fees and tolerance, based on the current index state
-        (, , , , , , uint256 totalAssetUsdValue) = _initFunctionValues();
+        (, , , , , , , uint256 totalAssetUsdValue) = _initFunctionValues();
         minimumSharesToMint = _mintPreview(
             minimumUsdAmount,
             totalAssetUsdValue
@@ -393,6 +400,7 @@ contract Index is IIndex, ERC20, AccessControl {
         (
             initState.priceAsset0,
             initState.priceAsset1,
+            initState.priceUsdc,
             initState.initialAsset0Reserve,
             initState.initialAsset1Reserve,
             initState.asset0UsdValue,
@@ -406,24 +414,36 @@ contract Index is IIndex, ERC20, AccessControl {
             totalSupply()
         );
 
+        // 3. Scope: swap underlying assets for USDC
         uint112 asset0AmountToRedeem;
         uint112 asset1AmountToRedeem;
-        // 3. Get asset weights and calculate the amount of asset0 and asset1 to swap based on the current index state and the USD value of the shares to redeem
-        // @audit-issue implement redeem function
-        // 4. Swap asset0 and asset1 for USDC according to the weights of the index, calculate the total amount of USDC received from the swap
-        // 5. Scope: Calculate net USDC amount after fees
-        uint256 netUsdcAmount;
+        uint256 usdcReceived;
         {
-            // 5.1. Normalize USDC amount received to 18 decimals standard for easier calculations
-            uint256 usdcReceivedNormalized = _convertToDecimalStandard(
-                0, // @audit-issue replace with the USDC amount received from the swap
-                i_decimalsUsdc
+            // 3.1 Get asset weights and effective weights before swap
+            (uint112 weight0, uint112 weight1) = getAssetsWeights();
+            (uint112 effectiveWeight0, ) = _getAssetsEffectiveWights(
+                initState.asset0UsdValue,
+                initState.asset1UsdValue,
+                initState.totalAssetUsdValue
             );
-            // 5.2. Calculate protocol fees on the USDC amount received from the swap
-            uint112 feeAmount;
-            (feeAmount, netUsdcAmount) = _calculateFees(usdcReceivedNormalized);
-            s_totalFees += feeAmount;
+
+            // 3.2 Calculate the amount of asset0 and asset1 to swap for USDC
+            (uint256 asset0UsdToSwap, uint256 asset1UsdToSwap) = UnderlyingMath // audit-info conviene calcolare effective weight dentro la library?
+                .calculateWithdrawUnderlyingAmountsInUsd(
+                    initState.totalAssetUsdValue,
+                    sharesBurnUsdValue,
+                    weight0,
+                    weight1,
+                    effectiveWeight0
+                );
+            // 4. Swap asset0 and asset1 for USDC according to the weights of the index, calculate the total amount of USDC received from the swap
+            usdcReceived = _swapAssetsForUsdc(asset0UsdToSwap, asset1UsdToSwap);
         }
+        // 5. Calculate net USDC amount after fees  on the USDC amount received from the swap
+
+        (uint112 feeAmount, uint256 netUsdcAmount) = _calculateFees(
+            usdcReceived
+        );
 
         // 6. Scope: Validate tolerance
         {
@@ -451,9 +471,10 @@ contract Index is IIndex, ERC20, AccessControl {
             }
         }
 
-        // 7. Update reserves
+        // 7. Update reserves and total fees accrued
         s_asset0Reserve -= asset0AmountToRedeem;
         s_asset1Reserve -= asset1AmountToRedeem;
+        s_totalFees += feeAmount;
 
         // 8 Convert USDC to its decimals before transfer
         uint256 netUsdcAmountTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
@@ -541,6 +562,8 @@ contract Index is IIndex, ERC20, AccessControl {
             feed = i_asset0PriceFeed;
         } else if (_asset == address(i_asset1)) {
             feed = i_asset1PriceFeed;
+        } else if (_asset == address(i_usdc)) {
+            feed = i_usdcPriceFeed;
         } else {
             revert Index__AssetNotSupported();
         }
@@ -641,53 +664,72 @@ contract Index is IIndex, ERC20, AccessControl {
     }
 
     function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) {
-        // all values are in 18 decimals standard for easier calculations
+        // 1. Struct to cache inital state values
+        InitStateCache memory initState;
         (
-            uint256 priceToken0,
-            uint256 priceToken1,
+            initState.priceAsset0,
+            initState.priceAsset1,
             ,
-            ,
-            /*uint112 initialToken0Reserve*/ /*uint112 initialToken1Reserve*/ uint256 token0UsdValue,
-            uint256 token1UsdValue,
-            uint256 totalAssetUsdValue
+            initState.initialAsset0Reserve,
+            initState.initialAsset1Reserve,
+            initState.asset0UsdValue,
+            initState.asset1UsdValue,
+            initState.totalAssetUsdValue
         ) = _initFunctionValues();
 
-        //get effective weights before rebalance
-        bool rebalanceNeeded = _checkIfRebalanceNeeded(
-            token0UsdValue,
-            token1UsdValue,
-            totalAssetUsdValue
-        );
-        if (!rebalanceNeeded) {
-            revert Index__RebalanceNotNeeded();
+        // 2. Scope: Check if rebalance is needed, if not revert
+        {
+            bool rebalanceNeeded = _checkIfRebalanceNeeded(
+                initState.asset0UsdValue,
+                initState.asset1UsdValue,
+                initState.totalAssetUsdValue
+            );
+            if (!rebalanceNeeded) {
+                revert Index__RebalanceNotNeeded();
+            }
         }
 
-        // calculate the amount of token0 or token1 to swap to rebalance the index according to the target weights of the index
+        // 3. Calculate the amount of token0 or token1 to swap to rebalance the index according to the target weights of the index
         (uint112 weight0, uint112 weight1) = getAssetsWeights();
         (uint256 amount0ToSwap, uint256 amount1ToSwap) = UnderlyingMath
             .calculateRebalanceAmounts(
-                totalAssetUsdValue,
-                token0UsdValue,
-                token1UsdValue,
+                initState.totalAssetUsdValue,
+                initState.asset0UsdValue,
+                initState.asset1UsdValue,
                 weight0,
                 weight1,
-                priceToken0,
-                priceToken1,
+                initState.priceAsset0,
+                initState.priceAsset1,
                 DECIMALS_STANDARD
             );
 
-        //conditional swap
+        // 4. Conditional swap and reserve updates
         if (amount0ToSwap > 0) {
             // swap token0 for token1
+            uint112 token1Received = _swapAssetForAsset(
+                address(i_asset0),
+                amount0ToSwap
+            );
+            s_asset0Reserve -= amount0ToSwap.toUint112();
+            s_asset1Reserve += token1Received;
         } else {
             // swap token1 for token0
+            uint112 token0Received = _swapAssetForAsset(
+                address(i_asset1),
+                amount1ToSwap
+            );
+            s_asset1Reserve -= amount1ToSwap.toUint112();
+            s_asset0Reserve += token0Received;
         }
 
-        //update reserves
-        // emit event
-
-        // @audit-info implement function to rebalance the index according to the current weights of the index
-        // @audit-info this function should use a DEX aggregator to get the best price for the swap and minimize the slippage
+        // 5. Emit event
+        emit IndexRebalanced(
+            initState.initialAsset0Reserve,
+            initState.initialAsset1Reserve,
+            s_asset0Reserve,
+            s_asset1Reserve,
+            block.timestamp
+        );
     }
 
     function _checkIfRebalanceNeeded(
@@ -714,6 +756,7 @@ contract Index is IIndex, ERC20, AccessControl {
      * @dev Initializes the function values to avoid multiple external calls and storage reads.
      * @return priceAsset0 The price of asset0 in USD with 18 decimals.
      * @return priceAsset1 The price of asset1 in USD with 18 decimals.
+     * @return priceUsdc The price of USDC in USD with 18 decimals.
      * @return initialAsset0Reserve The initial reserve of asset0.
      * @return initialAsset1Reserve The initial reserve of asset1.
      * @return asset0UsdValue The USD value of asset0.
@@ -726,6 +769,7 @@ contract Index is IIndex, ERC20, AccessControl {
         returns (
             uint256 priceAsset0,
             uint256 priceAsset1,
+            uint256 priceUsdc,
             uint112 initialAsset0Reserve,
             uint112 initialAsset1Reserve,
             uint256 asset0UsdValue,
@@ -736,6 +780,7 @@ contract Index is IIndex, ERC20, AccessControl {
         // call price feed to get the price of asset0 and asset1 in USD with 18 decimals
         priceAsset0 = getLatestPrice(address(i_asset0));
         priceAsset1 = getLatestPrice(address(i_asset1));
+        priceUsdc = getLatestPrice(address(i_usdc));
 
         // get the initial reserves of asset0 and asset1 from storage
         (initialAsset0Reserve, initialAsset1Reserve) = getAssetsAmount();
@@ -769,7 +814,7 @@ contract Index is IIndex, ERC20, AccessControl {
             );
 
         // 2. Make Swap
-        // @audit-info implement swap
+        // @audit-info implement swap with slippage protection
         uint256 assetReceivedTokenDecimals;
         // 3. Convert the received asset amount to 18 decimals standard
         uint8 assetDecimals = _swapFor == address(i_asset0)
@@ -777,6 +822,78 @@ contract Index is IIndex, ERC20, AccessControl {
             : i_decimals1;
         assetReceived = _convertToDecimalStandard(
             assetReceivedTokenDecimals,
+            assetDecimals
+        ).toUint112();
+    }
+
+    function _swapAssetsForUsdc(
+        uint256 _asset0UsdToSwap,
+        uint256 _asset1UsdToSwap
+    ) internal returns (uint256 usdcReceived) {
+        // 1. Convert the asset amounts from USD value to token amount in 18 decimals standard
+        uint256 asset0AmountToSwap = UnderlyingMath
+            .calculateTokenAmountFromUsdValue(
+                _asset0UsdToSwap,
+                getLatestPrice(address(i_asset0)),
+                DECIMALS_STANDARD
+            );
+        uint256 asset1AmountToSwap = UnderlyingMath
+            .calculateTokenAmountFromUsdValue(
+                _asset1UsdToSwap,
+                getLatestPrice(address(i_asset1)),
+                DECIMALS_STANDARD
+            );
+
+        // 2. Convert the asset amounts from 18 decimals standard to token decimals
+        uint256 asset0AmountTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                asset0AmountToSwap,
+                i_decimals0
+            );
+        uint256 asset1AmountTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                asset1AmountToSwap,
+                i_decimals1
+            );
+
+        // 3. Make Swap
+        // @audit-info implement swap with slippage protection
+        uint256 usdcReceivedTokenDecimals;
+
+        // 4. Convert the received USDC amount to 18 decimals standard
+        usdcReceived = _convertToDecimalStandard(
+            usdcReceivedTokenDecimals,
+            i_decimalsUsdc
+        );
+    }
+
+    function _swapAssetForAsset(
+        address _swapFrom,
+        uint256 _amountToSwap
+    ) internal returns (uint112 amountReceived) {
+        // TO BE IMPLEMENTED
+        // 1. Convert the amount to swap from 18 decimals standard to token decimals
+        uint256 amountToSwapTokenDecimals;
+        if (_swapFrom == address(i_asset0)) {
+            amountToSwapTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                _amountToSwap,
+                i_decimals0
+            );
+        } else {
+            amountToSwapTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                _amountToSwap,
+                i_decimals1
+            );
+        }
+
+        // 2. Make Swap
+        // @audit-info implement swap with slippage protection
+        uint256 amountReceivedTokenDecimals;
+
+        // 3. Convert the received asset amount to 18 decimals standard
+        uint8 assetDecimals = _swapFrom == address(i_asset0)
+            ? i_decimals1
+            : i_decimals0;
+        amountReceived = _convertToDecimalStandard(
+            amountReceivedTokenDecimals,
             assetDecimals
         ).toUint112();
     }

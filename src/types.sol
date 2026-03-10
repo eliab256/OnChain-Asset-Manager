@@ -10,6 +10,7 @@ struct IndexAsset {
 struct InitStateCache {
     uint256 priceAsset0;
     uint256 priceAsset1;
+    uint256 priceUsdc;
     uint112 initialAsset0Reserve;
     uint112 initialAsset1Reserve;
     uint256 asset0UsdValue;

@@ -51,9 +51,9 @@ library UnderlyingMath {
         uint256 _usdValue,
         uint256 _price,
         uint256 _priceDecimals
-    ) internal pure returns (uint256) {
-        uint256 amount = (_usdValue * (10 ** _priceDecimals)) / _price;
-        return amount;
+    ) internal pure returns (uint256 tokenAmount) {
+        uint256 tokenAmount = (_usdValue * (10 ** _priceDecimals)) / _price;
+        return tokenAmount;
     }
 
     /**
@@ -92,53 +92,52 @@ library UnderlyingMath {
      * @dev assume all values has the same decimals standard
      * @dev assume weights together do total 100%
      * @dev this function calculates the amount of token0 and token1 to swap in order to rebalance the index according to the target weights of the index, it returns the amount of token0 to swap and the amount of token1 to swap, one of them will be 0 depending on which asset is overweighted or underweighted
-     * @param totalAssetUsdValue the total USD value of the assets in the index
-     * @param token0UsdValueBefore the USD value of token0 before the rebalance
-     * @param token1UsdValueBefore the USD value of token1 before the rebalance
-     * @param weight0 the target weight of token0 in the index with 4 decimals precision, e.g. 50000 = 5%
-     * @param weight1 the target weight of token1 in the index with 4 decimals precision, e.g. 50000 = 5%
-     * @param token0Price the price of token0 in USD with 18 decimals
-     * @param token1Price the price of token1 in USD with 18 decimals
-     * @param decimals the decimals standard used for the calculations, all values should be in this decimals standard, e.g. 18 decimals
+     * @param _totalAssetUsdValue the total USD value of the assets in the index
+     * @param _token0UsdValueBefore the USD value of token0 before the rebalance
+     * @param _token1UsdValueBefore the USD value of token1 before the rebalance
+     * @param _weight0 the target weight of token0 in the index with 4 decimals precision, e.g. 50000 = 5%
+     * @param _weight1 the target weight of token1 in the index with 4 decimals precision, e.g. 50000 = 5%
+     * @param _token0Price the price of token0 in USD with 18 decimals
+     * @param _token1Price the price of token1 in USD with 18 decimals
+     * @param _decimals the decimals standard used for the calculations, all values should be in this decimals standard, e.g. 18 decimals
      */
     function calculateRebalanceAmounts(
-        uint256 totalAssetUsdValue,
-        uint256 token0UsdValueBefore,
-        uint256 token1UsdValueBefore,
-        uint112 weight0,
-        uint112 weight1,
-        uint256 token0Price,
-        uint256 token1Price,
-        uint8 decimals
+        uint256 _totalAssetUsdValue,
+        uint256 _token0UsdValueBefore,
+        uint256 _token1UsdValueBefore,
+        uint112 _weight0,
+        uint112 _weight1,
+        uint256 _token0Price,
+        uint256 _token1Price,
+        uint8 _decimals
     ) internal pure returns (uint256 amount0ToSwap, uint256 amount1ToSwap) {
-        uint256 totalWeight = weight0 + weight1;
-        uint256 effectiveWeight0 = (token0UsdValueBefore * totalWeight) /
-            totalAssetUsdValue;
-        if (effectiveWeight0 < weight0) {
-            // need to swap token1 for token0
-            uint256 desiredToken0UsdValue = (totalAssetUsdValue * weight0) /
+        uint256 totalWeight = _weight0 + _weight1;
+        (uint256 effectiveWeight0, ) = calculateEffectiveWeights(_token0UsdValueBefore, _totalAssetUsdValue, totalWeight);
+        if (effectiveWeight0 > _weight0) {
+            // need to swap token0 for token1
+            uint256 desiredToken0UsdValue = (_totalAssetUsdValue * _weight0) /
                 totalWeight;
 
-            uint256 token0UsdValueDiff = token0UsdValueBefore -
+            uint256 token0UsdValueDiff = _token0UsdValueBefore -
                 desiredToken0UsdValue;
 
             amount0ToSwap = calculateTokenAmountFromUsdValue(
                 token0UsdValueDiff,
-                token0Price,
-                decimals
+                _token0Price,
+                _decimals
             );
             amount1ToSwap = 0;
         } else {
-            // need to swap token0 for token1
-            uint256 desiredToken1UsdValue = (totalAssetUsdValue * weight1) /
+            // need to swap token1 for token0
+            uint256 desiredToken1UsdValue = (_totalAssetUsdValue * _weight1) /
                 totalWeight;
 
-            uint256 token1UsdValueDiff = desiredToken1UsdValue -
-                token1UsdValueBefore;
+            uint256 token1UsdValueDiff = _token1UsdValueBefore - desiredToken1UsdValue;
+
             amount1ToSwap = calculateTokenAmountFromUsdValue(
                 token1UsdValueDiff,
-                token1Price,
-                decimals
+                _token1Price,
+                _decimals
             );
             amount0ToSwap = 0;
         }
@@ -178,15 +177,53 @@ library UnderlyingMath {
             _effectiveWeight0) / maxPercentage;
 
         if (targetToken0UsdValue <= currentToken0UsdValue) {
-            // asset0 overweight → buy only asset1
+            // asset0 overweight, buy only asset1
             token0DepositAmountUsd = 0;
             token1DepositAmountUsd = _depositAmountUsd;
         } else {
-            // asset1 overweight or weights are balanced → buy only asset0
+            // asset1 overweight or weights are balanced, buy only asset0
             token0DepositAmountUsd =
                 targetToken0UsdValue -
                 currentToken0UsdValue;
             token1DepositAmountUsd = _depositAmountUsd - token0DepositAmountUsd;
         }
+    }
+
+    function calculateWithdrawUnderlyingAmountsInUsd(
+        uint256 _totalAssetUsdValue,
+        uint256 _withdrawAmountUsd,
+        uint112 _targetWeight0,
+        uint112 _targetWeight1,
+        uint112 _effectiveWeight0
+    )
+        internal
+        pure
+        returns (uint256 token0WithdrawAmountUsd, uint256 token1WithdrawAmountUsd)
+    {
+        uint256 updatedTotalAssetUsdValue = _totalAssetUsdValue -
+            _withdrawAmountUsd;
+        uint256 totalWeight = _targetWeight0 + _targetWeight1;
+
+        uint256 targetToken0UsdValue = (updatedTotalAssetUsdValue *
+            _targetWeight0) / totalWeight;
+        uint256 currentToken0UsdValue = (_totalAssetUsdValue *
+            _effectiveWeight0) / totalWeight;
+
+        if (targetToken0UsdValue >= currentToken0UsdValue) {
+            // asset0 underweight, sell only asset1
+            token0WithdrawAmountUsd = 0;
+            token1WithdrawAmountUsd = _withdrawAmountUsd;
+        } else {
+            // asset1 underweight or weights are balanced, sell only asset0
+            token0WithdrawAmountUsd =
+                currentToken0UsdValue -
+                targetToken0UsdValue;
+            token1WithdrawAmountUsd = _withdrawAmountUsd - token0WithdrawAmountUsd;
+        }
+    }
+
+    function calculateEffectiveWeights(uint256 _token0UsdValue, uint256 _totalAssetsUsdValue, uint256 _totalWeight) internal pure returns (uint256 effectiveWeight0, uint256 effectiveWeight1) {
+        effectiveWeight0 = (_token0UsdValue * _totalWeight) / _totalAssetsUsdValue;
+        effectiveWeight1 = _totalWeight - effectiveWeight0;
     }
 }

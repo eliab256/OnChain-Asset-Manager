@@ -25,6 +25,14 @@ event Withdrawal(
     uint256 usdcAmountOut
 );
 
+event IndexRebalanced(
+    uint256 initAsset0Reserve,
+    uint256 initAsset1Reserve,
+    uint256 newAsset0Reserve,
+    uint256 newAsset1Reserve,
+    uint256 rebalanceTimestamp
+);
+
 event WeightsUpdateProposed(
     uint112 newWeightAsset0,
     uint112 newWeightAsset1,
