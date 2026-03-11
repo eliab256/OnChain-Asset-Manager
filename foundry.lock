@@ -17,10 +17,16 @@
       "rev": "fcbae5394ae8ad52d8e580a3477db99814b9d565"
     }
   },
+  "lib/universal-router": {
+    "rev": "fd75e3eca49d039fe2082bbd0c01aee93ed777a1"
+  },
   "lib/v4-core": {
     "tag": {
       "name": "v4.0.0",
       "rev": "e50237c43811bd9b526eff40f26772152a42daba"
     }
+  },
+  "lib/v4-periphery": {
+    "rev": "5da22e609fd78c01fb7ddf2a6abb1f2ec7dc2b87"
   }
 }

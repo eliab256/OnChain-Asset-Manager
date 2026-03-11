@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+
 struct IndexAsset {
     address asset;
     uint128 weightPercentage; // With 4 decimals, e.g. 500000 = 50%
@@ -23,4 +27,10 @@ enum AssetAvailable {
     USDC,
     WBTC,
     LINK
+}
+
+enum SwapType {
+    ASSET0_USDC,
+    ASSET1_USDC,
+    ASSET0_ASSET1
 }

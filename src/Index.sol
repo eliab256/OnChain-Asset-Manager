@@ -19,15 +19,9 @@ import {
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
-import {IndexAsset, InitStateCache} from "./types.sol";
+import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
 import {console} from "forge-std/console.sol";
-import {
-    IUniversalRouter
-} from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
-import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import {
-    Commands
-} from "@uniswap/universal-router/contracts/libraries/Commands.sol";
+import {ISwapManager} from "./Interface/ISwapManager.sol";
 
 contract Index is IIndex, ERC20, AccessControl {
     using UnderlyingMath for uint256;
@@ -47,9 +41,7 @@ contract Index is IIndex, ERC20, AccessControl {
     AggregatorV3Interface internal immutable i_asset1PriceFeed;
     AggregatorV3Interface internal immutable i_usdcPriceFeed;
 
-    IUniversalRouter internal immutable i_uniswapUniversalRouter;
-    address internal constant PERMIT2 =
-        0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    ISwapManager internal immutable i_swapManager;
 
     uint256 public constant GRACE_PERIOD = 1 days;
     uint256 public constant MAX_DELAY = 1 hours;
@@ -92,7 +84,7 @@ contract Index is IIndex, ERC20, AccessControl {
         address _router,
         address _usdcAddress,
         address _usdcPricefeed,
-        address _uniswapUniversalRouter,
+        address _swapManager,
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
         uint32 _feePercentage
@@ -100,6 +92,8 @@ contract Index is IIndex, ERC20, AccessControl {
         i_asset0 = IERC20(_asset0.asset);
         i_asset1 = IERC20(_asset1.asset);
         i_usdc = IERC20(_usdcAddress);
+
+        i_swapManager = ISwapManager(_swapManager);
 
         s_weight0 = _asset0.weightPercentage;
         s_weight1 = _asset1.weightPercentage;
@@ -109,8 +103,6 @@ contract Index is IIndex, ERC20, AccessControl {
         i_asset0PriceFeed = AggregatorV3Interface(_asset0.priceFeed);
         i_asset1PriceFeed = AggregatorV3Interface(_asset1.priceFeed);
         i_usdcPriceFeed = AggregatorV3Interface(_usdcPricefeed);
-
-        i_uniswapUniversalRouter = IUniversalRouter(_uniswapUniversalRouter);
 
         i_decimals0 = IERC20Metadata(_asset0.asset).decimals();
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
@@ -185,15 +177,15 @@ contract Index is IIndex, ERC20, AccessControl {
             underlyingAmount1TokenDecimals
         );
 
-        // Mint the initial shares to the initializer
-        // All Values are in 18 decimals standard, so we can directly sum the USD values of the underlying assets to calculate the initial shares to mint
-        uint256 initialShares = underlying0UsdValue + underlying1UsdValue;
-        _mint(msg.sender, initialShares);
-
         // Update reserves
         s_asset0Reserve = underlyingAmount0;
         s_asset1Reserve = underlyingAmount1;
         s_initialized = true;
+
+        // Mint the initial shares to the initializer
+        // All Values are in 18 decimals standard, so we can directly sum the USD values of the underlying assets to calculate the initial shares to mint
+        uint256 initialShares = underlying0UsdValue + underlying1UsdValue;
+        _mint(msg.sender, initialShares);
 
         emit IndexInitialized(
             underlyingAmount0,
@@ -829,6 +821,7 @@ contract Index is IIndex, ERC20, AccessControl {
 
         // 2. Make Swap
         // @audit-info implement swap with slippage protection
+        
         uint256 assetReceivedTokenDecimals;
         // 3. Convert the received asset amount to 18 decimals standard
         uint8 assetDecimals = _swapFor == address(i_asset0)

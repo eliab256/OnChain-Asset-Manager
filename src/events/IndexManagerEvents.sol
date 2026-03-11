@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 event RouterAddressSet(address indexed newRouter, address indexed setter);
 
+event SwapManagerAddressSet(address indexed newSwapManager, address indexed setter);
+
 event IndexCreated(
     address indexed indexAddress,
     address indexed asset0,

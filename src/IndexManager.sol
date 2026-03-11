@@ -4,9 +4,10 @@ pragma solidity ^0.8.0;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
+import {ISwapManager} from "./Interface/ISwapManager.sol";
 import "./errors/IndexManagerErrors.sol";
 import "./events/IndexManagerEvents.sol";
-import {IndexAsset} from "./types.sol";
+import {IndexAsset, PoolKey} from "./types.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -38,6 +39,7 @@ contract IndexManager is IIndexManager, AccessControl {
     mapping(address => bool) private s_isInitialized;
 
     address internal s_router;
+    address internal s_swapManager;
     uint256 private s_totalFeesCollected;
 
     modifier isIndexInitialized(address indexAddress) {
@@ -75,6 +77,14 @@ contract IndexManager is IIndexManager, AccessControl {
         s_router = _newRouter;
 
         emit RouterAddressSet(_newRouter, msg.sender);
+    }
+
+    function setSwapManagerAddress(
+        address _swapManager
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        s_swapManager = _swapManager;
+
+        emit SwapManagerAddressSet(_swapManager, msg.sender);
     }
 
     /**
@@ -136,11 +146,7 @@ contract IndexManager is IIndexManager, AccessControl {
         _validatePriceFeed(asset0.priceFeed);
         _validatePriceFeed(asset1.priceFeed);
 
-        index = _deployIndex(
-            asset0,
-            asset1,
-            _feePercentage
-        );
+        index = _deployIndex(asset0, asset1, _feePercentage);
 
         s_getIndex[asset0.asset][asset1.asset] = index;
         s_isIndex[index] = true;
@@ -157,7 +163,10 @@ contract IndexManager is IIndexManager, AccessControl {
      */
     function initializeIndex(
         address _indexAddress,
-        uint256 _underlyingAmount0
+        uint256 _underlyingAmount0,
+        PoolKey memory _poolKeyAsset0Usdc,
+        PoolKey memory _poolKeyAsset1Usdc,
+        PoolKey memory _poolKeyAsset0Asset1
     ) public onlyRole(ASSET_MANAGER_ROLE) {
         if (_underlyingAmount0 == 0) {
             revert IndexManager__InvalidIndexAssetsAmount();
@@ -171,6 +180,13 @@ contract IndexManager is IIndexManager, AccessControl {
         }
         s_isInitialized[_indexAddress] = true;
         s_initializedIndexes.push(_indexAddress);
+
+        ISwapManager(s_swapManager).registerIndex(
+            _indexAddress,
+            _poolKeyAsset0Usdc,
+            _poolKeyAsset1Usdc,
+            _poolKeyAsset0Asset1
+        );
 
         IIndex(_indexAddress).initialize(_underlyingAmount0);
 
@@ -625,6 +641,10 @@ contract IndexManager is IIndexManager, AccessControl {
      */
     function getRouterAddress() public view returns (address) {
         return s_router;
+    }
+
+    function getSwapManagerAddress() public view returns (address) {
+        return s_swapManager;
     }
 
     /**
