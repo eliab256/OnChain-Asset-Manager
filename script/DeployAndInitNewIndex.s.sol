@@ -21,8 +21,8 @@ contract DeployAndInitNewIndex is Script {
         address _indexManager,
         AssetAvailable _assetA,
         AssetAvailable _assetB,
-        uint112 _weightA,
-        uint112 _weightB,
+        uint128 _weightA,
+        uint128 _weightB,
         uint256 _feePercentage,
         uint256 _initialAssetADeposit,
         uint256 _initialAssetBDeposit

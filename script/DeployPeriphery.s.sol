@@ -29,7 +29,7 @@ contract DeployPeriphery is Script, CodeConstants {
             "======================= Contracts Deployment ================="
         );
         // 1. Deploy IndexManager
-        indexManager = new IndexManager(config.usdcAddress);
+        indexManager = new IndexManager(config.usdcAddress, config.usdcPriceFeedAddress);
 
         // 2. Deploy Router with the address of the deployed IndexManager
         router = new Router(address(indexManager));

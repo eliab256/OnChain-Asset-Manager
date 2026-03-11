@@ -34,14 +34,14 @@ event IndexRebalanced(
 );
 
 event WeightsUpdateProposed(
-    uint112 newWeightAsset0,
-    uint112 newWeightAsset1,
+    uint128 newWeightAsset0,
+    uint128 newWeightAsset1,
     uint256 indexed implementationTimestamp
 );
 
 event IndexWeightsUpdated(
-    uint112 newWeightAsset0,
-    uint112 newWeightAsset1,
+    uint128 newWeightAsset0,
+    uint128 newWeightAsset1,
     uint256 indexed updateTimestamp
 );
 

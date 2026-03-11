@@ -11,10 +11,11 @@ evm_version = "cancun"
 remappings = [
     '@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/', 
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "v4-core/=lib/v4-core/",
-    "v4-periphery/=lib/v4-periphery/",
+    "@v4-core/=lib/v4-core/",
+    "@v4-periphery/=lib/v4-periphery/",
     "@uniswap/v4-core/=lib/v4-core/",
-    "@uniswap/v4-periphery/=lib/v4-periphery/"
+    "@uniswap/v4-periphery/=lib/v4-periphery/",
+    "@uniswap/universal-router/=lib/universal-router/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

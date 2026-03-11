@@ -35,7 +35,7 @@ interface IIndex is IERC20, IERC20Metadata {
     function getLatestPrice(address _asset) external view returns (uint256);
 
     function proposeUpdateWeights(
-        uint112 _newWeightAsset0
+        uint128 _newWeightAsset0
     ) external returns (uint256 implementationTimestamp);
 
     function executeWeightUpdate() external;
@@ -69,9 +69,9 @@ interface IIndex is IERC20, IERC20Metadata {
             uint8 usdcDecimals
         );
 
-    function getAssetsWeights() external view returns (uint112, uint112);
+    function getAssetsWeights() external view returns (uint128, uint128);
 
-    function getAssetsAmount() external view returns (uint112, uint112);
+    function getAssetsAmount() external view returns (uint128, uint128);
 
     function getAsset0() external view returns (address);
 
@@ -80,9 +80,9 @@ interface IIndex is IERC20, IERC20Metadata {
     function getFeesInfo()
         external
         view
-        returns (uint32 feePercentage, uint112 totalFees);
+        returns (uint32 feePercentage, uint128 totalFees);
 
-    function getPercentagePrecision() external pure returns (uint112);
+    function getPercentagePrecision() external pure returns (uint128);
 
-    function getWeightPrecision() external pure returns (uint112);
+    function getWeightPrecision() external pure returns (uint128);
 }

@@ -18,6 +18,8 @@ struct AssetConfig {
 
 struct NetworkConfig {
     address usdcAddress;
+    address usdcPriceFeedAddress;
+    address uniswapUniversalRouter;
     address deployerAccount;
     address feeCollector;
     address rebalancer;
@@ -94,6 +96,8 @@ contract HelperConfig is CodeConstants, Script {
         return
             NetworkConfig({
                 usdcAddress: USDC_SEPOLIA,
+                usdcPriceFeedAddress: USDC_USD_PRICEFEED_SEPOLIA,
+                uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
                 deployerAccount: SEPOLIA_DEPLOYER,
                 feeCollector: SEPOLIA_DEPLOYER,
                 rebalancer: SEPOLIA_DEPLOYER
@@ -173,6 +177,8 @@ contract HelperConfig is CodeConstants, Script {
         return
             NetworkConfig({
                 usdcAddress: address(mockUsdc),
+                usdcPriceFeedAddress: address(mockUsdcPriceFeed),
+                uniswapUniversalRouter: /* @audit-issue create mock router*/ address(0),
                 deployerAccount: ANVIL_DEPLOYER,
                 feeCollector: anvilFeeCollector,
                 rebalancer: anvilRebalancer

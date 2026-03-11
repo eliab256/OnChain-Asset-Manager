@@ -25,14 +25,18 @@ contract IndexManager is IIndexManager, AccessControl {
         keccak256("FEE_COLLECTOR_ROLE");
     bytes32 public constant REBALANCER_ROLE = keccak256("REBALANCER_ROLE");
 
-    uint112 public constant MAX_PERCENTAGE = 1000000; // 100% with 4 decimals
+    uint128 public constant MAX_PERCENTAGE = 1000000; // 100% with 4 decimals
+
+    IERC20 internal immutable i_usdc;
+    address internal immutable i_usdcPriceFeed;
+    address internal immutable i_uniswapUniversalRouter;
 
     address[] private s_indexes;
     address[] private s_initializedIndexes;
     mapping(address => mapping(address => address)) private s_getIndex;
     mapping(address => bool) private s_isIndex;
     mapping(address => bool) private s_isInitialized;
-    IERC20 internal immutable i_usdc;
+
     address internal s_router;
     uint256 private s_totalFeesCollected;
 
@@ -46,8 +50,14 @@ contract IndexManager is IIndexManager, AccessControl {
         _;
     }
 
-    constructor(address _usdcAddress) {
+    constructor(
+        address _usdcAddress,
+        address _usdcPriceFeed,
+        address _uniswapUniversalRouter
+    ) {
         i_usdc = IERC20(_usdcAddress);
+        i_usdcPriceFeed = _usdcPriceFeed;
+        i_uniswapUniversalRouter = _uniswapUniversalRouter;
 
         grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         grantRole(ASSET_MANAGER_ROLE, msg.sender);
@@ -126,7 +136,11 @@ contract IndexManager is IIndexManager, AccessControl {
         _validatePriceFeed(asset0.priceFeed);
         _validatePriceFeed(asset1.priceFeed);
 
-        index = _deployIndex(asset0, asset1, _feePercentage, address(i_usdc));
+        index = _deployIndex(
+            asset0,
+            asset1,
+            _feePercentage
+        );
 
         s_getIndex[asset0.asset][asset1.asset] = index;
         s_isIndex[index] = true;
@@ -158,7 +172,7 @@ contract IndexManager is IIndexManager, AccessControl {
         s_isInitialized[_indexAddress] = true;
         s_initializedIndexes.push(_indexAddress);
 
-        Index(_indexAddress).initialize(_underlyingAmount0);
+        IIndex(_indexAddress).initialize(_underlyingAmount0);
 
         emit IndexInitialized(_indexAddress, msg.sender);
     }
@@ -166,7 +180,9 @@ contract IndexManager is IIndexManager, AccessControl {
     function rebalanceIndex(
         address _indexAddress
     ) public isIndexInitialized(_indexAddress) onlyRole(REBALANCER_ROLE) {
-        (bool success, string memory reason) = _rebalanceSingleIndex(_indexAddress);
+        (bool success, string memory reason) = _rebalanceSingleIndex(
+            _indexAddress
+        );
         if (!success) {
             emit IndexRebalanceFailed(_indexAddress, reason);
         } else {
@@ -222,16 +238,16 @@ contract IndexManager is IIndexManager, AccessControl {
      */
     function proposeNewWeights(
         address _indexAddress,
-        uint112 _newWeightAsset0 // With 4 decimals, e.g. 50000 = 5%
+        uint128 _newWeightAsset0 // With 4 decimals, e.g. 50000 = 5%
     ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
         if (_newWeightAsset0 > MAX_PERCENTAGE) {
             revert IndexManager__InvalidPercentage();
         }
         // weight of asset1 is implicitly calculated as 100% - weight of asset0
         IIndex index = IIndex(_indexAddress);
-        (uint112 oldWeightAsset0, uint112 oldWeightAsset1) = index
+        (uint128 oldWeightAsset0, uint128 oldWeightAsset1) = index
             .getAssetsWeights();
-        uint112 newWeightAsset1 = MAX_PERCENTAGE - _newWeightAsset0;
+        uint128 newWeightAsset1 = MAX_PERCENTAGE - _newWeightAsset0;
 
         uint256 implementationTimestamp = index.proposeUpdateWeights(
             _newWeightAsset0
@@ -447,14 +463,12 @@ contract IndexManager is IIndexManager, AccessControl {
      * @param _asset0 The first asset of the index.
      * @param _asset1 The second asset of the index.
      * @param _feePercentage The fee percentage for the index.
-     * @param _usdcAddress The address of the USDC token.
      * @return index The address of the newly deployed index contract.
      */
     function _deployIndex(
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
-        uint256 _feePercentage,
-        address _usdcAddress
+        uint256 _feePercentage
     ) internal returns (address index) {
         // prepare data for Index constructor
         string memory name;
@@ -472,7 +486,9 @@ contract IndexManager is IIndexManager, AccessControl {
                 name,
                 symbol,
                 s_router,
-                _usdcAddress,
+                address(i_usdc),
+                i_usdcPriceFeed,
+                i_uniswapUniversalRouter,
                 _asset0,
                 _asset1,
                 _feePercentage
@@ -523,7 +539,7 @@ contract IndexManager is IIndexManager, AccessControl {
     }
 
     /**
-     * @notice This function is used internally by rebalanceMultipleIndexes and rebalanceAllIndexes to handle rebalance for each index, allowing for error handling 
+     * @notice This function is used internally by rebalanceMultipleIndexes and rebalanceAllIndexes to handle rebalance for each index, allowing for error handling
      * on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
      * @dev Rebalances a single index and returns whether it was successful and the reason if it failed.
      * @param _indexAddress The address of the index to rebalance.

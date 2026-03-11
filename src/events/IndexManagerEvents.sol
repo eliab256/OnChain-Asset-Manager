@@ -21,10 +21,10 @@ event IndexRebalanceFailed(address indexed indexAddress, string reason);
 event NewIndexWeightsProposed(
     address indexed indexAddress,
     address indexed assetManager,
-    uint112 oldWeightAsset0,
-    uint112 oldWeightAsset1,
-    uint112 newWeightAsset0,
-    uint112 newWeightAsset1,
+    uint128 oldWeightAsset0,
+    uint128 oldWeightAsset1,
+    uint128 newWeightAsset0,
+    uint128 newWeightAsset1,
     uint256 implementationTimestamp
 );
 event FeesCollected(

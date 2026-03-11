@@ -50,8 +50,8 @@ contract BaseTest is Test {
     uint256 public constant INITIAL_USDC_BALANCE = 10_000_000_000;
 
     //constants
-    uint112 public PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
-    uint112 public WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
+    uint128 public PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
+    uint128 public WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
 
     function setUp() public {
         deployerPeriphery = new DeployPeriphery();

@@ -8,8 +8,8 @@ library UnderlyingMath {
 
     function calculateAmount1UsdFromAmount0UsdAndIndexWeights(
         uint256 _amount0Usd,
-        uint112 _weight0,
-        uint112 _weight1
+        uint128 _weight0,
+        uint128 _weight1
     ) internal pure returns (uint256) {
         return (_amount0Usd * _weight1) / _weight0;
     }
@@ -43,8 +43,8 @@ library UnderlyingMath {
         uint256 _amount,
         uint256 _price,
         uint256 _stdDecimals
-    ) internal pure returns (uint256) {
-        return (_amount * _price) / (10 ** _stdDecimals);
+    ) internal pure returns (uint256 usdValue) {
+        usdValue = (_amount * _price) / (10 ** _stdDecimals);
     }
 
     function calculateTokenAmountFromUsdValue(
@@ -52,8 +52,7 @@ library UnderlyingMath {
         uint256 _price,
         uint256 _priceDecimals
     ) internal pure returns (uint256 tokenAmount) {
-        uint256 tokenAmount = (_usdValue * (10 ** _priceDecimals)) / _price;
-        return tokenAmount;
+        tokenAmount = (_usdValue * (10 ** _priceDecimals)) / _price;
     }
 
     /**
@@ -105,14 +104,18 @@ library UnderlyingMath {
         uint256 _totalAssetUsdValue,
         uint256 _token0UsdValueBefore,
         uint256 _token1UsdValueBefore,
-        uint112 _weight0,
-        uint112 _weight1,
+        uint128 _weight0,
+        uint128 _weight1,
         uint256 _token0Price,
         uint256 _token1Price,
         uint8 _decimals
     ) internal pure returns (uint256 amount0ToSwap, uint256 amount1ToSwap) {
         uint256 totalWeight = _weight0 + _weight1;
-        (uint256 effectiveWeight0, ) = calculateEffectiveWeights(_token0UsdValueBefore, _totalAssetUsdValue, totalWeight);
+        (uint256 effectiveWeight0, ) = calculateEffectiveWeights(
+            _token0UsdValueBefore,
+            _totalAssetUsdValue,
+            totalWeight
+        );
         if (effectiveWeight0 > _weight0) {
             // need to swap token0 for token1
             uint256 desiredToken0UsdValue = (_totalAssetUsdValue * _weight0) /
@@ -132,7 +135,8 @@ library UnderlyingMath {
             uint256 desiredToken1UsdValue = (_totalAssetUsdValue * _weight1) /
                 totalWeight;
 
-            uint256 token1UsdValueDiff = _token1UsdValueBefore - desiredToken1UsdValue;
+            uint256 token1UsdValueDiff = _token1UsdValueBefore -
+                desiredToken1UsdValue;
 
             amount1ToSwap = calculateTokenAmountFromUsdValue(
                 token1UsdValueDiff,
@@ -145,8 +149,8 @@ library UnderlyingMath {
 
     function calculateSwapFromUsdcAmount(
         uint256 _usdcAmount,
-        uint112 _weight0,
-        uint112 _weight1
+        uint128 _weight0,
+        uint128 _weight1
     )
         internal
         pure
@@ -159,9 +163,9 @@ library UnderlyingMath {
     function calculateDepositAllocationInUsd(
         uint256 _initTotalAssetUsdValue,
         uint256 _depositAmountUsd,
-        uint112 _targetWeight0,
-        uint112 _targetWeight1,
-        uint112 _effectiveWeight0
+        uint128 _targetWeight0,
+        uint128 _targetWeight1,
+        uint128 _effectiveWeight0
     )
         internal
         pure
@@ -192,13 +196,16 @@ library UnderlyingMath {
     function calculateWithdrawUnderlyingAmountsInUsd(
         uint256 _totalAssetUsdValue,
         uint256 _withdrawAmountUsd,
-        uint112 _targetWeight0,
-        uint112 _targetWeight1,
-        uint112 _effectiveWeight0
+        uint128 _targetWeight0,
+        uint128 _targetWeight1,
+        uint128 _effectiveWeight0
     )
         internal
         pure
-        returns (uint256 token0WithdrawAmountUsd, uint256 token1WithdrawAmountUsd)
+        returns (
+            uint256 token0WithdrawAmountUsd,
+            uint256 token1WithdrawAmountUsd
+        )
     {
         uint256 updatedTotalAssetUsdValue = _totalAssetUsdValue -
             _withdrawAmountUsd;
@@ -218,12 +225,24 @@ library UnderlyingMath {
             token0WithdrawAmountUsd =
                 currentToken0UsdValue -
                 targetToken0UsdValue;
-            token1WithdrawAmountUsd = _withdrawAmountUsd - token0WithdrawAmountUsd;
+            token1WithdrawAmountUsd =
+                _withdrawAmountUsd -
+                token0WithdrawAmountUsd;
         }
     }
 
-    function calculateEffectiveWeights(uint256 _token0UsdValue, uint256 _totalAssetsUsdValue, uint256 _totalWeight) internal pure returns (uint256 effectiveWeight0, uint256 effectiveWeight1) {
-        effectiveWeight0 = (_token0UsdValue * _totalWeight) / _totalAssetsUsdValue;
+    function calculateEffectiveWeights(
+        uint256 _token0UsdValue,
+        uint256 _totalAssetsUsdValue,
+        uint256 _totalWeight
+    )
+        internal
+        pure
+        returns (uint256 effectiveWeight0, uint256 effectiveWeight1)
+    {
+        effectiveWeight0 =
+            (_token0UsdValue * _totalWeight) /
+            _totalAssetsUsdValue;
         effectiveWeight1 = _totalWeight - effectiveWeight0;
     }
 }

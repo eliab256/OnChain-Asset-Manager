@@ -27,7 +27,7 @@ interface IIndexManager {
 
     function proposeNewWeights(
         address indexAddress,
-        uint112 newWeightAsset0
+        uint128 newWeightAsset0
     ) external;
 
     function executeWeightUpdate(address indexAddress) external;
