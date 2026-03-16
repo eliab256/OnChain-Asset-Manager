@@ -40,10 +40,10 @@ contract SwapManager is Ownable {
         ] = _poolKeyAsset0Asset1;
     }
 
-    function swapExactInput(
+    function buildSingleSwapParams(
         address _indexAddress,
         SwapType _swapType,
-        bool zeroForOne,
+        address _tokenIn,
         uint128 _amountIn
     )
         public
@@ -58,80 +58,75 @@ contract SwapManager is Ownable {
     {
         PoolKey memory key = s_poolKeys[_indexAddress][_swapType];
 
-        // 1. Check if the pool key is registered for the given index and swap type
         if (Currency.unwrap(key.currency0) == address(0)) {
             revert SwapManager__PoolKeyNotRegistered();
         }
 
-        // 2. Swap params
+        bool zeroForOne = _tokenIn == Currency.unwrap(key.currency0);
+
+        tokenIn = _tokenIn;
+        tokenOut = zeroForOne
+            ? Currency.unwrap(key.currency1)
+            : Currency.unwrap(key.currency0);
+
         IV4Router.ExactInputSingleParams memory swapParams = IV4Router
             .ExactInputSingleParams({
                 poolKey: key,
                 zeroForOne: zeroForOne,
                 amountIn: _amountIn,
-                amountOutMinimum: 0, // slippage handled on index
+                amountOutMinimum: 0,
                 hookData: ""
             });
 
-        // 3. Encode actions V4
         bytes memory actions = abi.encodePacked(
             uint8(Actions.SWAP_EXACT_IN_SINGLE),
             uint8(Actions.SETTLE_ALL),
             uint8(Actions.TAKE_ALL)
         );
 
-        tokenIn = zeroForOne
-            ? Currency.unwrap(key.currency0)
-            : Currency.unwrap(key.currency1);
-        tokenOut = zeroForOne
-            ? Currency.unwrap(key.currency1)
-            : Currency.unwrap(key.currency0);
-
         bytes[] memory actionParams = new bytes[](3);
         actionParams[0] = abi.encode(swapParams);
         actionParams[1] = abi.encode(Currency.wrap(tokenIn), _amountIn);
         actionParams[2] = abi.encode(Currency.wrap(tokenOut), uint256(0));
 
-        // 4. Encode Universal router commands
         commands = abi.encodePacked(uint8(Commands.V4_SWAP));
         inputs = new bytes[](1);
         inputs[0] = abi.encode(actions, actionParams);
     }
 
     function buildDoubleSwapParams(
-    address _indexAddress,
-    uint128 _amountIn0,
-    uint128 _amountIn1,
-    bool zeroForOne
-) external view returns (
-    bytes memory commands,
-    bytes[] memory inputs
-) {
-    // first swap asset0 - USDC
-    (, bytes[] memory inputs0, , ) = swapExactInput(
-        _indexAddress,
-        SwapType.ASSET0_USDC,
-        zeroForOne,
-        _amountIn0
-    );
+        address _indexAddress,
+        SwapType _swapType0,
+        SwapType _swapType1,
+        address _tokenIn0,
+        address _tokenIn1,
+        uint128 _amountIn0,
+        uint128 _amountIn1
+    ) external view returns (bytes memory commands, bytes[] memory inputs) {
+        // primo swap — zeroForOne derivato da tokenIn0
+        (, bytes[] memory inputs0, , ) = buildSingleSwapParams(
+            _indexAddress,
+            _swapType0,
+            _tokenIn0,
+            _amountIn0
+        );
 
-    // second swap asset1 - USDC
-    (, bytes[] memory inputs1, , ) = swapExactInput(
-        _indexAddress,
-        SwapType.ASSET1_USDC,
-        zeroForOne,
-        _amountIn1
-    );
+        // secondo swap — zeroForOne derivato da tokenIn1
+        (, bytes[] memory inputs1, , ) = buildSingleSwapParams(
+            _indexAddress,
+            _swapType1,
+            _tokenIn1,
+            _amountIn1
+        );
 
-    // combine actions and inputs for the two swaps into a single command
-    commands = abi.encodePacked(
-        uint8(Commands.V4_SWAP),
-        uint8(Commands.V4_SWAP)
-    );
-    inputs = new bytes[](2);
-    inputs[0] = inputs0[0];
-    inputs[1] = inputs1[0];
-}
+        commands = abi.encodePacked(
+            uint8(Commands.V4_SWAP),
+            uint8(Commands.V4_SWAP)
+        );
+        inputs = new bytes[](2);
+        inputs[0] = inputs0[0];
+        inputs[1] = inputs1[0];
+    }
 
     function getPoolKey(
         address _indexAddress,

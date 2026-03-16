@@ -240,6 +240,13 @@ library UnderlyingMath {
         pure
         returns (uint256 effectiveWeight0, uint256 effectiveWeight1)
     {
+        // a = totalAsset0
+        // b = totalAsset1
+        // c = totalValue (a + b)
+        // x = effectiveWeight0
+        // y = effectiveWeight1
+        // a : c = x : 100 => x = (a * 100) / c
+        // b : c = y : 100 => y = (b * 100) / c
         effectiveWeight0 =
             (_token0UsdValue * _totalWeight) /
             _totalAssetsUsdValue;

@@ -22,6 +22,9 @@ import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
 import {console} from "forge-std/console.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
+import {
+    IUniversalRouter
+} from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
 
 contract Index is IIndex, ERC20, AccessControl {
     using UnderlyingMath for uint256;
@@ -42,6 +45,7 @@ contract Index is IIndex, ERC20, AccessControl {
     AggregatorV3Interface internal immutable i_usdcPriceFeed;
 
     ISwapManager internal immutable i_swapManager;
+    IUniversalRouter internal immutable i_universalRouter;
 
     uint256 public constant GRACE_PERIOD = 1 days;
     uint256 public constant MAX_DELAY = 1 hours;
@@ -57,6 +61,8 @@ contract Index is IIndex, ERC20, AccessControl {
     uint128 internal constant WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
     uint128 internal constant MAX_WEIGHT = 100 * WEIGHT_PRECISION; // 100% with 4 decimals precision
     uint128 internal constant REBALANCE_THRESHOLD = 3 * WEIGHT_PRECISION; // 3% with 4 decimals precision, if the effective weight of an asset deviates from its target weight by more than this threshold, the index can be rebalanced
+    uint256 internal constant MAX_SLIPPAGE_TOLERANCE =
+        1 * PERCENTAGE_FEE_PRECISION; // 1% with 4 decimals precision
     uint128 internal s_weight0;
     uint128 internal s_weight1;
     uint128 internal s_pendingWeight0;
@@ -85,6 +91,7 @@ contract Index is IIndex, ERC20, AccessControl {
         address _usdcAddress,
         address _usdcPricefeed,
         address _swapManager,
+        address _uniswapUniversalRouter,
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
         uint32 _feePercentage
@@ -94,6 +101,7 @@ contract Index is IIndex, ERC20, AccessControl {
         i_usdc = IERC20(_usdcAddress);
 
         i_swapManager = ISwapManager(_swapManager);
+        i_universalRouter = IUniversalRouter(_uniswapUniversalRouter);
 
         s_weight0 = _asset0.weightPercentage;
         s_weight1 = _asset1.weightPercentage;
@@ -709,24 +717,42 @@ contract Index is IIndex, ERC20, AccessControl {
                 DECIMALS_STANDARD
             );
 
+        
         // 4. Conditional swap and reserve updates
+        uint128 updatedReserv0;
+        uint128 updatedReserv1;
         if (amount0ToSwap > 0) {
             // swap token0 for token1
             uint128 token1Received = _swapAssetForAsset(
                 address(i_asset0),
                 amount0ToSwap
             );
-            s_asset0Reserve -= amount0ToSwap.toUint128();
-            s_asset1Reserve += token1Received;
+
+            updatedReserv0 = initState.initialAsset0Reserve - amount0ToSwap.toUint128();
+            updatedReserv1 = initState.initialAsset1Reserve + token1Received;
         } else {
             // swap token1 for token0
             uint128 token0Received = _swapAssetForAsset(
                 address(i_asset1),
                 amount1ToSwap
             );
-            s_asset1Reserve -= amount1ToSwap.toUint128();
-            s_asset0Reserve += token0Received;
+            updatedReserv1 = initState.initialAsset1Reserve - amount1ToSwap.toUint128();
+            updatedReserv0 = initState.initialAsset0Reserve + token0Received;
         }
+
+        (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
+        if (
+            totalAssetUsdValueAfter <
+            initState.totalAssetUsdValue.calculateNetAmountFromTolerance(
+                MAX_SLIPPAGE_TOLERANCE,
+                MAX_PERCENTAGE
+            )
+        ) {
+            revert Index__RebalanceSlippageTooHigh();
+        }
+
+        s_asset0Reserve = updatedReserv0;
+        s_asset1Reserve = updatedReserv1;
 
         // 5. Emit event
         emit IndexRebalanced(
@@ -758,6 +784,7 @@ contract Index is IIndex, ERC20, AccessControl {
             return true;
         }
     }
+
     /**
      * @dev Initializes the function values to avoid multiple external calls and storage reads.
      * @return priceAsset0 The price of asset0 in USD with 18 decimals.
@@ -809,19 +836,33 @@ contract Index is IIndex, ERC20, AccessControl {
     }
 
     function _swapFromUsdc(
-        uint256 _usdcAmountIn,
-        address _swapFor
+        uint256 _usdcAmountIn0,
+        uint256 _usdcAmountIn1
     ) internal returns (uint128 assetReceived) {
         // TO BE IMPLEMENTED
         // 1. Convert USDC amount from 18 decimals standard to USDC decimals
-        uint256 usdcAmountTokenDecimals = _convertFromStdDecimalsToTokenDecimals(
-                _usdcAmountIn,
+        uint256 usdcAmount0TokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                _usdcAmountIn0,
+                i_decimalsUsdc
+            );
+        uint256 usdcAmount1TokenDecimals = _convertFromStdDecimalsToTokenDecimals(
+                _usdcAmountIn1,
                 i_decimalsUsdc
             );
 
-        // 2. Make Swap
+        // 2. Prepare  swap parameters
         // @audit-info implement swap with slippage protection
-        
+        (bytes memory commands, bytes[] memory inputs) = i_swapManager
+            .buildDoubleSwapParams(
+                address(this),
+                SwapType.ASSET0_USDC,
+                SwapType.ASSET1_USDC,
+                address(i_asset0),
+                address(i_asset1),
+                _usdcAmountIn0,
+                _usdcAmountIn1
+            );
+
         uint256 assetReceivedTokenDecimals;
         // 3. Convert the received asset amount to 18 decimals standard
         uint8 assetDecimals = _swapFor == address(i_asset0)
@@ -891,11 +932,30 @@ contract Index is IIndex, ERC20, AccessControl {
             );
         }
 
-        // 2. Make Swap
-        // @audit-info implement swap with slippage protection
-        uint256 amountReceivedTokenDecimals;
+        // 2. Prepare swap parameters
+        (
+            bytes memory commands,
+            bytes[] memory inputs,
+            address tokenToSwap,
+            address tokenToReceive
+        ) = i_swapManager.buildSingleSwapParams(
+                address(this),
+                SwapType.ASSET0_ASSET1,
+                _swapFrom,
+                amountToSwapTokenDecimals
+            );
 
-        // 3. Convert the received asset amount to 18 decimals standard
+        // 3. Make Swap
+        // @audit-info implement swap with slippage protection
+        uint256 amountReceivedTokenDecimals = _executeSwap(
+            commands,
+            inputs,
+            tokenToSwap,
+            tokenToReceive,
+            amountToSwapTokenDecimals
+        );
+
+        // 4. Convert the received asset amount to 18 decimals standard
         uint8 assetDecimals = _swapFrom == address(i_asset0)
             ? i_decimals1
             : i_decimals0;
@@ -903,6 +963,36 @@ contract Index is IIndex, ERC20, AccessControl {
             amountReceivedTokenDecimals,
             assetDecimals
         ).toUint128();
+
+        // 5. Controlla che dopo lo swap il controvalore in usd di totalAsset non sia diminuito più della tolleranza dello slippage accettabile, altrimenti revert
+        // (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
+        // if(totalAssetUsdValueAfter < initState.totalAssetUsdValue.calculateNetAmountFromTolerance(MAX_SLIPPAGE_TOLERANCE, MAX_PERCENTAGE)) {
+        //     revert Index__RebalanceSlippageTooHigh();
+        // }
+    }
+
+    function _executeSwap(
+        bytes memory commands,
+        bytes[] memory inputs,
+        address _tokenToSwap,
+        address _tokenToReceive,
+        uint256 _amountToSwap
+    ) internal returns (uint256 assetReceivedTokenDecimals) {
+        uint256 balanceBefore = IERC20(_tokenToReceive).balanceOf(
+            address(this)
+        );
+        // 1. Approve the router to spend the token to swap
+        IERC20(_tokenToSwap).safeApprove(
+            address(i_universalRouter),
+            _amountToSwap
+        );
+
+        // 2. Execute swap
+        i_universalRouter.execute(commands, inputs);
+
+        // 3. Get real amount received
+        uint256 balanceAfter = IERC20(_tokenToReceive).balanceOf(address(this));
+        assetReceivedTokenDecimals = balanceAfter - balanceBefore;
     }
 
     /**
@@ -975,25 +1065,24 @@ contract Index is IIndex, ERC20, AccessControl {
             uint256 totalUsdValue
         )
     {
-        (uint128 asset0Amount, uint128 asset1Amount) = getAssetsAmount();
-        uint256 asset0Price = getLatestPrice(address(i_asset0));
-        uint256 asset1Price = getLatestPrice(address(i_asset1));
-
-        asset0TotalUsdValue = UnderlyingMath
-            .calculateUSDValueOfTokenAmountStdDecimals(
-                asset0Amount,
-                asset0Price,
-                DECIMALS_STANDARD
-            );
-        asset1TotalUsdValue = UnderlyingMath
-            .calculateUSDValueOfTokenAmountStdDecimals(
-                asset1Amount,
-                asset1Price,
-                DECIMALS_STANDARD
-            );
-        totalUsdValue = asset0TotalUsdValue + asset1TotalUsdValue;
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            asset0TotalUsdValue,
+            asset1TotalUsdValue,
+            totalUsdValue
+        ) = _initFunctionValues();
     }
 
+    /**
+     * @dev Gets the effective weights of the underlying assets in the index.
+     * @dev The effective weight is calculated as the ratio of the asset's USD value to the total USD value of the index.
+     * @return effectiveWeight0 The effective weight of asset0 in the index.
+     * @return effectiveWeight1 The effective weight of asset1 in the index.
+     */
     function getAssetsEffectiveWeights()
         public
         view
@@ -1021,19 +1110,20 @@ contract Index is IIndex, ERC20, AccessControl {
         pure
         returns (uint128 effectiveWeight0, uint128 effectiveWeight1)
     {
-        // a = totalAsset0
-        // b = totalAsset1
-        // c = totalValue (a + b)
-        // x = effectiveWeight0
-        // y = effectiveWeight1
-        // a : c = x : 100 => x = (a * 100) / c
-        // b : c = y : 100 => y = (b * 100) / c
-        effectiveWeight0 = SafeCast.toUint128(
-            (asset0UsdValue * MAX_PERCENTAGE) / totalAssetUsdValue
-        );
-        effectiveWeight1 = SafeCast.toUint128(
-            (asset1UsdValue * MAX_PERCENTAGE) / totalAssetUsdValue
-        );
+        effectiveWeight0 = UnderlyingMath
+            .calculateEffectiveWeight(
+                asset0UsdValue,
+                totalAssetUsdValue,
+                MAX_PERCENTAGE
+            )
+            .toUint128();
+        effectiveWeight1 = UnderlyingMath
+            .calculateEffectiveWeight(
+                asset1UsdValue,
+                totalAssetUsdValue,
+                MAX_PERCENTAGE
+            )
+            .toUint128();
     }
 
     function getAssetsAndUsdcDecimals()

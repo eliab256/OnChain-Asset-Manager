@@ -11,11 +11,33 @@ interface ISwapManager {
         PoolKey memory _poolKeyAsset0Asset1
     ) external;
 
-    function swapExactInput(
+    function buildSingleSwapParams(
         address _indexAddress,
         SwapType _swapType,
         address _tokenIn,
-        address _tokenOut,
-        uint256 _amountIn
-    ) external returns (uint256 amountOut);
+        uint128 _amountIn
+    )
+        external
+        view
+        returns (
+            bytes memory commands,
+            bytes[] memory inputs,
+            address tokenIn,
+            address tokenOut
+        );
+
+    function buildDoubleSwapParams(
+        address _indexAddress,
+        SwapType _swapType0,
+        SwapType _swapType1,
+        address _tokenIn0,
+        address _tokenIn1,
+        uint128 _amountIn0,
+        uint128 _amountIn1
+    ) external view returns (bytes memory commands, bytes[] memory inputs);
+
+    function getPoolKey(
+        address _indexAddress,
+        SwapType _swapType
+    ) external view returns (PoolKey memory);
 }
