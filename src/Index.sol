@@ -718,7 +718,7 @@ contract Index is IIndex, ERC20, AccessControl {
             );
 
         
-        // 4. Conditional swap and reserve updates
+        // 4. Conditional swap 
         uint128 updatedReserv0;
         uint128 updatedReserv1;
         if (amount0ToSwap > 0) {
@@ -741,6 +741,8 @@ contract Index is IIndex, ERC20, AccessControl {
         }
 
         (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
+
+        // 5. Check that after the swap the USD value of totalAsset has not decreased more than the acceptable slippage tolerance, otherwise revert
         if (
             totalAssetUsdValueAfter <
             initState.totalAssetUsdValue.calculateNetAmountFromTolerance(
@@ -754,7 +756,7 @@ contract Index is IIndex, ERC20, AccessControl {
         s_asset0Reserve = updatedReserv0;
         s_asset1Reserve = updatedReserv1;
 
-        // 5. Emit event
+        // 6. Emit event
         emit IndexRebalanced(
             initState.initialAsset0Reserve,
             initState.initialAsset1Reserve,
@@ -917,7 +919,6 @@ contract Index is IIndex, ERC20, AccessControl {
         address _swapFrom,
         uint256 _amountToSwap
     ) internal returns (uint128 amountReceived) {
-        // TO BE IMPLEMENTED
         // 1. Convert the amount to swap from 18 decimals standard to token decimals
         uint256 amountToSwapTokenDecimals;
         if (_swapFrom == address(i_asset0)) {
@@ -945,8 +946,7 @@ contract Index is IIndex, ERC20, AccessControl {
                 amountToSwapTokenDecimals
             );
 
-        // 3. Make Swap
-        // @audit-info implement swap with slippage protection
+        // 3. Make Swap and get the amount received in token decimals
         uint256 amountReceivedTokenDecimals = _executeSwap(
             commands,
             inputs,
@@ -955,7 +955,7 @@ contract Index is IIndex, ERC20, AccessControl {
             amountToSwapTokenDecimals
         );
 
-        // 4. Convert the received asset amount to 18 decimals standard
+        // 4. Convert the received asset amount to 18 decimals standard and return the amount received in standard decimals
         uint8 assetDecimals = _swapFrom == address(i_asset0)
             ? i_decimals1
             : i_decimals0;
@@ -964,11 +964,7 @@ contract Index is IIndex, ERC20, AccessControl {
             assetDecimals
         ).toUint128();
 
-        // 5. Controlla che dopo lo swap il controvalore in usd di totalAsset non sia diminuito più della tolleranza dello slippage accettabile, altrimenti revert
-        // (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
-        // if(totalAssetUsdValueAfter < initState.totalAssetUsdValue.calculateNetAmountFromTolerance(MAX_SLIPPAGE_TOLERANCE, MAX_PERCENTAGE)) {
-        //     revert Index__RebalanceSlippageTooHigh();
-        // }
+        // The check on returned amount from swap is done in the calling function
     }
 
     function _executeSwap(
