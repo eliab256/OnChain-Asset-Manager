@@ -60,10 +60,10 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
         i_usdcPriceFeed = _usdcPriceFeed;
         i_uniswapUniversalRouter = _uniswapUniversalRouter;
 
-        grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        grantRole(ASSET_MANAGER_ROLE, msg.sender);
-        grantRole(FEE_COLLECTOR_ROLE, msg.sender);
-        grantRole(REBALANCER_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ASSET_MANAGER_ROLE, msg.sender);
+        _grantRole(FEE_COLLECTOR_ROLE, msg.sender);
+        _grantRole(REBALANCER_ROLE, msg.sender);
     }
 
     /**

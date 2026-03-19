@@ -27,6 +27,7 @@ contract DeployPeriphery is Script, CodeConstants {
         bool isAnvil = block.chainid == ANVIL_CHAIN_ID;
 
         vm.startBroadcast(deployer);
+        
         console.log(
             "======================= Contracts Deployment ================="
         );

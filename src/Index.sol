@@ -105,9 +105,9 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
         i_decimalsUsdc = IERC20Metadata(_usdcAddress).decimals();
 
-        grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        grantRole(INDEX_MANAGER_ROLE, msg.sender);
-        grantRole(ROUTER_ROLE, _router);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(INDEX_MANAGER_ROLE, msg.sender);
+        _grantRole(ROUTER_ROLE, _router);
     }
 
     /**

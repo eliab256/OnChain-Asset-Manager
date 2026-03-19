@@ -9,6 +9,7 @@ import {HelperConfig} from "../../script/HelperConfig.s.sol";
 import {Router} from "../../src/Router.sol";
 import {IndexManager} from "../../src/IndexManager.sol";
 import {Index} from "../../src/Index.sol";
+import {SwapManager} from "../../src/SwapManager.sol";
 import {MockUSDC} from "../mocks/USDCMock.sol";
 import {AssetTokenMock} from "../mocks/AssetTokenMock.sol";
 import {
@@ -16,13 +17,14 @@ import {
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {IndexAsset, AssetAvailable} from "../../src/types.sol";
 
-contract BaseTest is Test {
+abstract contract BaseTest is Test {
     DeployPeriphery public deployerPeriphery;
     HelperConfig public helperConfig;
     Router public router;
     IndexManager public indexManager;
     DeployAndInitNewIndex public deployAndInitNewIndex;
     Index public index;
+    SwapManager public swapManager;
 
     // Mocks
     MockUSDC public mockUsdc;
@@ -57,7 +59,7 @@ contract BaseTest is Test {
         deployerPeriphery = new DeployPeriphery();
         deployAndInitNewIndex = new DeployAndInitNewIndex();
 
-        (indexManager, router, helperConfig, , deployer) = deployerPeriphery
+        (indexManager, router, helperConfig, swapManager , deployer) = deployerPeriphery
             .run();
 
         (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
