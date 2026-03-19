@@ -81,8 +81,4 @@ interface IIndex is IERC20, IERC20Metadata {
         external
         view
         returns (uint32 feePercentage, uint128 totalFees);
-
-    function getPercentagePrecision() external pure returns (uint128);
-
-    function getWeightPrecision() external pure returns (uint128);
 }

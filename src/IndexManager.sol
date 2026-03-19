@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {CodeConstants} from "../script/CodeConstants.sol";
+import {CodeConstants} from "./CodeConstants.sol";
 import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";

@@ -12,17 +12,17 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract DeployAndInitNewIndex is Script {
-    struct RunParams {
-        AssetAvailable assetA;
-        AssetAvailable assetB;
-        uint128 weightA;
-        uint128 weightB;
-        uint32 feePercentage;
-        uint256 initialAssetADeposit;
-        uint256 initialAssetBDeposit;
-    }
+struct RunParams {
+    AssetAvailable assetA;
+    AssetAvailable assetB;
+    uint128 weightA;
+    uint128 weightB;
+    uint32 feePercentage;
+    uint256 initialAssetADeposit;
+    uint256 initialAssetBDeposit;
+}
 
+contract DeployAndInitNewIndex is Script {
     IndexManager public indexManager;
     HelperConfig public helperConfig;
 

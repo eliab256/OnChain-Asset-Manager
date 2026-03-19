@@ -20,21 +20,21 @@ import {
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
-import {CodeConstant} from "./CodeConstant.sol";
+import {CodeConstants} from "./CodeConstants.sol";
 import {console} from "forge-std/console.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {
     IUniversalRouter
 } from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
 
-contract Index is IIndex, ERC20, AccessControl, CodeConstant {
+contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
 
-    bytes32 public constant ASSET_MANAGER_ROLE =
-        keccak256("ASSET_MANAGER_ROLE");
+    bytes32 public constant INDEX_MANAGER_ROLE =
+        keccak256("INDEX_MANAGER_ROLE");
     bytes32 public constant ROUTER_ROLE = keccak256("ROUTER_ROLE");
 
     IERC20 internal immutable i_asset0;
