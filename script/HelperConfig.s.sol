@@ -45,8 +45,8 @@ contract HelperConfig is CodeConstants, Script {
      * @dev Reverts with HelperConfig__InvalidChainId if chain is not supported
      */
     constructor() {
-        if (block.chainid == SEPOLIA_CHAIN_ID) {
-            activeNetworkConfig = getSepoliaConfig();
+        if (block.chainid == MAINNET_CHAIN_ID) {
+            activeNetworkConfig = getMainnetConfig();
         } else if (block.chainid == ANVIL_CHAIN_ID) {
             activeNetworkConfig = getAnvilConfig();
         } else {
@@ -67,45 +67,47 @@ contract HelperConfig is CodeConstants, Script {
         return assetConfigByChainId[asset][block.chainid];
     }
     /**
-     * @notice Returns network configuration for Sepolia testnet
-     * @return NetworkConfig Configuration struct with Sepolia testnet parameters
+     * @notice Returns network configuration for Ethereum mainnet.
+     * @return NetworkConfig Configuration struct with Ethereum mainnet parameters.
      */
-    function getSepoliaConfig() public returns (NetworkConfig memory) {
+    function getMainnetConfig() public returns (NetworkConfig memory) {
+        address mainnetDeployer = vm.envAddress("MAINNET_DEPLOYER");
+
         assetConfigByChainId[AssetAvailable.USDC][
-            SEPOLIA_CHAIN_ID
+            MAINNET_CHAIN_ID
         ] = AssetConfig({
-            token: USDC_SEPOLIA,
-            priceFeed: USDC_USD_PRICEFEED_SEPOLIA
+            token: USDC_MAINNET,
+            priceFeed: USDC_USD_PRICEFEED_MAINNET
         });
 
         assetConfigByChainId[AssetAvailable.WETH][
-            SEPOLIA_CHAIN_ID
+            MAINNET_CHAIN_ID
         ] = AssetConfig({
-            token: WETH_SEPOLIA,
-            priceFeed: WETH_USD_PRICEFEED_SEPOLIA
+            token: WETH_MAINNET,
+            priceFeed: WETH_USD_PRICEFEED_MAINNET
         });
 
         assetConfigByChainId[AssetAvailable.WBTC][
-            SEPOLIA_CHAIN_ID
+            MAINNET_CHAIN_ID
         ] = AssetConfig({
-            token: WBTC_SEPOLIA,
-            priceFeed: WBTC_USD_PRICEFEED_SEPOLIA
+            token: WBTC_MAINNET,
+            priceFeed: WBTC_USD_PRICEFEED_MAINNET
         });
 
         assetConfigByChainId[AssetAvailable.LINK][
-            SEPOLIA_CHAIN_ID
+            MAINNET_CHAIN_ID
         ] = AssetConfig({
-            token: LINK_SEPOLIA,
-            priceFeed: LINK_USD_PRICEFEED_SEPOLIA
+            token: LINK_MAINNET,
+            priceFeed: LINK_USD_PRICEFEED_MAINNET
         });
         return
             NetworkConfig({
-                usdcAddress: USDC_SEPOLIA,
-                usdcPriceFeedAddress: USDC_USD_PRICEFEED_SEPOLIA,
-                uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_SEPOLIA,
-                deployerAccount: SEPOLIA_DEPLOYER,
-                feeCollector: SEPOLIA_DEPLOYER,
-                rebalancer: SEPOLIA_DEPLOYER
+                usdcAddress: USDC_MAINNET,
+                usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
+                uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
+                deployerAccount: mainnetDeployer,
+                feeCollector: mainnetDeployer,
+                rebalancer: mainnetDeployer
             });
     }
 
@@ -202,8 +204,8 @@ contract HelperConfig is CodeConstants, Script {
     function getConfigByChainId(
         uint256 chainId
     ) public returns (NetworkConfig memory) {
-        if (chainId == SEPOLIA_CHAIN_ID) {
-            return getSepoliaConfig();
+        if (chainId == MAINNET_CHAIN_ID) {
+            return getMainnetConfig();
         } else if (chainId == ANVIL_CHAIN_ID) {
             return getAnvilConfig();
         } else {
