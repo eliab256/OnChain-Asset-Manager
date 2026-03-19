@@ -40,6 +40,17 @@ contract SwapManager is Ownable {
         ] = _poolKeyAsset0Asset1;
     }
 
+    /**
+     * @dev Builds the parameters for a single swap.
+     * @param _indexAddress The address of the index.
+     * @param _swapType The type of swap.
+     * @param _tokenIn The address of the input token.
+     * @param _amountIn The amount of the input token.
+     * @return commands The encoded commands for the swap.
+     * @return inputs The encoded inputs for the swap.
+     * @return tokenIn The address of the input token.
+     * @return tokenOut The address of the output token.
+     */
     function buildSingleSwapParams(
         address _indexAddress,
         SwapType _swapType,
@@ -103,7 +114,7 @@ contract SwapManager is Ownable {
         uint128 _amountIn0,
         uint128 _amountIn1
     ) external view returns (bytes memory commands, bytes[] memory inputs) {
-        // primo swap — zeroForOne derivato da tokenIn0
+        // first swap — zeroForOne derived from tokenIn0
         (, bytes[] memory inputs0, , ) = buildSingleSwapParams(
             _indexAddress,
             _swapType0,
@@ -111,7 +122,7 @@ contract SwapManager is Ownable {
             _amountIn0
         );
 
-        // secondo swap — zeroForOne derivato da tokenIn1
+        // second swap — zeroForOne derived from tokenIn1
         (, bytes[] memory inputs1, , ) = buildSingleSwapParams(
             _indexAddress,
             _swapType1,
