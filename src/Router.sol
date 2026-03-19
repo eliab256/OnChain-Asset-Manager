@@ -13,7 +13,7 @@ import {
     ReentrancyGuard
 } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Router is ReentrancyGuard {
+contract Router is IRouter, ReentrancyGuard {
     IIndexManager private immutable i_IndexManager;
     IERC20 private immutable i_usdc;
 

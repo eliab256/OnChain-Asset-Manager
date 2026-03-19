@@ -72,4 +72,10 @@ abstract contract CodeConstants {
     // @audit-issue set deployer account with .env file
     address public constant ANVIL_DEPLOYER =
         0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-}
+
+    // // UniswapV4 pool Ids
+    // bytes32 public constant LINK_USDC_POOL_ID_SEPOLIA = 0x50ae33c238824aa1937d5d9f1766c487bca39b548f8d957994e8357eeeca3280;
+    // bytes32 public constant WBTC_USDC_POOL_ID_SEPOLIA = 0x3ea74c37fbb79dfcd6d760870f0f4e00cf4c3960b3259d0d43f211c0547394c1;
+    // bytes32 public constant WETH_USDC_POOL_ID_SEPOLIA = ;
+    // bytes32 public constant WETH_WBTC_POOL_ID_SEPOLIA = ;
+}   

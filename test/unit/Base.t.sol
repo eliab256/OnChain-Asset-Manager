@@ -57,20 +57,20 @@ contract BaseTest is Test {
         deployerPeriphery = new DeployPeriphery();
         deployAndInitNewIndex = new DeployAndInitNewIndex();
 
-        (indexManager, router, /*helperConfig*/, deployer) = deployerPeriphery
+        (indexManager, router, helperConfig, , deployer) = deployerPeriphery
             .run();
 
-        // (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
-        //     .getAssetTokenMocks();
-        // (
-        //     mockWethPriceFeed,
-        //     mockUsdcPriceFeed,
-        //     mockWbtcPriceFeed,
-        //     mockLinkPriceFeed
-        // ) = helperConfig.getPriceFeedMocks();
+        (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
+            .getAssetTokenMocks();
+        (
+            mockWethPriceFeed,
+            mockUsdcPriceFeed,
+            mockWbtcPriceFeed,
+            mockLinkPriceFeed
+        ) = helperConfig.getPriceFeedMocks();
 
-        // feeCollector = helperConfig.getFeeCollector();
-        // rebalancer = helperConfig.getRebalancer();
+        feeCollector = helperConfig.getFeeCollector();
+        rebalancer = helperConfig.getRebalancer();
 
         vm.label(deployer, "assetManager");
         vm.label(feeCollector, "feeCollector");
@@ -79,18 +79,25 @@ contract BaseTest is Test {
         vm.label(user2, "user2");
         vm.label(user3, "user3");
 
-        mockWeth.mint(deployer, INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals());
-        mockWbtc.mint(deployer, INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals());
-        mockLink.mint(deployer, INITIAL_LINK_BALANCE * 10 ** mockLink.decimals());
-        mockUsdc.mint(deployer, INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals());
-
+        mockWeth.mint(
+            deployer,
+            INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals()
+        );
+        mockWbtc.mint(
+            deployer,
+            INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals()
+        );
+        mockLink.mint(
+            deployer,
+            INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()
+        );
+        mockUsdc.mint(
+            deployer,
+            INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()
+        );
     }
 
     function testDeployNewIndex() public {
-              
         assert(address(mockUsdc) != address(0));
-
     }
-
-    
 }

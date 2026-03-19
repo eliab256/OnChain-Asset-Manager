@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 interface IRouter {
-    // External functions
+    // External state-changing functions
     function buyExactUsdcAmountOfShares(
         address _indexAddress,
         uint256 _usdcAmount,
@@ -15,7 +15,7 @@ interface IRouter {
         uint256 _maxTolerance
     ) external;
 
-    // View functions
+    // External view functions
     function getMinRedeemPreview(
         address _indexAddress,
         uint256 _sharesAmount,

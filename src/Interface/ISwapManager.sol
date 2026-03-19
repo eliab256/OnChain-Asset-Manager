@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {SwapType, PoolKey} from "../types.sol";
+import {SwapType, SwapRoute} from "../types.sol";
 
 interface ISwapManager {
     function registerIndex(
         address _indexAddress,
-        PoolKey memory _poolKeyAsset0Usdc,
-        PoolKey memory _poolKeyAsset1Usdc,
-        PoolKey memory _poolKeyAsset0Asset1
+        SwapRoute memory _routeAsset0Usdc,
+        SwapRoute memory _routeAsset1Usdc,
+        SwapRoute memory _routeAsset0Asset1
     ) external;
 
     function buildSingleSwapParams(
@@ -36,8 +36,8 @@ interface ISwapManager {
         uint128 _amountIn1
     ) external view returns (bytes memory commands, bytes[] memory inputs);
 
-    function getPoolKey(
+    function getRoute(
         address _indexAddress,
         SwapType _swapType
-    ) external view returns (PoolKey memory);
+    ) external view returns (SwapRoute memory);
 }

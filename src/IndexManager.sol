@@ -7,7 +7,7 @@ import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import "./errors/IndexManagerErrors.sol";
 import "./events/IndexManagerEvents.sol";
-import {IndexAsset, PoolKey} from "./types.sol";
+import {IndexAsset, SwapRoute} from "./types.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -79,6 +79,10 @@ contract IndexManager is IIndexManager, AccessControl {
         emit RouterAddressSet(_newRouter, msg.sender);
     }
 
+    /**
+     * @notice Sets the address of the swap manager contract.
+     * @param _swapManager The address of the new swap manager contract.
+     */
     function setSwapManagerAddress(
         address _swapManager
     ) public onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -96,7 +100,7 @@ contract IndexManager is IIndexManager, AccessControl {
      * @param _assetB The second underlying asset of the index. The struct includes the asset address, its weight percentage in the index, and its Chainlink price feed address.
      */
     function createIndex(
-        uint256 _feePercentage,
+        uint32 _feePercentage,
         IndexAsset memory _assetA,
         IndexAsset memory _assetB
     )
@@ -124,25 +128,25 @@ contract IndexManager is IIndexManager, AccessControl {
             asset1 = _assetA;
         }
 
-        // CHECK INDEX IS NOT ALREADY CREATED
+        // Check that the index does not already exist.
         if (s_getIndex[asset0.asset][asset1.asset] != address(0)) {
             revert IndexManager__IndexAlreadyExists(
                 s_getIndex[asset0.asset][asset1.asset]
             );
         }
 
-        // CHECK WEIGHT PERCENTAGES SUM TO 100
+        // Check that the weights sum to 100%.
         if (
             asset0.weightPercentage + asset1.weightPercentage != MAX_PERCENTAGE
         ) {
             revert IndexManager__InvalidIndexAssetsPercentages();
         }
 
-        // CHECK UNDERLYIN ASSETS ARE ERC20
+        // Check that the underlying assets implement ERC20 metadata.
         _validateAssetIsERC20(asset0.asset);
         _validateAssetIsERC20(asset1.asset);
 
-        // CHECK UNDERLYIN ASSETS HAVE PRICEFEED CHAINLINK
+        // Check that the underlying assets have valid Chainlink price feeds.
         _validatePriceFeed(asset0.priceFeed);
         _validatePriceFeed(asset1.priceFeed);
 
@@ -160,13 +164,16 @@ contract IndexManager is IIndexManager, AccessControl {
      * @notice Initializes the specified index with the given underlying amount.
      * @param _indexAddress The address of the index to initialize.
      * @param _underlyingAmount0 The amount of the first underlying asset to initialize the index with.
+     * @param _routeAsset0Usdc The route used for Asset0 ↔ USDC swaps.
+     * @param _routeAsset1Usdc The route used for Asset1 ↔ USDC swaps.
+     * @param _routeAsset0Asset1 The route used for Asset0 ↔ Asset1 swaps.
      */
     function initializeIndex(
         address _indexAddress,
         uint256 _underlyingAmount0,
-        PoolKey memory _poolKeyAsset0Usdc,
-        PoolKey memory _poolKeyAsset1Usdc,
-        PoolKey memory _poolKeyAsset0Asset1
+        SwapRoute memory _routeAsset0Usdc,
+        SwapRoute memory _routeAsset1Usdc,
+        SwapRoute memory _routeAsset0Asset1
     ) public onlyRole(ASSET_MANAGER_ROLE) {
         if (_underlyingAmount0 == 0) {
             revert IndexManager__InvalidIndexAssetsAmount();
@@ -183,9 +190,9 @@ contract IndexManager is IIndexManager, AccessControl {
 
         ISwapManager(s_swapManager).registerIndex(
             _indexAddress,
-            _poolKeyAsset0Usdc,
-            _poolKeyAsset1Usdc,
-            _poolKeyAsset0Asset1
+            _routeAsset0Usdc,
+            _routeAsset1Usdc,
+            _routeAsset0Asset1
         );
 
         IIndex(_indexAddress).initialize(_underlyingAmount0);
@@ -259,7 +266,7 @@ contract IndexManager is IIndexManager, AccessControl {
         if (_newWeightAsset0 > MAX_PERCENTAGE) {
             revert IndexManager__InvalidPercentage();
         }
-        // weight of asset1 is implicitly calculated as 100% - weight of asset0
+        // The weight of asset1 is implicitly calculated as 100% - weight of asset0.
         IIndex index = IIndex(_indexAddress);
         (uint128 oldWeightAsset0, uint128 oldWeightAsset1) = index
             .getAssetsWeights();
@@ -484,9 +491,9 @@ contract IndexManager is IIndexManager, AccessControl {
     function _deployIndex(
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
-        uint256 _feePercentage
+        uint32 _feePercentage
     ) internal returns (address index) {
-        // prepare data for Index constructor
+        // Prepare constructor data for the Index deployment.
         string memory name;
         string memory symbol;
         {
@@ -583,7 +590,7 @@ contract IndexManager is IIndexManager, AccessControl {
      * @return success A boolean indicating whether the fee collection and transfer were successful.
      * @return reason A string containing the reason for failure if the fee collection or transfer was not successful, or "Unknown error" if the reason could not be determined.
      */
-    // @audit-info fare post linkedin su trycatch e revert
+    // @audit-info: document the try/catch and revert pattern later
     function _collectFeesFroSingleIndex(
         address _indexAddress,
         address _feeCollector
@@ -643,6 +650,10 @@ contract IndexManager is IIndexManager, AccessControl {
         return s_router;
     }
 
+    /**
+     * @notice Returns the address of the swap manager used by the index manager.
+     * @return The swap manager address.
+     */
     function getSwapManagerAddress() public view returns (address) {
         return s_swapManager;
     }

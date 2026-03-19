@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IndexAsset, PoolKey} from "../types.sol";
+import {IndexAsset, SwapRoute} from "../types.sol";
 
 interface IIndexManager {
     function setRouterAddress(address _newRouter) external;
@@ -9,7 +9,7 @@ interface IIndexManager {
     function setSwapManagerAddress(address _swapManager) external;
 
     function createIndex(
-        uint256 _feePercentage,
+        uint32 _feePercentage,
         IndexAsset memory _assetA,
         IndexAsset memory _assetB
     ) external returns (address index, address token0, address token1);
@@ -17,9 +17,9 @@ interface IIndexManager {
     function initializeIndex(
         address _indexAddress,
         uint256 _underlyingAmount0,
-        PoolKey memory _poolKeyAsset0Usdc,
-        PoolKey memory _poolKeyAsset1Usdc,
-        PoolKey memory _poolKeyAsset0Asset1
+        SwapRoute memory _routeAsset0Usdc,
+        SwapRoute memory _routeAsset1Usdc,
+        SwapRoute memory _routeAsset0Asset1
     ) external;
 
     function rebalanceIndex(address _indexAddress) external;

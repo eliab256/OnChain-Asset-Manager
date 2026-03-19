@@ -2,12 +2,10 @@
 pragma solidity ^0.8.0;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 struct IndexAsset {
     address asset;
-    uint128 weightPercentage; // With 4 decimals, e.g. 500000 = 50%
+    uint128 weightPercentage; // Uses 4 decimal places, e.g. 500000 = 50%
     address priceFeed;
 }
 
@@ -33,4 +31,15 @@ enum SwapType {
     ASSET0_USDC,
     ASSET1_USDC,
     ASSET0_ASSET1
+}
+
+enum PoolVersion {
+    V3,
+    V4
+}
+
+struct SwapRoute {
+    PoolVersion version;
+    PoolKey poolKey; // Used only for V4 routes
+    bytes v3Path; // Used only for V3 routes
 }

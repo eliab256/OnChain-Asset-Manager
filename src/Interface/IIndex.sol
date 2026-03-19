@@ -7,7 +7,7 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface IIndex is IERC20, IERC20Metadata {
-    // Functions
+    // External functions
     function initialize(uint256 _underlyingAmount0) external;
 
     function mintShares(
