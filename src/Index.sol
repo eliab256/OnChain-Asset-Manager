@@ -20,17 +20,22 @@ import {
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
+import {CodeConstant} from "./CodeConstant.sol";
 import {console} from "forge-std/console.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {
     IUniversalRouter
 } from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
 
-contract Index is IIndex, ERC20, AccessControl {
+contract Index is IIndex, ERC20, AccessControl, CodeConstant {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
+
+    bytes32 public constant ASSET_MANAGER_ROLE =
+        keccak256("ASSET_MANAGER_ROLE");
+    bytes32 public constant ROUTER_ROLE = keccak256("ROUTER_ROLE");
 
     IERC20 internal immutable i_asset0;
     IERC20 internal immutable i_asset1;
@@ -46,24 +51,6 @@ contract Index is IIndex, ERC20, AccessControl {
 
     ISwapManager internal immutable i_swapManager;
     IUniversalRouter internal immutable i_universalRouter;
-
-    uint256 public constant GRACE_PERIOD = 1 days;
-    uint256 public constant MAX_DELAY = 1 hours;
-    uint8 public constant DECIMALS_STANDARD = 18;
-    uint128 public constant PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
-    uint128 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION; // 100 with 4 decimals precision
-
-    bytes32 public constant INDEX_MANAGER_ROLE =
-        keccak256("INDEX_MANAGER_ROLE");
-    bytes32 public constant ROUTER_ROLE = keccak256("ROUTER_ROLE");
-
-    uint256 internal constant WEIGHT_UPDATE_DELAY = 2 days; // timelock duration
-    uint128 internal constant WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
-    uint128 internal constant MAX_WEIGHT = 100 * WEIGHT_PRECISION; // 100% with 4 decimals precision
-    uint128 internal constant REBALANCE_THRESHOLD = 3 * WEIGHT_PRECISION; // 3% with 4 decimals precision, if the effective weight of an asset deviates from its target weight by more than this threshold, the index can be rebalanced
-    uint256 internal constant MAX_SLIPPAGE_TOLERANCE =
-        2 * PERCENTAGE_FEE_PRECISION; // 2% with 4 decimals precision
-    uint256 internal constant SWAP_DEADLINE = 30; // 30 seconds
 
     uint128 internal s_weight0;
     uint128 internal s_weight1;
@@ -1327,13 +1314,5 @@ contract Index is IIndex, ERC20, AccessControl {
         returns (uint32 feePercentage, uint128 totalFees)
     {
         return (s_feePercentage, s_totalFees);
-    }
-
-    function getPercentagePrecision() public pure returns (uint128) {
-        return PERCENTAGE_FEE_PRECISION;
-    }
-
-    function getWeightPrecision() public pure returns (uint128) {
-        return WEIGHT_PRECISION;
     }
 }

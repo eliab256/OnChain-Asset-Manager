@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {CodeConstants} from "../script/CodeConstants.sol";
 import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
@@ -17,7 +18,7 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIndex} from "./Interface/IIndex.sol";
 
-contract IndexManager is IIndexManager, AccessControl {
+contract IndexManager is IIndexManager, AccessControl, CodeConstants {
     using SafeERC20 for IERC20;
 
     bytes32 public constant ASSET_MANAGER_ROLE =
@@ -25,8 +26,6 @@ contract IndexManager is IIndexManager, AccessControl {
     bytes32 public constant FEE_COLLECTOR_ROLE =
         keccak256("FEE_COLLECTOR_ROLE");
     bytes32 public constant REBALANCER_ROLE = keccak256("REBALANCER_ROLE");
-
-    uint128 public constant MAX_PERCENTAGE = 1000000; // 100% with 4 decimals
 
     IERC20 internal immutable i_usdc;
     address internal immutable i_usdcPriceFeed;
