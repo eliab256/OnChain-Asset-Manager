@@ -2,7 +2,9 @@
 pragma solidity ^0.8.0;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {
+    SafeERC20
+} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title MockUniversalRouter
@@ -44,25 +46,14 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract UniversalRouterMock {
     using SafeERC20 for IERC20;
 
-    // ─── Errors ───────────────────────────────────────────────────────────────
-
     error UniversalRouterMock__RateNotSet(address tokenIn, address tokenOut);
-    error UniversalRouterMock__InsufficientOutputBalance(address token, uint256 needed, uint256 available);
+    error UniversalRouterMock__InsufficientOutputBalance(
+        address token,
+        uint256 needed,
+        uint256 available
+    );
     error UniversalRouterMock__UnsupportedCommand(uint8 command);
     error UniversalRouterMock__InvalidPath();
-
-    // ─── Constants ────────────────────────────────────────────────────────────
-
-    uint8 public constant V3_SWAP_EXACT_IN = 0x00;
-    uint8 public constant V4_SWAP = 0x10;
-    uint256 public constant RATE_PRECISION = 1e18;
-
-    // ─── State ────────────────────────────────────────────────────────────────
-
-    /// @notice exchangeRates[tokenIn][tokenOut] = rate (scaled by RATE_PRECISION).
-    mapping(address => mapping(address => uint256)) public exchangeRates;
-
-    // ─── Events ───────────────────────────────────────────────────────────────
 
     event SwapExecuted(
         address indexed tokenIn,
@@ -72,7 +63,18 @@ contract UniversalRouterMock {
         address recipient
     );
 
-    event RateSet(address indexed tokenIn, address indexed tokenOut, uint256 rate);
+    event RateSet(
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 rate
+    );
+
+    uint8 public constant V3_SWAP_EXACT_IN = 0x00;
+    uint8 public constant V4_SWAP = 0x10;
+    uint256 public constant RATE_PRECISION = 1e18;
+
+    /// @notice exchangeRates[tokenIn][tokenOut] = rate (scaled by RATE_PRECISION).
+    mapping(address => mapping(address => uint256)) public exchangeRates;
 
     // ─── Configuration ────────────────────────────────────────────────────────
 
@@ -83,7 +85,11 @@ contract UniversalRouterMock {
      * @param rate     amountOut = (amountIn * rate) / RATE_PRECISION.
      *                 Use computeRate() to derive this value from human amounts.
      */
-    function setExchangeRate(address tokenIn, address tokenOut, uint256 rate) external {
+    function setExchangeRate(
+        address tokenIn,
+        address tokenOut,
+        uint256 rate
+    ) external {
         exchangeRates[tokenIn][tokenOut] = rate;
         emit RateSet(tokenIn, tokenOut, rate);
     }
@@ -115,8 +121,6 @@ contract UniversalRouterMock {
     function fundToken(address token, uint256 amount) external {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
     }
-
-    // ─── Core execute ─────────────────────────────────────────────────────────
 
     /**
      * @notice Mirrors IUniversalRouter.execute(commands, inputs, deadline).
@@ -156,14 +160,15 @@ contract UniversalRouterMock {
         (
             address recipient,
             uint256 amountIn,
-            ,          // amountOutMin — ignored in mock
+            , // amountOutMin — ignored in mock
             bytes memory path,
-            // payerIsUser — ignored in mock (we always pull from msg.sender)
-        ) = abi.decode(input, (address, uint256, uint256, bytes, bool));
+
+        ) = // payerIsUser — ignored in mock (we always pull from msg.sender)
+            abi.decode(input, (address, uint256, uint256, bytes, bool));
 
         if (path.length < 43) revert UniversalRouterMock__InvalidPath();
 
-        address tokenIn  = _addressAt(path, 0);
+        address tokenIn = _addressAt(path, 0);
         address tokenOut = _addressAt(path, path.length - 20);
 
         _executeSwap(tokenIn, tokenOut, amountIn, recipient);
@@ -188,8 +193,11 @@ contract UniversalRouterMock {
     function _handleV4Swap(bytes calldata input) internal {
         (, bytes[] memory actionParams) = abi.decode(input, (bytes, bytes[]));
 
-        (address tokenIn,  uint256 amountIn) = abi.decode(actionParams[1], (address, uint256));
-        (address tokenOut, )                 = abi.decode(actionParams[2], (address, uint256));
+        (address tokenIn, uint256 amountIn) = abi.decode(
+            actionParams[1],
+            (address, uint256)
+        );
+        (address tokenOut, ) = abi.decode(actionParams[2], (address, uint256));
 
         // V4 TAKE_ALL sends output to the caller (the Index contract).
         _executeSwap(tokenIn, tokenOut, amountIn, msg.sender);
@@ -204,14 +212,19 @@ contract UniversalRouterMock {
         address recipient
     ) internal {
         uint256 rate = exchangeRates[tokenIn][tokenOut];
-        if (rate == 0) revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);
+        if (rate == 0)
+            revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);
 
         uint256 amountOut = (amountIn * rate) / RATE_PRECISION;
 
         // Verify the mock has enough output tokens.
         uint256 available = IERC20(tokenOut).balanceOf(address(this));
         if (available < amountOut) {
-            revert UniversalRouterMock__InsufficientOutputBalance(tokenOut, amountOut, available);
+            revert UniversalRouterMock__InsufficientOutputBalance(
+                tokenOut,
+                amountOut,
+                available
+            );
         }
 
         // Pull input tokens from the caller.
@@ -226,7 +239,10 @@ contract UniversalRouterMock {
     // ─── Path helpers ─────────────────────────────────────────────────────────
 
     /// @dev Reads a 20-byte address from `data` starting at byte `offset`.
-    function _addressAt(bytes memory data, uint256 offset) internal pure returns (address result) {
+    function _addressAt(
+        bytes memory data,
+        uint256 offset
+    ) internal pure returns (address result) {
         // Load 32 bytes at offset and right-align the address (shift left 96 bits = 12 bytes).
         assembly {
             result := shr(96, mload(add(add(data, 0x20), offset)))
@@ -246,7 +262,10 @@ contract UniversalRouterMock {
      * @param amountOut Raw output amount (in tokenOut's decimals).
      * @return rate     Value to pass to setExchangeRate().
      */
-    function computeRate(uint256 amountIn, uint256 amountOut) external pure returns (uint256 rate) {
+    function computeRate(
+        uint256 amountIn,
+        uint256 amountOut
+    ) external pure returns (uint256 rate) {
         rate = (amountOut * RATE_PRECISION) / amountIn;
     }
 
@@ -263,7 +282,8 @@ contract UniversalRouterMock {
         uint256 amountIn
     ) external view returns (uint256 amountOut) {
         uint256 rate = exchangeRates[tokenIn][tokenOut];
-        if (rate == 0) revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);
+        if (rate == 0)
+            revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);
         amountOut = (amountIn * rate) / RATE_PRECISION;
     }
 }

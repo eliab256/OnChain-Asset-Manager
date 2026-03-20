@@ -15,12 +15,19 @@ interface IIndexManager {
     ) external returns (address index, address token0, address token1);
 
     function initializeIndex(
+        address _depositor,
         address _indexAddress,
         uint256 _underlyingAmount0,
         SwapRoute memory _routeAsset0Usdc,
         SwapRoute memory _routeAsset1Usdc,
         SwapRoute memory _routeAsset0Asset1
     ) external;
+
+    function retrieveAmountFromAmount(
+        uint256 _amount0,
+        address _indexAddress,
+        bool _zeroToOne
+    ) external view returns (uint256 amountToDeposit);
 
     function rebalanceIndex(address _indexAddress) external;
 
@@ -69,11 +76,15 @@ interface IIndexManager {
         address _assetAddressB
     ) external view returns (address index);
 
-    function getUsdcAddress() external view returns (address);
-
     function getRouterAddress() external view returns (address);
 
     function getSwapManagerAddress() external view returns (address);
 
     function getTotalFeesCollected() external view returns (uint256);
+
+    function getUsdc() external view returns (address);
+
+    function getUsdcPriceFeed() external view returns (address);
+
+    function getUniswapUniversalRouter() external view returns (address);
 }

@@ -4,7 +4,10 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../script/DeployPeriphery.s.sol";
-import {DeployAndInitNewIndex} from "../../script/DeployAndInitNewIndex.s.sol";
+import {
+    DeployAndInitNewIndex,
+    RunParams
+} from "../../script/DeployAndInitNewIndex.s.sol";
 import {HelperConfig} from "../../script/HelperConfig.s.sol";
 import {Router} from "../../src/Router.sol";
 import {IndexManager} from "../../src/IndexManager.sol";
@@ -15,6 +18,7 @@ import {AssetTokenMock} from "../mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
+import {UniversalRouterMock} from "../mocks/UniversalRouterMock.sol";
 import {IndexAsset, AssetAvailable} from "../../src/types.sol";
 
 abstract contract BaseTest is Test {
@@ -23,7 +27,8 @@ abstract contract BaseTest is Test {
     Router public router;
     IndexManager public indexManager;
     DeployAndInitNewIndex public deployAndInitNewIndex;
-    Index public index;
+    Index public indexWethWbtc;
+    Index public indexWethLink;
     SwapManager public swapManager;
 
     // Mocks
@@ -37,6 +42,8 @@ abstract contract BaseTest is Test {
     MockV3Aggregator public mockWbtcPriceFeed;
     MockV3Aggregator public mockLinkPriceFeed;
 
+    UniversalRouterMock public mockUniRouter;
+
     //Test partecipants
     address public deployer;
     address public feeCollector;
@@ -46,21 +53,26 @@ abstract contract BaseTest is Test {
     address public user3 = makeAddr("user3");
 
     //token Amounts
-    uint256 public constant INITIAL_WETH_BALANCE = 100_000;
+    uint256 public constant INITIAL_WETH_BALANCE = 1_000_000;
     uint256 public constant INITIAL_WBTC_BALANCE = 100_000;
     uint256 public constant INITIAL_LINK_BALANCE = 100_000_000;
     uint256 public constant INITIAL_USDC_BALANCE = 10_000_000_000;
 
     //constants
-    uint128 public PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
+    uint32 public PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
     uint128 public WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
 
-    function setUp() public {
+    function setUp() public virtual {
         deployerPeriphery = new DeployPeriphery();
         deployAndInitNewIndex = new DeployAndInitNewIndex();
 
-        (indexManager, router, helperConfig, swapManager , deployer) = deployerPeriphery
-            .run();
+        (
+            indexManager,
+            router,
+            helperConfig,
+            swapManager,
+            deployer
+        ) = deployerPeriphery.run();
 
         (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
             .getAssetTokenMocks();
@@ -70,6 +82,8 @@ abstract contract BaseTest is Test {
             mockWbtcPriceFeed,
             mockLinkPriceFeed
         ) = helperConfig.getPriceFeedMocks();
+
+        mockUniRouter = helperConfig.getUniswapUniversalRouter();
 
         feeCollector = helperConfig.getFeeCollector();
         rebalancer = helperConfig.getRebalancer();
@@ -97,6 +111,19 @@ abstract contract BaseTest is Test {
             deployer,
             INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()
         );
-    }
 
+        indexWethWbtc = deployAndInitNewIndex.run(
+            helperConfig,
+            address(indexManager),
+            RunParams({
+                assetA: AssetAvailable.WETH,
+                assetB: AssetAvailable.WBTC,
+                weightA: 50 * WEIGHT_PRECISION, // 50%
+                weightB: 50 * WEIGHT_PRECISION, // 50%
+                feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
+                initialAssetADeposit: 10 * 10 ** mockWeth.decimals(),
+                initialAssetBDeposit: 0
+            })
+        );
+    }
 }

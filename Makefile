@@ -24,13 +24,26 @@ ASSET1_ADDRESS 		?= 0xf531B8F309Be94191af87605CfBf600D71C2cFe0  # WETH Sepolia
 ASSET1_PRICEFEED 	?= 0x694AA1769357215DE4FAC081bf1f309aDC325306  # ETH/USD Sepolia
 
 # ─── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: create-index build test
+.PHONY: create-index build test test-index test-index-manager test-router test-swap-manager test-base
 
 build:
 	forge build
 
 test:
 	forge test
+
+test-index:
+	forge test --match-path test/unit/Index.t.sol
+
+test-indexmanager:
+	forge test --match-path test/unit/IndexManager.t.sol
+
+test-router:
+	forge test --match-path test/unit/Router.t.sol
+
+test-swap-manager:
+	forge test --match-path test/unit/SwapManager.t.sol
+
 
 create-index:
 	forge create src/Index.sol:Index \

@@ -71,22 +71,25 @@ contract DeployAndInitNewIndex is Script {
         uint256 initialAsset1Deposit;
         if (token0 == indexAssetA.asset) {
             initialAsset0Deposit = _params.initialAssetADeposit;
-            initialAsset1Deposit = type(uint256).max; // approve max for the token with variable deposit to simplify testing
+            initialAsset1Deposit = indexManager.retrieveAmountFromAmount(
+                initialAsset0Deposit,
+                newIndex,
+                true
+            );
         } else {
             initialAsset0Deposit = _params.initialAssetBDeposit;
-            initialAsset1Deposit = type(uint256).max; // approve max for the token with variable deposit to simplify testing
+            initialAsset1Deposit = indexManager.retrieveAmountFromAmount(
+                initialAsset0Deposit,
+                newIndex,
+                true
+            );
         }
 
-        IERC20(token0).forceApprove(
-            address(indexManager),
-            initialAsset0Deposit
-        );
-        IERC20(token1).forceApprove(
-            address(indexManager),
-            initialAsset1Deposit
-        );
+        IERC20(token0).forceApprove(address(newIndex), initialAsset0Deposit);
+        IERC20(token1).forceApprove(address(newIndex), initialAsset1Deposit);
         // initialize new index
         indexManager.initializeIndex(
+            config.deployerAccount,
             newIndex,
             initialAsset0Deposit,
             routeAsset0Usdc,

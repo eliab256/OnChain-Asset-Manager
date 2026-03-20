@@ -115,6 +115,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
      * @param _underlyingAmount0 The amount (in wei) of asset0 to initialize the index with.
      */
     function initialize(
+        address _depositor,
         uint256 _underlyingAmount0
     ) external onlyRole(INDEX_MANAGER_ROLE) {
         if (s_initialized) {
@@ -125,7 +126,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
             revert Index__InvalidUnderlyingAmount();
         }
         i_asset0.safeTransferFrom(
-            msg.sender,
+            _depositor,
             address(this),
             _underlyingAmount0
         );
@@ -169,7 +170,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
             );
 
         i_asset1.safeTransferFrom(
-            msg.sender,
+            _depositor,
             address(this),
             underlyingAmount1TokenDecimals
         );
@@ -182,7 +183,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         // Mint the initial shares to the initializer
         // All Values are in 18 decimals standard, so we can directly sum the USD values of the underlying assets to calculate the initial shares to mint
         uint256 initialShares = underlying0UsdValue + underlying1UsdValue;
-        _mint(msg.sender, initialShares);
+        _mint(_depositor, initialShares);
 
         emit IndexInitialized(
             underlyingAmount0,
@@ -1183,7 +1184,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         uint256 _amount,
         uint8 _currentDecimals
     ) internal pure returns (uint256) {
-        if (_currentDecimals >= DECIMALS_STANDARD) {
+        if (_currentDecimals <= DECIMALS_STANDARD) {
             (uint256 convertedAmount, ) = UnderlyingMath
                 .convertToSpecificDecimal(
                     _amount,
@@ -1325,6 +1326,22 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
 
     function getAsset1() public view returns (address) {
         return address(i_asset1);
+    }
+
+    function getUsdc() public view returns (address) {
+        return address(i_usdc);
+    }
+
+    function getAsset0PriceFeed() public view returns (address) {
+        return (address(i_asset0PriceFeed));
+    }
+
+    function getAsset1PriceFeed() public view returns (address) {
+        return (address(i_asset1PriceFeed));
+    }
+
+    function getUsdcPriceFeed() public view returns (address) {
+        return (address(i_usdcPriceFeed));
     }
 
     function getFeesInfo()

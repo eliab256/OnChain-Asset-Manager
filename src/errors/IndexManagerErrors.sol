@@ -13,3 +13,4 @@ error IndexManager__InvalidPriceFeedAddress();
 error IndexManager__NotIndexInitialized();
 error IndexManager__InvalidPercentage();
 error IndexManager__RouterAddressNotSet();
+error IndexManager__SwapManagerAddressNotSet();

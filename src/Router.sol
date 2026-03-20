@@ -48,7 +48,7 @@ contract Router is IRouter, ReentrancyGuard {
 
     constructor(address _indexManager) {
         i_IndexManager = IIndexManager(_indexManager);
-        i_usdc = IERC20(IIndexManager(_indexManager).getUsdcAddress());
+        i_usdc = IERC20(IIndexManager(_indexManager).getUsdc());
     }
 
     /**

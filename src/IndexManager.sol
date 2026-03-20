@@ -17,9 +17,15 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIndex} from "./Interface/IIndex.sol";
+import {console2} from "forge-std/console2.sol";
 
 contract IndexManager is IIndexManager, AccessControl, CodeConstants {
     using SafeERC20 for IERC20;
+
+    struct IndexAssets {
+        address asset0;
+        address asset1;
+    }
 
     bytes32 public constant ASSET_MANAGER_ROLE =
         keccak256("ASSET_MANAGER_ROLE");
@@ -27,13 +33,16 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
         keccak256("FEE_COLLECTOR_ROLE");
     bytes32 public constant REBALANCER_ROLE = keccak256("REBALANCER_ROLE");
 
-    IERC20 internal immutable i_usdc;
+    address internal immutable i_usdc;
     address internal immutable i_usdcPriceFeed;
     address internal immutable i_uniswapUniversalRouter;
 
     address[] private s_indexes;
     address[] private s_initializedIndexes;
+    // Mapping from assets to index
     mapping(address => mapping(address => address)) private s_getIndex;
+    // Mapping from index to address
+    mapping(address => IndexAssets) private s_indexAssets;
     mapping(address => bool) private s_isIndex;
     mapping(address => bool) private s_isInitialized;
 
@@ -56,7 +65,7 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
         address _usdcPriceFeed,
         address _uniswapUniversalRouter
     ) {
-        i_usdc = IERC20(_usdcAddress);
+        i_usdc = _usdcAddress;
         i_usdcPriceFeed = _usdcPriceFeed;
         i_uniswapUniversalRouter = _uniswapUniversalRouter;
 
@@ -72,7 +81,7 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
      */
     function setRouterAddress(
         address _newRouter
-    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
+    ) public onlyRole(ASSET_MANAGER_ROLE) {
         s_router = _newRouter;
 
         emit RouterAddressSet(_newRouter, msg.sender);
@@ -84,7 +93,7 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
      */
     function setSwapManagerAddress(
         address _swapManager
-    ) public onlyRole(DEFAULT_ADMIN_ROLE) {
+    ) public onlyRole(ASSET_MANAGER_ROLE) {
         s_swapManager = _swapManager;
 
         emit SwapManagerAddressSet(_swapManager, msg.sender);
@@ -109,6 +118,9 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
     {
         if (s_router == address(0)) {
             revert IndexManager__RouterAddressNotSet();
+        }
+        if (s_swapManager == address(0)) {
+            revert IndexManager__SwapManagerAddressNotSet();
         }
         if (_assetA.asset == _assetB.asset) {
             revert IndexManager__InvalidIndexAssetsAddress();
@@ -135,9 +147,7 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
         }
 
         // Check that the weights sum to 100%.
-        if (
-            asset0.weightPercentage + asset1.weightPercentage != MAX_PERCENTAGE
-        ) {
+        if (asset0.weightPercentage + asset1.weightPercentage != MAX_WEIGHT) {
             revert IndexManager__InvalidIndexAssetsPercentages();
         }
 
@@ -152,6 +162,10 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
         index = _deployIndex(asset0, asset1, _feePercentage);
 
         s_getIndex[asset0.asset][asset1.asset] = index;
+        s_indexAssets[index] = IndexAssets({
+            asset0: asset0.asset,
+            asset1: asset1.asset
+        });
         s_isIndex[index] = true;
         s_indexes.push(index);
 
@@ -168,6 +182,7 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
      * @param _routeAsset0Asset1 The route used for Asset0 ↔ Asset1 swaps.
      */
     function initializeIndex(
+        address _depositor,
         address _indexAddress,
         uint256 _underlyingAmount0,
         SwapRoute memory _routeAsset0Usdc,
@@ -194,9 +209,42 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
             _routeAsset0Asset1
         );
 
-        IIndex(_indexAddress).initialize(_underlyingAmount0);
+        IIndex(_indexAddress).initialize(_depositor, _underlyingAmount0);
 
         emit IndexInitialized(_indexAddress, msg.sender);
+    }
+
+    function retrieveAmountFromAmount(
+        uint256 _amount,
+        address _indexAddress,
+        bool _zeroToOne
+    ) public view returns (uint256 amountToDeposit) {
+        (uint128 weight0, uint128 weight1) = IIndex(_indexAddress)
+            .getAssetsWeights();
+        IndexAssets memory indexAssets = s_indexAssets[_indexAddress];
+        uint256 asset0Price = IIndex(_indexAddress).getLatestPrice(
+            indexAssets.asset0
+        );
+        uint256 asset1Price = IIndex(_indexAddress).getLatestPrice(
+            indexAssets.asset1
+        );
+        if (_zeroToOne) {
+            uint256 amount0InUsd = (_amount * asset0Price) /
+                (10 ** IERC20Metadata(indexAssets.asset0).decimals());
+            uint256 amount1InUsd = (amount0InUsd * weight1) / weight0;
+            amountToDeposit =
+                (amount1InUsd *
+                    (10 ** IERC20Metadata(indexAssets.asset1).decimals())) /
+                asset1Price;
+        } else {
+            uint256 amount1InUsd = (_amount * asset1Price) /
+                (10 ** IERC20Metadata(indexAssets.asset1).decimals());
+            uint256 amount0InUsd = (amount1InUsd * weight0) / weight1;
+            amountToDeposit =
+                (amount0InUsd *
+                    (10 ** IERC20Metadata(indexAssets.asset0).decimals())) /
+                asset0Price;
+        }
     }
 
     function rebalanceIndex(
@@ -508,8 +556,9 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
                 name,
                 symbol,
                 s_router,
-                address(i_usdc),
+                i_usdc,
                 i_usdcPriceFeed,
+                s_swapManager,
                 i_uniswapUniversalRouter,
                 _asset0,
                 _asset1,
@@ -634,30 +683,6 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
     }
 
     /**
-     * @dev Returns the address of the USDC token used by the index manager
-     * @return address The address of the USDC token
-     */
-    function getUsdcAddress() public view returns (address) {
-        return address(i_usdc);
-    }
-
-    /**
-     * @dev Returns the address of the router used by the index manager
-     * @return address The address of the router
-     */
-    function getRouterAddress() public view returns (address) {
-        return s_router;
-    }
-
-    /**
-     * @notice Returns the address of the swap manager used by the index manager.
-     * @return The swap manager address.
-     */
-    function getSwapManagerAddress() public view returns (address) {
-        return s_swapManager;
-    }
-
-    /**
      * @dev Returns the index address for a given pair of underlying assets, or address(0) if no index exists for that pair
      * The function sorts the asset addresses to ensure consistent ordering, so the caller can provide them in any order.
      * It then looks up the index address in the getIndex mapping using the sorted asset addresses as keys.
@@ -679,6 +704,22 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
     }
 
     /**
+     * @dev Returns the address of the router used by the index manager
+     * @return address The address of the router
+     */
+    function getRouterAddress() public view returns (address) {
+        return s_router;
+    }
+
+    /**
+     * @notice Returns the address of the swap manager used by the index manager.
+     * @return The swap manager address.
+     */
+    function getSwapManagerAddress() public view returns (address) {
+        return s_swapManager;
+    }
+
+    /**
      * @dev Returns all index addresses managed by the index manager
      * @return address[] An array of all index addresses
      */
@@ -692,5 +733,17 @@ contract IndexManager is IIndexManager, AccessControl, CodeConstants {
      */
     function getTotalFeesCollected() public view returns (uint256) {
         return s_totalFeesCollected;
+    }
+
+    function getUsdc() public view returns (address) {
+        return i_usdc;
+    }
+
+    function getUsdcPriceFeed() public view returns (address) {
+        return i_usdcPriceFeed;
+    }
+
+    function getUniswapUniversalRouter() public view returns (address) {
+        return i_uniswapUniversalRouter;
     }
 }

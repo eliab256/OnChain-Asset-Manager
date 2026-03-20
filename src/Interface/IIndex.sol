@@ -8,7 +8,7 @@ import {
 
 interface IIndex is IERC20, IERC20Metadata {
     // External functions
-    function initialize(uint256 _underlyingAmount0) external;
+    function initialize(address _depositor, uint256 _underlyingAmount0) external;
 
     function mintShares(
         address _to,

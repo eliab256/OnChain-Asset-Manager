@@ -18,12 +18,12 @@ abstract contract CodeConstants {
     /**
      * @dev The precision for percentage fee calculations, in basis points (1 basis point = 0.01%).
      */
-    uint128 public constant PERCENTAGE_FEE_PRECISION = 10000;
+    uint32 public constant PERCENTAGE_FEE_PRECISION = 10000;
 
     /**
      * @dev The maximum percentage value, in basis points.
      */
-    uint128 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
+    uint32 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
 
     /**
      * @dev The delay between weight updates propose and execution. 

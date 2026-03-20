@@ -4,6 +4,9 @@ pragma solidity ^0.8.0;
 import {CodeConstants} from "./CodeConstants.sol";
 import {Script} from "forge-std/Script.sol";
 import {MockUSDC} from "../test/mocks/USDCMock.sol";
+import {
+    UniversalRouterMock
+} from "../test/mocks/UniversalRouterMock.sol";
 import {AssetTokenMock} from "../test/mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
@@ -178,6 +181,8 @@ contract HelperConfig is CodeConstants, Script {
             priceFeed: address(mockLinkPriceFeed)
         });
 
+        UniversalRouterMock mockUniRouter = new UniversalRouterMock();
+
         address anvilFeeCollector = makeAddr("feeCollector");
         address anvilRebalancer = makeAddr("rebalancer");
 
@@ -185,9 +190,7 @@ contract HelperConfig is CodeConstants, Script {
             NetworkConfig({
                 usdcAddress: address(mockUsdc),
                 usdcPriceFeedAddress: address(mockUsdcPriceFeed),
-                uniswapUniversalRouter: /* @audit-issue create mock router*/ address(
-                    0
-                ),
+                uniswapUniversalRouter: address(mockUniRouter),
                 deployerAccount: ANVIL_DEPLOYER,
                 feeCollector: anvilFeeCollector,
                 rebalancer: anvilRebalancer
@@ -344,5 +347,9 @@ contract HelperConfig is CodeConstants, Script {
             MockV3Aggregator(wbtcConfig.priceFeed),
             MockV3Aggregator(linkConfig.priceFeed)
         );
+    }
+
+    function getUniswapUniversalRouter() public view returns (UniversalRouterMock) {
+        return UniversalRouterMock(activeNetworkConfig.uniswapUniversalRouter);
     }
 }
