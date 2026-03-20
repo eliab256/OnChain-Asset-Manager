@@ -99,7 +99,4 @@ abstract contract BaseTest is Test {
         );
     }
 
-    function testDeployNewIndex() public {
-        assert(address(mockUsdc) != address(0));
-    }
 }

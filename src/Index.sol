@@ -1037,12 +1037,22 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
                 address(i_asset0),
                 asset0AmountTokenDecimals
             );
+
+            i_asset0.forceApprove(
+                address(i_universalRouter),
+                asset0AmountTokenDecimals
+            );
         } else if (_asset0UsdToSwap == 0 && _asset1UsdToSwap > 0) {
             // Prepare a single swap from asset1 to USDC.
             (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
                 address(this),
                 SwapType.ASSET1_USDC,
                 address(i_asset1),
+                asset1AmountTokenDecimals
+            );
+
+            i_asset1.forceApprove(
+                address(i_universalRouter),
                 asset1AmountTokenDecimals
             );
         } else {
@@ -1056,10 +1066,19 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
                 asset0AmountTokenDecimals,
                 asset1AmountTokenDecimals
             );
+
+            i_asset0.forceApprove(
+                address(i_universalRouter),
+                asset0AmountTokenDecimals
+            );
+            i_asset1.forceApprove(
+                address(i_universalRouter),
+                asset1AmountTokenDecimals
+            );
         }
 
         // 3. Execute the swap.
-        // @audit-info: implement swap slippage protection
+        // @audit-issue : implement swap slippage protection
         uint256 usdcBalanceBefore = i_usdc.balanceOf(address(this));
         i_universalRouter.execute(
             commands,
