@@ -18,7 +18,7 @@ event IndexInitialized(
 );
 event IndexRebalanced(address indexed indexAddress, address indexed rebalancer);
 
-event IndexRebalanceFailed(address indexed indexAddress, string reason);
+event IndexRebalanceFailed(address indexed indexAddress, bytes reasonData);
 
 event NewIndexWeightsProposed(
     address indexed indexAddress,
@@ -38,9 +38,9 @@ event FeesCollected(
 event FeesCollectionFailed(
     address indexed indexAddress,
     address indexed feeCollector,
-    string reason
+    bytes reasonData
 );
 
 event WeightUpdateExecuted(address indexed indexAddress);
 
-event WeightUpdateFailed(address indexed indexAddress, string reason);
+event WeightUpdateFailed(address indexed indexAddress, bytes reasonData);

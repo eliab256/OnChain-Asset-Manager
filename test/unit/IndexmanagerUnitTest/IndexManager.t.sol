@@ -1,49 +1,88 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {BaseTest} from "./Base.t.sol";
-import {IndexManager} from "../../src/IndexManager.sol";
-import {IIndex} from "../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute} from "../../src/types.sol";
-import {HelperConfig} from "../../script/HelperConfig.s.sol";
+import {BaseTest} from "../Base.t.sol";
+import {IndexManager} from "../../../src/IndexManager.sol";
+import {IIndex} from "../../../src/Interface/IIndex.sol";
+import {IndexAsset, SwapRoute} from "../../../src/types.sol";
+import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Vm} from "forge-std/Vm.sol";
+import {console2} from "forge-std/console2.sol";
 
-import "../../src/errors/IndexManagerErrors.sol";
-import "../../src/events/IndexManagerEvents.sol";
+import "../../../src/errors/IndexManagerErrors.sol";
+import "../../../src/events/IndexManagerEvents.sol";
+import "../../../src/errors/IndexErrors.sol";
 
 contract IndexManagerTest is BaseTest {
-    /// 50 % — MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION = 1_000_000
-    uint128 public constant WEIGHT_50 = 500_000;
-
-    /// Valid proposed weight for asset0 (within ±REBALANCE_THRESHOLD = 30_000)
-    uint128 public constant VALID_NEW_WEIGHT = 520_000;
-
-    /// Default pool fee (0.05 %)
-    uint32 public constant DEFAULT_FEE = 500;
+    IndexAsset wethAsset60;
+    IndexAsset linkAsset40;
+    IIndex nonInitializedIndex;
+    address nonInitializedToken0;
+    address nonInitializedToken1;
 
     function setUp() public override {
         super.setUp();
-    }
-    function _createDefaultIndex()
-        internal
-        returns (address indexAddress, address token0, address token1)
-    {
-        IndexAsset memory wethAsset = IndexAsset({
+        //prepared index assets for tests
+        wethAsset60 = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: WEIGHT_50,
+            weightPercentage: weight60,
             priceFeed: address(mockWethPriceFeed)
         });
-        IndexAsset memory linkAsset = IndexAsset({
+        linkAsset40 = IndexAsset({
             asset: address(mockLink),
-            weightPercentage: WEIGHT_50,
+            weightPercentage: weight40,
             priceFeed: address(mockLinkPriceFeed)
+        });
+
+        //creat a mom initialized index
+        IndexAsset memory wbtcAsset40 = IndexAsset({
+            asset: address(mockWbtc),
+            weightPercentage: weight40,
+            priceFeed: address(mockWbtcPriceFeed)
+        });
+        IndexAsset memory linkAsset60 = IndexAsset({
+            asset: address(mockLink),
+            weightPercentage: weight60,
+            priceFeed: address(mockLinkPriceFeed)
+        });
+        vm.prank(deployer);
+        (
+            address nonInitializedIndexAddress,
+            address token0,
+            address token1
+        ) = indexManager.createIndex(
+                validFeePercentage,
+                wbtcAsset40,
+                linkAsset60
+            );
+        nonInitializedIndex = IIndex(nonInitializedIndexAddress);
+        nonInitializedToken0 = token0;
+        nonInitializedToken1 = token1;
+    }
+
+    function _createDefaultIndex(
+        address _assetA,
+        address _assetB,
+        address _priceFeedA,
+        address _priceFeedB
+    ) internal returns (address indexAddress, address token0, address token1) {
+        IndexAsset memory assetA = IndexAsset({
+            asset: _assetA,
+            weightPercentage: weight60,
+            priceFeed: _priceFeedA
+        });
+        IndexAsset memory assetB = IndexAsset({
+            asset: _assetB,
+            weightPercentage: weight40,
+            priceFeed: _priceFeedB
         });
 
         vm.prank(deployer);
         (indexAddress, token0, token1) = indexManager.createIndex(
-            DEFAULT_FEE,
-            wethAsset,
-            linkAsset
+            validFeePercentage,
+            assetA,
+            assetB
         );
     }
 
@@ -59,11 +98,18 @@ contract IndexManagerTest is BaseTest {
      *        initAmount0 = 1e18 WETH  → USD value = 2 000e18
      *        initAmount1 ≈ 285.7e18 LINK → USD value ≈ 2 000e18
      */
-    function _createAndInitializeDefaultIndex()
-        internal
-        returns (address indexAddress, address token0, address token1)
-    {
-        (indexAddress, token0, token1) = _createDefaultIndex();
+    function _createAndInitializeDefaultIndex(
+        address _assetA,
+        address _assetB,
+        address _priceFeedA,
+        address _priceFeedB
+    ) internal returns (address indexAddress, address token0, address token1) {
+        (indexAddress, token0, token1) = _createDefaultIndex(
+            _assetA,
+            _assetB,
+            _priceFeedA,
+            _priceFeedB
+        );
 
         uint256 initAmount = 1e18; // 1 unit of token0 in 18-decimal standard
 
@@ -100,462 +146,76 @@ contract IndexManagerTest is BaseTest {
      *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
      */
     function _refreshPriceFeeds() internal {
-        mockWethPriceFeed.updateAnswer(int256(2000 * 10 ** 8));
-        mockUsdcPriceFeed.updateAnswer(int256(1 * 10 ** 8));
-        mockLinkPriceFeed.updateAnswer(int256(7 * 10 ** 8));
+        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
+        mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
+        mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
+        mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
     }
 
-    // =========================================================================
-    //  constructor
-    // =========================================================================
+    // // =========================================================================
+    // //  retreiveAmountFromAmount
+    // // =========================================================================
 
-    function testConstructorSetsInitialStateCorrectly() public {
+    // @audit-issue testare la funzione
+
+    // // =========================================================================
+    // //  rebalanceSingleIndex
+    // // =========================================================================
+
+    function testRebalanceSingleIndexRevertIfIndexNotInitialized() public {
         vm.prank(deployer);
-        IndexManager newIndexManager = new IndexManager(
-            address(mockUsdc),
-            address(mockUsdcPriceFeed),
-            address(mockUniRouter)
-        );
-        assertEq(newIndexManager.getUsdc(), address(mockUsdc));
-        assertEq(
-            newIndexManager.getUsdcPriceFeed(),
-            address(mockUsdcPriceFeed)
-        );
-        assertEq(
-            newIndexManager.getUniswapUniversalRouter(),
-            address(mockUniRouter)
-        );
-
-        assertTrue(newIndexManager.hasRole(newIndexManager.DEFAULT_ADMIN_ROLE(), deployer));
-        assertTrue(newIndexManager.hasRole(newIndexManager.ASSET_MANAGER_ROLE(), deployer));
-        assertTrue(newIndexManager.hasRole(newIndexManager.FEE_COLLECTOR_ROLE(), deployer));
-        assertTrue(newIndexManager.hasRole(newIndexManager.REBALANCER_ROLE(), deployer));
+        vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+        indexManager.rebalanceSingleIndex(address(nonInitializedIndex));
     }
 
-    // =========================================================================
-    //  setRouterAddress
-    // =========================================================================
-
-    function testSetRouterAddressUpdateStatAndEmitsEvent() public {
-        address newRouter = makeAddr("newRouter");
-
-        vm.prank(deployer);
-        vm.expectEmit(true, true, false, false);
-        emit RouterAddressSet(newRouter, deployer);
-        indexManager.setRouterAddress(newRouter);
-        assertEq(indexManager.getRouterAddress(), newRouter);
-    }
-
-    function testSetRouterAddressRevertIfCallerNotAssetManager() public {
-        vm.prank(rebalancer);
-        vm.expectRevert();
-        indexManager.setRouterAddress(makeAddr("newRouter"));
-    }
-
-    // =========================================================================
-    //  setSwapManagerAddress
-    // =========================================================================
-
-    function testSetSwapManagerAddressUpdatesStateAndEmitsEvent() public {
-        address newSwapMgr = makeAddr("newSwapManager");
-
-        vm.prank(deployer);
-        vm.expectEmit(true, true, false, false);
-        emit SwapManagerAddressSet(newSwapMgr, deployer);
-        indexManager.setSwapManagerAddress(newSwapMgr);
-
-        assertEq(indexManager.getSwapManagerAddress(), newSwapMgr);
-    }
-
-    function testSetSwapManagerAddressRevertIfCallerNotAssetManager() public {
+    function testRebalanceSingleIndexRevertIfCallerNotRebalancer() public {
         vm.prank(user1);
         vm.expectRevert();
-        indexManager.setSwapManagerAddress(makeAddr("newSwapManager"));
+        indexManager.rebalanceSingleIndex(address(nonInitializedIndex));
     }
 
-    // =========================================================================
-    //  createIndex
-    // =========================================================================
+    function testRebalanceIndexEmitsIndexRebalanceFailedWhenBalanced() public {
+        // indexWethWbtc is already initialized in Base.setUp() and is balanced,
+        // so we can directly call rebalanceIndex without setup here.
 
-    function testCreateIndexRegistersIndexInIsIndexMappingsAndArrays() public {
-        (address indexAddress, , ) = _createDefaultIndex();
-
-        assertTrue(indexManager.isIndexAddress(indexAddress));
+        vm.prank(deployer);
+        vm.expectEmit(true, false, false, true);
+        emit IndexRebalanceFailed(
+            address(indexWethWbtc),
+            abi.encodePacked(Index__RebalanceNotNeeded.selector)
+        );
+        indexManager.rebalanceSingleIndex(address(indexWethWbtc));
     }
 
-    function test_createIndex_IndexNotMarkedInitializedAfterCreate() public {
-        (address indexAddress, , ) = _createDefaultIndex();
+    function testRebalanceIndexEmitsIndexRebalanceWhenBalancedSuccessfully()
+        public
+    {
+        // indexWethWbtc is already initialized in Base.setUp() and is balanced,
 
-        assertFalse(indexManager.checkIsIndexInitialized(indexAddress));
+        // change price of unerlying assets to make index unbalanced and trigger rebalance logic
+        vm.warp(block.timestamp + 3600);
+        _refreshPriceFeeds();
+        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 6);
+        console2.log("WETH price updated to:", mockWethPriceFeed.latestAnswer());
+        console2.log("WBTC price is:        ", mockWbtcPriceFeed.latestAnswer());
+        (uint256 target0, uint256 target1) = indexWethWbtc
+            .getAssetsEffectiveWeights();
+        (uint256 effective0, uint256 effective1) = indexWethWbtc.getAssetsEffectiveWeights();
+        bool rebalanceNeeded = effective0 > target0
+            ? (effective0 - target0) > REBALANCE_THRESHOLD
+            : (target0 - effective0) > REBALANCE_THRESHOLD;
+
+        assertTrue(rebalanceNeeded, "rebalance not needed with current prices");
+
+        vm.prank(deployer);
+        vm.expectEmit(true, true, false, false);
+        emit IndexRebalanced(
+            address(indexWethWbtc),
+            deployer
+            //abi.encodePacked(IndexRebalanced.selector)
+        );
+        indexManager.rebalanceSingleIndex(address(indexWethWbtc));
     }
-
-    // function test_createIndex_AppendsToGetAllIndexes() public {
-    //     assertEq(indexManager.getAllIndexes().length, 0);
-    //     _createDefaultIndex();
-    //     assertEq(indexManager.getAllIndexes().length, 1);
-    // }
-
-    // function test_createIndex_IndexLookupByBothAssetsWorks() public {
-    //     (address indexAddress, , ) = _createDefaultIndex();
-
-    //     assertEq(
-    //         indexManager.getIndexByAssetsAddresses(
-    //             address(mockWeth),
-    //             address(mockLink)
-    //         ),
-    //         indexAddress
-    //     );
-    // }
-
-    // function test_createIndex_IndexLookupIsOrderIndependent() public {
-    //     (address indexAddress, , ) = _createDefaultIndex();
-
-    //     address lookupAB = indexManager.getIndexByAssetsAddresses(
-    //         address(mockWeth),
-    //         address(mockLink)
-    //     );
-    //     address lookupBA = indexManager.getIndexByAssetsAddresses(
-    //         address(mockLink),
-    //         address(mockWeth)
-    //     );
-
-    //     assertEq(lookupAB, indexAddress);
-    //     assertEq(lookupBA, indexAddress);
-    // }
-
-    // function test_createIndex_Token0IsLessThanToken1() public {
-    //     (, address token0, address token1) = _createDefaultIndex();
-
-    //     assertTrue(token0 < token1, "token0 must be < token1 after sorting");
-    // }
-
-    // function test_createIndex_EmitsIndexCreatedEvent() public {
-    //     (address sortedToken0, address sortedToken1) = indexManager.sortAssets(
-    //         address(mockWeth),
-    //         address(mockLink)
-    //     );
-
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockLinkPriceFeed)
-    //     });
-
-    //     // topic1 (indexAddress) is unknown in advance → checkTopic1 = false.
-    //     vm.expectEmit(false, true, true, true);
-    //     emit IndexCreated(address(0), sortedToken0, sortedToken1, deployer);
-
-    //     vm.prank(deployer);
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // function test_createIndex_CanCreateTwoDistinctPairs() public {
-    //     _createDefaultIndex(); // WETH / LINK
-
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory wbtcAsset = IndexAsset({
-    //         asset: address(mockWbtc),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWbtcPriceFeed)
-    //     });
-
-    //     vm.prank(deployer);
-    //     (address index2, , ) = indexManager.createIndex(
-    //         DEFAULT_FEE,
-    //         wethAsset,
-    //         wbtcAsset
-    //     );
-
-    //     assertNotEq(index2, address(0));
-    //     assertEq(indexManager.getAllIndexes().length, 2);
-    // }
-
-    // function test_createIndex_RevertIf_SameAssets() public {
-    //     IndexAsset memory sameAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
-    //     indexManager.createIndex(DEFAULT_FEE, sameAsset, sameAsset);
-    // }
-
-    // function test_createIndex_RevertIf_WeightsDoNotSumToMaxPercentage() public {
-    //     // 400_000 + 500_000 = 900_000 ≠ 1_000_000
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: 400_000,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockLinkPriceFeed)
-    //     });
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__InvalidIndexAssetsPercentages.selector);
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // function test_createIndex_RevertIf_IndexAlreadyExists() public {
-    //     (address existingIndex, , ) = _createDefaultIndex();
-
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockLinkPriceFeed)
-    //     });
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(
-    //         abi.encodeWithSelector(
-    //             IndexManager__IndexAlreadyExists.selector,
-    //             existingIndex
-    //         )
-    //     );
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // function test_createIndex_RevertIf_Asset0PriceFeedIsZeroAddress() public {
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(0) // invalid
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockLinkPriceFeed)
-    //     });
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__InvalidPriceFeedAddress.selector);
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // function test_createIndex_RevertIf_Asset1PriceFeedIsZeroAddress() public {
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(0) // invalid
-    //     });
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__InvalidPriceFeedAddress.selector);
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // function test_createIndex_RevertIf_RouterNotSet() public {
-    //     // Remove the router so the guard triggers.
-    //     vm.prank(deployer);
-    //     indexManager.setRouterAddress(address(0));
-
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockLinkPriceFeed)
-    //     });
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__RouterAddressNotSet.selector);
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // function test_createIndex_RevertIf_CallerNotAssetManager() public {
-    //     IndexAsset memory wethAsset = IndexAsset({
-    //         asset: address(mockWeth),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockWethPriceFeed)
-    //     });
-    //     IndexAsset memory linkAsset = IndexAsset({
-    //         asset: address(mockLink),
-    //         weightPercentage: WEIGHT_50,
-    //         priceFeed: address(mockLinkPriceFeed)
-    //     });
-
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.createIndex(DEFAULT_FEE, wethAsset, linkAsset);
-    // }
-
-    // // =========================================================================
-    // //  initializeIndex
-    // // =========================================================================
-
-    // function test_initializeIndex_MarksIndexAsInitialized() public {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-
-    //     assertTrue(indexManager.checkIsIndexInitialized(indexAddress));
-    // }
-
-    // function test_initializeIndex_AddsIndexToInitializedList() public {
-    //     // The clearest observable effect of s_initializedIndexes growing is that
-    //     // rebalanceAllIndexes (which iterates over it) now processes the new index.
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-
-    //     // A balanced index causes rebalanceIndex to fail → IndexRebalanceFailed.
-    //     vm.prank(deployer);
-    //     vm.expectEmit(true, false, false, false);
-    //     emit IndexRebalanceFailed(indexAddress, "");
-    //     indexManager.rebalanceAllIndexes();
-    // }
-
-    // function test_initializeIndex_EmitsIndexInitializedEvent() public {
-    //     (
-    //         address indexAddress,
-    //         address token0,
-    //         address token1
-    //     ) = _createDefaultIndex();
-
-    //     uint256 initAmount = 1e18;
-    //     deal(token0, address(indexManager), initAmount * 10);
-    //     deal(token1, address(indexManager), 10_000e18);
-    //     vm.prank(address(indexManager));
-    //     IERC20(token0).approve(indexAddress, type(uint256).max);
-    //     vm.prank(address(indexManager));
-    //     IERC20(token1).approve(indexAddress, type(uint256).max);
-
-    //     (
-    //         SwapRoute memory r0,
-    //         SwapRoute memory r1,
-    //         SwapRoute memory r01
-    //     ) = helperConfig.getDefaultSwapRoutes(token0, token1);
-
-    //     // Specify the emitter to distinguish from Index's own IndexInitialized event.
-    //     vm.expectEmit(true, true, false, false, address(indexManager));
-    //     emit IndexInitialized(indexAddress, deployer);
-
-    //     vm.prank(deployer);
-    //     indexManager.initializeIndex(msg.sender, indexAddress, initAmount, r0, r1, r01);
-    // }
-
-    // function test_initializeIndex_RevertIf_AmountIsZero() public {
-    //     (
-    //         address indexAddress,
-    //         address token0,
-    //         address token1
-    //     ) = _createDefaultIndex();
-    //     (
-    //         SwapRoute memory r0,
-    //         SwapRoute memory r1,
-    //         SwapRoute memory r01
-    //     ) = helperConfig.getDefaultSwapRoutes(token0, token1);
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__InvalidIndexAssetsAmount.selector);
-    //     indexManager.initializeIndex(msg.sender, indexAddress, 0, r0, r1, r01);
-    // }
-
-    // function test_initializeIndex_RevertIf_AddressIsNotAnIndex() public {
-    //     address notAnIndex = makeAddr("notAnIndex");
-    //     (
-    //         SwapRoute memory r0,
-    //         SwapRoute memory r1,
-    //         SwapRoute memory r01
-    //     ) = helperConfig.getDefaultSwapRoutes(
-    //             address(mockWeth),
-    //             address(mockLink)
-    //         );
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__IsNotIndex.selector);
-    //     indexManager.initializeIndex(msg.sender, notAnIndex, 1e18, r0, r1, r01);
-    // }
-
-    // function test_initializeIndex_RevertIf_AlreadyInitialized() public {
-    //     (
-    //         address indexAddress,
-    //         address token0,
-    //         address token1
-    //     ) = _createAndInitializeDefaultIndex();
-    //     (
-    //         SwapRoute memory r0,
-    //         SwapRoute memory r1,
-    //         SwapRoute memory r01
-    //     ) = helperConfig.getDefaultSwapRoutes(token0, token1);
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__IndexAlreadyInitialized.selector);
-    //     indexManager.initializeIndex(msg.sender, indexAddress, 1e18, r0, r1, r01);
-    // }
-
-    // function test_initializeIndex_RevertIf_CallerNotAssetManager() public {
-    //     (
-    //         address indexAddress,
-    //         address token0,
-    //         address token1
-    //     ) = _createDefaultIndex();
-    //     (
-    //         SwapRoute memory r0,
-    //         SwapRoute memory r1,
-    //         SwapRoute memory r01
-    //     ) = helperConfig.getDefaultSwapRoutes(token0, token1);
-
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.initializeIndex(msg.sender, indexAddress, 1e18, r0, r1, r01);
-    // }
-
-    // // =========================================================================
-    // //  rebalanceIndex
-    // // =========================================================================
-
-    // function test_rebalanceIndex_RevertIf_IndexNotInitialized() public {
-    //     (address indexAddress, , ) = _createDefaultIndex();
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__NotIndexInitialized.selector);
-    //     indexManager.rebalanceIndex(indexAddress);
-    // }
-
-    // function test_rebalanceIndex_EmitsIndexRebalanceFailed_WhenBalanced()
-    //     public
-    // {
-    //     // A freshly initialised 50/50 index does not need rebalancing.
-    //     // Index.rebalanceIndex reverts with Index__RebalanceNotNeeded.
-    //     // IndexManager catches it and emits IndexRebalanceFailed — no revert.
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-
-    //     vm.prank(deployer);
-    //     vm.expectEmit(true, false, false, false);
-    //     emit IndexRebalanceFailed(indexAddress, "");
-    //     indexManager.rebalanceIndex(indexAddress);
-    // }
-
-    // function test_rebalanceIndex_RevertIf_CallerNotRebalancer() public {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.rebalanceIndex(indexAddress);
-    // }
 
     // // =========================================================================
     // //  rebalanceMultipleIndexes
@@ -625,34 +285,32 @@ contract IndexManagerTest is BaseTest {
     // //  proposeNewWeights
     // // =========================================================================
 
-    // function test_proposeNewWeights_SucceedsWithValidWeight() public {
-    //     // VALID_NEW_WEIGHT = 520_000; within ±REBALANCE_THRESHOLD (30_000) of 500_000.
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+    function test_proposeNewWeights_EmitsNewIndexWeightsProposedEvent() public {
+        uint128 expectedNewWeight1 = MAX_WEIGHT - weight30;
+        (uint128 lastWeight0, uint128 lastWeight1) = indexWethWbtc.getAssetsWeights();
+        // checkData = false because implementationTimestamp is block-dependent.
+        vm.expectEmit(true, true, false, false);
+        emit NewIndexWeightsProposed(
+            address(indexWethWbtc),
+            deployer,
+            lastWeight0,
+            lastWeight1,
+            weight30,
+            expectedNewWeight1,
+            block.timestamp + WEIGHT_UPDATE_DELAY
+        );
 
-    //     vm.prank(deployer);
-    //     indexManager.proposeNewWeights(indexAddress, VALID_NEW_WEIGHT);
-    //     // No revert expected.
-    // }
+        vm.prank(deployer);
+        indexManager.proposeNewWeights(address(indexWethWbtc), weight30);
 
-    // function test_proposeNewWeights_EmitsNewIndexWeightsProposedEvent() public {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-    //     uint128 expectedNewWeight1 = 1_000_000 - VALID_NEW_WEIGHT; // 480_000
-
-    //     // checkData = false because implementationTimestamp is block-dependent.
-    //     vm.expectEmit(true, true, false, false);
-    //     emit NewIndexWeightsProposed(
-    //         indexAddress,
-    //         deployer,
-    //         WEIGHT_50,
-    //         WEIGHT_50,
-    //         VALID_NEW_WEIGHT,
-    //         expectedNewWeight1,
-    //         0 // placeholder, not checked
-    //     );
-
-    //     vm.prank(deployer);
-    //     indexManager.proposeNewWeights(indexAddress, VALID_NEW_WEIGHT);
-    // }
+        (uint128 previousWeight0, uint128 previousWeight1) = indexWethWbtc.getAssetsWeights();
+        (uint128 pendingWeight0, uint128 pendingWeight1, uint256 weightUpdateExecutableAt) = indexWethWbtc.getAssetsPendingWeights();
+        assertEq(pendingWeight0, weight30);
+        assertEq(pendingWeight1, expectedNewWeight1);
+        assertEq(previousWeight0, previousWeight0);
+        assertEq(previousWeight1, previousWeight1);
+        assertEq(weightUpdateExecutableAt, block.timestamp + WEIGHT_UPDATE_DELAY);
+    }
 
     // function test_proposeNewWeights_AcceptsLowerBoundaryWeight() public {
     //     // Lower boundary: 500_000 - 30_000 = 470_000

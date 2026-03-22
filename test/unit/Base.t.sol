@@ -20,8 +20,9 @@ import {
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {UniversalRouterMock} from "../mocks/UniversalRouterMock.sol";
 import {IndexAsset, AssetAvailable} from "../../src/types.sol";
+import {CodeConstants} from "../../src/CodeConstants.sol";
 
-abstract contract BaseTest is Test {
+abstract contract BaseTest is Test, CodeConstants {
     DeployPeriphery public deployerPeriphery;
     HelperConfig public helperConfig;
     Router public router;
@@ -59,8 +60,17 @@ abstract contract BaseTest is Test {
     uint256 public constant INITIAL_USDC_BALANCE = 10_000_000_000;
 
     //constants
-    uint32 public PERCENTAGE_FEE_PRECISION = 10000; // 4 decimals precision for percentage values
-    uint128 public WEIGHT_PRECISION = 10000; // 4 decimals precision for weights to allow more granular weights
+    uint128 public weight30 = (30 * WEIGHT_PRECISION); // 30%
+    uint128 public weight60 = (60 * WEIGHT_PRECISION); // 60%
+    uint128 public weight50 = (50 * WEIGHT_PRECISION); // 50%
+    uint128 public weight40 = (40 * WEIGHT_PRECISION); // 40%
+    uint32 public validFeePercentage = 1 * PERCENTAGE_FEE_PRECISION; // 1%
+    uint32 public invalidFeePercentage = (1 * PERCENTAGE_FEE_PRECISION) / 1000; // 0.001% - above the max fee percentage allowed of 10%
+
+    int256 public constant WETH_INITIAL_PRICE = 2000 * 10 ** 8; // $2000 with 8 decimals
+    int256 public constant WBTC_INITIAL_PRICE = 30000 * 10 ** 8; // $30000 with 8 decimals
+    int256 public constant LINK_INITIAL_PRICE = 7 * 10 ** 8; // $7 with 8 decimals
+    int256 public constant USDC_INITIAL_PRICE = 1 * 10 ** 8; // $1 with
 
     function setUp() public virtual {
         deployerPeriphery = new DeployPeriphery();
@@ -112,15 +122,20 @@ abstract contract BaseTest is Test {
             INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()
         );
 
+        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
+        mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
+        mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
+        mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
+
         indexWethWbtc = deployAndInitNewIndex.run(
             helperConfig,
             address(indexManager),
             RunParams({
                 assetA: AssetAvailable.WETH,
                 assetB: AssetAvailable.WBTC,
-                weightA: 50 * WEIGHT_PRECISION, // 50%
-                weightB: 50 * WEIGHT_PRECISION, // 50%
-                feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
+                weightA: weight60, // 60%
+                weightB: weight40, // 40%
+                feePercentage: validFeePercentage, // 1%
                 initialAssetADeposit: 10 * 10 ** mockWeth.decimals(),
                 initialAssetBDeposit: 0
             })

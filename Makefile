@@ -23,14 +23,36 @@ ASSET0_PRICEFEED 	?= 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43  # WBTC/USD Sepo
 ASSET1_ADDRESS 		?= 0xf531B8F309Be94191af87605CfBf600D71C2cFe0  # WETH Sepolia
 ASSET1_PRICEFEED 	?= 0x694AA1769357215DE4FAC081bf1f309aDC325306  # ETH/USD Sepolia
 
+# ─── Test paths ───────────────────────────────────────────────────────────────
+UNIT_TEST_PATH 				?= test/unit/**/*.sol
+INDEX_UNIT_TEST_PATH 		?= test/unit/IndexUnitTest/*.sol
+INDEX_MANAGER_UNIT_TEST_PATH ?= test/unit/IndexmanagerUnitTest/*.sol
+INTEGRATION_TEST_PATH 		?= test/integration/**/*.sol
+FUZZ_TEST_PATH 			?= test/fuzz/**/*.sol
+
 # ─── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: create-index build test test-index test-index-manager test-router test-swap-manager test-base
+.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single
 
 build:
 	forge build
 
 test:
 	forge test
+
+unittest:
+	forge test --match-path '$(UNIT_TEST_PATH)'
+
+indextest:
+	forge test --match-path '$(INDEX_UNIT_TEST_PATH)'
+
+indexmanagertest:
+	forge test --match-path '$(INDEX_MANAGER_UNIT_TEST_PATH)'
+
+integrationtest:
+	forge test --match-path '$(INTEGRATION_TEST_PATH)'
+
+fuzztest:
+	forge test --match-path '$(FUZZ_TEST_PATH)'
 
 test-index:
 	forge test --match-path test/unit/Index.t.sol
@@ -43,6 +65,9 @@ test-router:
 
 test-swap-manager:
 	forge test --match-path test/unit/SwapManager.t.sol
+
+test-single:
+	forge test --match-test $(NAME) -vvvv
 
 
 create-index:

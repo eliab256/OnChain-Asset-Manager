@@ -60,6 +60,8 @@ interface IIndex is IERC20, IERC20Metadata {
         view
         returns (uint256 effectiveWeight0, uint256 effectiveWeight1);
 
+
+
     function getAssetsAndUsdcDecimals()
         external
         view
@@ -71,11 +73,21 @@ interface IIndex is IERC20, IERC20Metadata {
 
     function getAssetsWeights() external view returns (uint128, uint128);
 
+    function getAssetsPendingWeights() external view returns (uint128, uint128, uint256);
+
     function getAssetsAmount() external view returns (uint128, uint128);
 
     function getAsset0() external view returns (address);
 
     function getAsset1() external view returns (address);
+
+    function getUsdc() external view returns (address); 
+
+    function getAsset0PriceFeed() external view returns (address);
+
+    function getAsset1PriceFeed() external view returns (address);
+
+    function getUsdcPriceFeed() external view returns (address);
 
     function getFeesInfo()
         external

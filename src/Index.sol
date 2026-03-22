@@ -27,6 +27,8 @@ import {
     IUniversalRouter
 } from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
 
+import {console2} from "forge-std/console2.sol";
+
 contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
@@ -125,6 +127,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         if (_underlyingAmount0 == 0) {
             revert Index__InvalidUnderlyingAmount();
         }
+        // @audit-issue possilie errore gestione decimali tra amount0 e amount1
         i_asset0.safeTransferFrom(
             _depositor,
             address(this),
@@ -1314,6 +1317,14 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
 
     function getAssetsWeights() public view returns (uint128, uint128) {
         return (s_weight0, s_weight1);
+    }
+
+    function getAssetsPendingWeights() public view returns (uint128, uint128, uint256) {
+        return (
+            s_pendingWeight0,
+            s_pendingWeight1,
+            s_weightUpdateExecutableAt
+        );
     }
 
     function getAssetsAmount() public view returns (uint128, uint128) {

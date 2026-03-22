@@ -29,7 +29,7 @@ interface IIndexManager {
         bool _zeroToOne
     ) external view returns (uint256 amountToDeposit);
 
-    function rebalanceIndex(address _indexAddress) external;
+    function rebalanceSingleIndex(address _indexAddress) external;
 
     function rebalanceMultipleIndexes(
         address[] calldata _indexAddresses
@@ -42,7 +42,7 @@ interface IIndexManager {
         uint128 _newWeightAsset0
     ) external;
 
-    function executeWeightUpdate(address _indexAddress) external;
+    function executeSingleWeightUpdate(address _indexAddress) external;
 
     function executeWeightUpdateForMultipleIndexes(
         address[] calldata _indexAddresses
@@ -50,7 +50,7 @@ interface IIndexManager {
 
     function executeWeightUpdateForAllIndexes() external;
 
-    function collectFees(address _indexAddress) external;
+    function collectFeesFromSingleIndex(address _indexAddress) external;
 
     function collectFeesFromMultipleIndexes(
         address[] calldata _indexAddresses
@@ -70,6 +70,12 @@ interface IIndexManager {
     ) external view returns (bool);
 
     function getAllIndexes() external view returns (address[] memory);
+
+    function getInitializedIndexes() external view returns (address[] memory);
+
+    function getIndexAssets(
+        address _indexAddress
+    ) external view returns (address asset0, address asset1);
 
     function getIndexByAssetsAddresses(
         address _assetAddressA,
