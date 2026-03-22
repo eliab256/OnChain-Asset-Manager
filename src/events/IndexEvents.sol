@@ -45,7 +45,6 @@ event IndexWeightsUpdated(
     uint256 indexed updateTimestamp
 );
 
-event FeesCollected(
-    address indexed feeCollector,
-    uint256 feeAmount
-);
+event WeightUpdateRebalanceFailed(bytes reasonData);
+
+event FeesCollected(address indexed feeCollector, uint256 feeAmount);

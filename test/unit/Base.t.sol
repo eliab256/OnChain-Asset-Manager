@@ -8,7 +8,7 @@ import {
     DeployAndInitNewIndex,
     RunParams
 } from "../../script/DeployAndInitNewIndex.s.sol";
-import {HelperConfig} from "../../script/HelperConfig.s.sol";
+import {HelperConfig, AssetConfig} from "../../script/HelperConfig.s.sol";
 import {Router} from "../../src/Router.sol";
 import {IndexManager} from "../../src/IndexManager.sol";
 import {Index} from "../../src/Index.sol";
@@ -28,8 +28,15 @@ abstract contract BaseTest is Test, CodeConstants {
     Router public router;
     IndexManager public indexManager;
     DeployAndInitNewIndex public deployAndInitNewIndex;
-    Index public indexWethWbtc;
-    Index public indexWethLink;
+
+    Index public initializedIndex;
+    address public initializedToken0;
+    address public initializedToken1;
+
+    Index public nonInitializedIndex;
+    address public nonInitializedToken0;
+    address public nonInitializedToken1;
+
     SwapManager public swapManager;
 
     // Mocks
@@ -127,7 +134,7 @@ abstract contract BaseTest is Test, CodeConstants {
         mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
         mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
 
-        indexWethWbtc = deployAndInitNewIndex.run(
+        initializedIndex = deployAndInitNewIndex.run(
             helperConfig,
             address(indexManager),
             RunParams({
@@ -140,5 +147,53 @@ abstract contract BaseTest is Test, CodeConstants {
                 initialAssetBDeposit: 0
             })
         );
+
+        initializedToken0 = initializedIndex.getAsset0();
+        initializedToken1 = initializedIndex.getAsset1();
+
+        //deploy a non initialized index
+        AssetConfig memory asset0Config = helperConfig.getActiveAssetConfig(
+            AssetAvailable.WBTC
+        );
+        AssetConfig memory asset1Config = helperConfig.getActiveAssetConfig(
+            AssetAvailable.LINK
+        );
+
+        IndexAsset memory indexAsset0 = IndexAsset({
+            asset: asset0Config.token,
+            weightPercentage: weight40,
+            priceFeed: asset0Config.priceFeed
+        });
+
+        IndexAsset memory indexAsset1 = IndexAsset({
+            asset: asset1Config.token,
+            weightPercentage: weight60,
+            priceFeed: asset1Config.priceFeed
+        });
+        vm.prank(deployer);
+        (
+            address nonInitializedIndexAddress,
+            address notinitToken0,
+            address notinitToken1
+        ) = indexManager.createIndex(
+                validFeePercentage,
+                indexAsset0,
+                indexAsset1
+            );
+        nonInitializedIndex = Index(nonInitializedIndexAddress);
+        nonInitializedToken0 = notinitToken0;
+        nonInitializedToken1 = notinitToken1;
+    }
+
+    /**
+     * @dev Refreshes all mock price feeds to block.timestamp.
+     *      Required after vm.warp() because Index.getLatestPrice reverts with
+     *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
+     */
+    function _refreshPriceFeeds() internal {
+        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
+        mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
+        mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
+        mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
     }
 }

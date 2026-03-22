@@ -17,48 +17,21 @@ import "../../../src/errors/IndexErrors.sol";
 contract IndexManagerTest is BaseTest {
     IndexAsset wethAsset60;
     IndexAsset linkAsset40;
-    IIndex nonInitializedIndex;
-    address nonInitializedToken0;
-    address nonInitializedToken1;
 
     function setUp() public override {
         super.setUp();
-        //prepared index assets for tests
+
         wethAsset60 = IndexAsset({
             asset: address(mockWeth),
             weightPercentage: weight60,
             priceFeed: address(mockWethPriceFeed)
         });
+
         linkAsset40 = IndexAsset({
             asset: address(mockLink),
             weightPercentage: weight40,
             priceFeed: address(mockLinkPriceFeed)
         });
-
-        //creat a mom initialized index
-        IndexAsset memory wbtcAsset40 = IndexAsset({
-            asset: address(mockWbtc),
-            weightPercentage: weight40,
-            priceFeed: address(mockWbtcPriceFeed)
-        });
-        IndexAsset memory linkAsset60 = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight60,
-            priceFeed: address(mockLinkPriceFeed)
-        });
-        vm.prank(deployer);
-        (
-            address nonInitializedIndexAddress,
-            address token0,
-            address token1
-        ) = indexManager.createIndex(
-                validFeePercentage,
-                wbtcAsset40,
-                linkAsset60
-            );
-        nonInitializedIndex = IIndex(nonInitializedIndexAddress);
-        nonInitializedToken0 = token0;
-        nonInitializedToken1 = token1;
     }
 
     function _createDefaultIndex(
@@ -138,18 +111,6 @@ contract IndexManagerTest is BaseTest {
             r1,
             r01
         );
-    }
-
-    /**
-     * @dev Refreshes all mock price feeds to block.timestamp.
-     *      Required after vm.warp() because Index.getLatestPrice reverts with
-     *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
-     */
-    function _refreshPriceFeeds() internal {
-        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
-        mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
-        mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
-        mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
     }
 
     // =========================================================================
@@ -236,8 +197,8 @@ contract IndexManagerTest is BaseTest {
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
 
         Vm.Log[] memory entries = vm.getRecordedLogs();
-        assertEq(entries.length, 4);
-        Vm.Log memory fullEvent = entries[3];
+        assertEq(entries.length, 5);
+        Vm.Log memory fullEvent = entries[4];
         bytes32 eventSignature = fullEvent.topics[0]; //event signature hashed
         address testIndex;
         address testToken0;
@@ -292,7 +253,6 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfWeightsDoNotSumToMaxPercentage() public {
         uint128 weight00 = (0 * WEIGHT_PRECISION); // 0%
         uint128 weight20 = (20 * WEIGHT_PRECISION); // 20%
-        uint128 weight70 = (70 * WEIGHT_PRECISION); // 70%
         uint128 weight100 = (100 * WEIGHT_PRECISION); // 100%
         uint128 weight120 = (120 * WEIGHT_PRECISION); // 120%
 
@@ -355,7 +315,7 @@ contract IndexManagerTest is BaseTest {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IndexManager__IndexAlreadyExists.selector,
-                address(indexWethWbtc)
+                address(initializedIndex)
             )
         );
         indexManager.createIndex(validFeePercentage, wethAsset, wbtcAsset);
@@ -429,24 +389,24 @@ contract IndexManagerTest is BaseTest {
     // =========================================================================
 
     function testInitializeIndexMarksIndexAsInitialized() public {
-        assertTrue(indexManager.isIndexAddress(address(indexWethWbtc)));
+        assertTrue(indexManager.isIndexAddress(address(initializedIndex)));
         assertTrue(
-            indexManager.checkIsIndexInitialized(address(indexWethWbtc))
+            indexManager.checkIsIndexInitialized(address(initializedIndex))
         );
         address[] memory allIndexes = indexManager.getAllIndexes();
-        assertEq(allIndexes[0], address(indexWethWbtc));
+        assertEq(allIndexes[0], address(initializedIndex));
         assertEq(
             indexManager.getIndexByAssetsAddresses(
                 address(mockWeth),
                 address(mockWbtc)
             ),
-            address(indexWethWbtc)
+            address(initializedIndex)
         );
         address[] memory initializedIndexes = indexManager
             .getInitializedIndexes();
-        assertEq(initializedIndexes[0], address(indexWethWbtc));
+        assertEq(initializedIndexes[0], address(initializedIndex));
         (address asset0, address asset1) = indexManager.getIndexAssets(
-            address(indexWethWbtc)
+            address(initializedIndex)
         );
         assertEq(asset0, address(mockWeth));
         assertEq(asset1, address(mockWbtc));
@@ -567,7 +527,7 @@ contract IndexManagerTest is BaseTest {
         vm.expectRevert(IndexManager__IndexAlreadyInitialized.selector);
         indexManager.initializeIndex(
             msg.sender,
-            address(indexWethWbtc),
+            address(initializedIndex),
             1e18,
             r0,
             r1,
@@ -607,5 +567,4 @@ contract IndexManagerTest is BaseTest {
             r01
         );
     }
-
 }

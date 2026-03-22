@@ -22,36 +22,11 @@ import "../../../src/errors/IndexErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 
 contract IndexTest is BaseTest {
-    IIndex nonInitializedIndex;
-    address nonInitializedToken0;
-    address nonInitializedToken1;
+  
 
     function setUp() public override {
         super.setUp();
-        //creat a mom initialized index
-        IndexAsset memory wbtcAsset40 = IndexAsset({
-            asset: address(mockWbtc),
-            weightPercentage: weight40,
-            priceFeed: address(mockWbtcPriceFeed)
-        });
-        IndexAsset memory linkAsset60 = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight60,
-            priceFeed: address(mockLinkPriceFeed)
-        });
-        vm.prank(deployer);
-        (
-            address nonInitializedIndexAddress,
-            address token0,
-            address token1
-        ) = indexManager.createIndex(
-                validFeePercentage,
-                wbtcAsset40,
-                linkAsset60
-            );
-        nonInitializedIndex = IIndex(nonInitializedIndexAddress);
-        nonInitializedToken0 = token0;
-        nonInitializedToken1 = token1;
+        
     }
 
     function testIndexDeployment() public {
@@ -110,14 +85,14 @@ contract IndexTest is BaseTest {
 
     function testIndexInitializationRevertIfAlreadyInitialized() public {
         assertEq(
-            indexManager.checkIsIndexInitialized(address(indexWethWbtc)),
+            indexManager.checkIsIndexInitialized(address(initializedIndex)),
             true
         );
         uint256 initAmount = 10 * 10 ** mockWeth.decimals();
 
         vm.expectRevert(Index__AlreadyInitialized.selector);
         vm.prank(address(indexManager));
-        indexWethWbtc.initialize(address(deployer), initAmount);
+        initializedIndex.initialize(address(deployer), initAmount);
     }
 
     

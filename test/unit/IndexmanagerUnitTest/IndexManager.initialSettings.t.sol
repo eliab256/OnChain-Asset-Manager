@@ -17,48 +17,9 @@ import "../../../src/errors/IndexErrors.sol";
 contract IndexManagerTest is BaseTest {
     IndexAsset wethAsset60;
     IndexAsset linkAsset40;
-    IIndex nonInitializedIndex;
-    address nonInitializedToken0;
-    address nonInitializedToken1;
 
     function setUp() public override {
         super.setUp();
-        //prepared index assets for tests
-        wethAsset60 = IndexAsset({
-            asset: address(mockWeth),
-            weightPercentage: weight60,
-            priceFeed: address(mockWethPriceFeed)
-        });
-        linkAsset40 = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight40,
-            priceFeed: address(mockLinkPriceFeed)
-        });
-
-        //creat a mom initialized index
-        IndexAsset memory wbtcAsset40 = IndexAsset({
-            asset: address(mockWbtc),
-            weightPercentage: weight40,
-            priceFeed: address(mockWbtcPriceFeed)
-        });
-        IndexAsset memory linkAsset60 = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight60,
-            priceFeed: address(mockLinkPriceFeed)
-        });
-        vm.prank(deployer);
-        (
-            address nonInitializedIndexAddress,
-            address token0,
-            address token1
-        ) = indexManager.createIndex(
-                validFeePercentage,
-                wbtcAsset40,
-                linkAsset60
-            );
-        nonInitializedIndex = IIndex(nonInitializedIndexAddress);
-        nonInitializedToken0 = token0;
-        nonInitializedToken1 = token1;
     }
 
     function _createDefaultIndex(
@@ -140,17 +101,6 @@ contract IndexManagerTest is BaseTest {
         );
     }
 
-    /**
-     * @dev Refreshes all mock price feeds to block.timestamp.
-     *      Required after vm.warp() because Index.getLatestPrice reverts with
-     *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
-     */
-    function _refreshPriceFeeds() internal {
-        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
-        mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
-        mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
-        mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
-    }
 
     // =========================================================================
     //  constructor

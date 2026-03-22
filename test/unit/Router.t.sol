@@ -10,9 +10,13 @@ import {IRouter} from "../../src/Interface/IRouter.sol";
 import {Router} from "../../src/Router.sol";
 import {HelperConfig, AssetConfig, NetworkConfig} from "../../script/HelperConfig.s.sol";
 import {DeployAndInitNewIndex, RunParams} from "../../script/DeployAndInitNewIndex.s.sol";
+import {AssetAvailable} from "../../src/types.sol";
 
 
 contract RouterTest is BaseTest {
     //ovverride setuP function per avere diversi index deployati
+    function setUp() public override {
+        super.setUp();
+    }
     
 }

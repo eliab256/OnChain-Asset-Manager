@@ -17,48 +17,9 @@ import "../../../src/errors/IndexErrors.sol";
 contract IndexManagerTest is BaseTest {
     IndexAsset wethAsset60;
     IndexAsset linkAsset40;
-    IIndex nonInitializedIndex;
-    address nonInitializedToken0;
-    address nonInitializedToken1;
 
     function setUp() public override {
         super.setUp();
-        //prepared index assets for tests
-        wethAsset60 = IndexAsset({
-            asset: address(mockWeth),
-            weightPercentage: weight60,
-            priceFeed: address(mockWethPriceFeed)
-        });
-        linkAsset40 = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight40,
-            priceFeed: address(mockLinkPriceFeed)
-        });
-
-        //creat a mom initialized index
-        IndexAsset memory wbtcAsset40 = IndexAsset({
-            asset: address(mockWbtc),
-            weightPercentage: weight40,
-            priceFeed: address(mockWbtcPriceFeed)
-        });
-        IndexAsset memory linkAsset60 = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight60,
-            priceFeed: address(mockLinkPriceFeed)
-        });
-        vm.prank(deployer);
-        (
-            address nonInitializedIndexAddress,
-            address token0,
-            address token1
-        ) = indexManager.createIndex(
-                validFeePercentage,
-                wbtcAsset40,
-                linkAsset60
-            );
-        nonInitializedIndex = IIndex(nonInitializedIndexAddress);
-        nonInitializedToken0 = token0;
-        nonInitializedToken1 = token1;
     }
 
     function _createDefaultIndex(
@@ -140,17 +101,7 @@ contract IndexManagerTest is BaseTest {
         );
     }
 
-    /**
-     * @dev Refreshes all mock price feeds to block.timestamp.
-     *      Required after vm.warp() because Index.getLatestPrice reverts with
-     *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
-     */
-    function _refreshPriceFeeds() internal {
-        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
-        mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
-        mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
-        mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
-    }
+
 
     // // =========================================================================
     // //  retreiveAmountFromAmount
@@ -175,22 +126,21 @@ contract IndexManagerTest is BaseTest {
     }
 
     function testRebalanceIndexEmitsIndexRebalanceFailedWhenBalanced() public {
-        // indexWethWbtc is already initialized in Base.setUp() and is balanced,
+        // index is already initialized in Base.setUp() and is balanced,
         // so we can directly call rebalanceIndex without setup here.
 
         vm.prank(deployer);
         vm.expectEmit(true, false, false, true);
         emit IndexRebalanceFailed(
-            address(indexWethWbtc),
+            address(initializedIndex),
             abi.encodePacked(Index__RebalanceNotNeeded.selector)
         );
-        indexManager.rebalanceSingleIndex(address(indexWethWbtc));
+        indexManager.rebalanceSingleIndex(address(initializedIndex));
     }
 
     function testRebalanceIndexEmitsIndexRebalanceWhenBalancedSuccessfully()
         public
     {
-        // indexWethWbtc is already initialized in Base.setUp() and is balanced,
 
         // change price of unerlying assets to make index unbalanced and trigger rebalance logic
         vm.warp(block.timestamp + 3600);
@@ -198,9 +148,9 @@ contract IndexManagerTest is BaseTest {
         mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 6);
         console2.log("WETH price updated to:", mockWethPriceFeed.latestAnswer());
         console2.log("WBTC price is:        ", mockWbtcPriceFeed.latestAnswer());
-        (uint256 target0, uint256 target1) = indexWethWbtc
+        (uint256 target0, ) = initializedIndex
             .getAssetsEffectiveWeights();
-        (uint256 effective0, uint256 effective1) = indexWethWbtc.getAssetsEffectiveWeights();
+        (uint256 effective0, ) = initializedIndex.getAssetsEffectiveWeights();
         bool rebalanceNeeded = effective0 > target0
             ? (effective0 - target0) > REBALANCE_THRESHOLD
             : (target0 - effective0) > REBALANCE_THRESHOLD;
@@ -210,11 +160,11 @@ contract IndexManagerTest is BaseTest {
         vm.prank(deployer);
         vm.expectEmit(true, true, false, false);
         emit IndexRebalanced(
-            address(indexWethWbtc),
+            address(initializedIndex),
             deployer
             //abi.encodePacked(IndexRebalanced.selector)
         );
-        indexManager.rebalanceSingleIndex(address(indexWethWbtc));
+        indexManager.rebalanceSingleIndex(address(initializedIndex));
     }
 
     // // =========================================================================
@@ -287,11 +237,11 @@ contract IndexManagerTest is BaseTest {
 
     function test_proposeNewWeights_EmitsNewIndexWeightsProposedEvent() public {
         uint128 expectedNewWeight1 = MAX_WEIGHT - weight30;
-        (uint128 lastWeight0, uint128 lastWeight1) = indexWethWbtc.getAssetsWeights();
+        (uint128 lastWeight0, uint128 lastWeight1) = initializedIndex.getAssetsWeights();
         // checkData = false because implementationTimestamp is block-dependent.
         vm.expectEmit(true, true, false, false);
         emit NewIndexWeightsProposed(
-            address(indexWethWbtc),
+            address(initializedIndex),
             deployer,
             lastWeight0,
             lastWeight1,
@@ -301,10 +251,10 @@ contract IndexManagerTest is BaseTest {
         );
 
         vm.prank(deployer);
-        indexManager.proposeNewWeights(address(indexWethWbtc), weight30);
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
 
-        (uint128 previousWeight0, uint128 previousWeight1) = indexWethWbtc.getAssetsWeights();
-        (uint128 pendingWeight0, uint128 pendingWeight1, uint256 weightUpdateExecutableAt) = indexWethWbtc.getAssetsPendingWeights();
+        (uint128 previousWeight0, uint128 previousWeight1) = initializedIndex.getAssetsWeights();
+        (uint128 pendingWeight0, uint128 pendingWeight1, uint256 weightUpdateExecutableAt) = initializedIndex.getAssetsPendingWeights();
         assertEq(pendingWeight0, weight30);
         assertEq(pendingWeight1, expectedNewWeight1);
         assertEq(previousWeight0, previousWeight0);

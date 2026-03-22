@@ -109,6 +109,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(INDEX_MANAGER_ROLE, msg.sender);
+        _grantRole(INDEX_MANAGER_ROLE, address(this));
         _grantRole(ROUTER_ROLE, _router);
     }
 
@@ -669,7 +670,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     /**
      * @notice Executes a pending weight update and triggers a rebalance.
      */
-    function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
+    function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE)  {
         if (
             s_weightUpdateExecutableAt == 0 ||
             block.timestamp < s_weightUpdateExecutableAt
@@ -686,9 +687,42 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         s_weightUpdateExecutableAt = 0;
 
         // Rebalance the index using the new target weights.
-        rebalanceIndex();
+        // Use try/catch so a rebalance failure does not revert the whole transaction,
+        // while still surfacing the failure reason.
+        (bool rebalanceSuccess, bytes memory reasonData) = _tryRebalanceIndex();
+        if (!rebalanceSuccess) {
+            emit WeightUpdateRebalanceFailed(reasonData);
+        }
 
         emit IndexWeightsUpdated(s_weight0, s_weight1, block.timestamp);
+        
+    }
+
+    /**
+     * @dev Tries to rebalance without reverting the caller and returns the failure reason.
+     * @return success True if rebalance succeeded.
+     * @return reasonData ABI-encoded revert reason/custom error data when failed.
+     */
+    function _tryRebalanceIndex()
+        internal
+        returns (bool success, bytes memory reasonData)
+    {
+        try this.rebalanceIndex() {
+            return (true, "");
+        } catch Error(string memory reason) {
+            return (
+                false,
+                abi.encodeWithSelector(
+                    bytes4(keccak256("Error(string)")),
+                    reason
+                )
+            );
+        } catch (bytes memory lowLevelData) {
+            if (lowLevelData.length > 0) {
+                return (false, lowLevelData);
+            }
+            return (false, bytes("Unknown error"));
+        }
     }
 
     /**
@@ -816,12 +850,12 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         );
 
         if (
-            weight0 < s_weight0 + REBALANCE_THRESHOLD ||
-            weight0 > s_weight0 - REBALANCE_THRESHOLD
+            weight0 < s_weight0 - REBALANCE_THRESHOLD ||
+            weight0 > s_weight0 + REBALANCE_THRESHOLD
         ) {
-            return false;
-        } else {
             return true;
+        } else {
+            return false;
         }
     }
 
@@ -1319,12 +1353,12 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         return (s_weight0, s_weight1);
     }
 
-    function getAssetsPendingWeights() public view returns (uint128, uint128, uint256) {
-        return (
-            s_pendingWeight0,
-            s_pendingWeight1,
-            s_weightUpdateExecutableAt
-        );
+    function getAssetsPendingWeights()
+        public
+        view
+        returns (uint128, uint128, uint256)
+    {
+        return (s_pendingWeight0, s_pendingWeight1, s_weightUpdateExecutableAt);
     }
 
     function getAssetsAmount() public view returns (uint128, uint128) {
