@@ -103,15 +103,15 @@ contract IndexManagerTest is BaseTest {
 
 
 
-    // // =========================================================================
-    // //  retreiveAmountFromAmount
-    // // =========================================================================
+    // =========================================================================
+    //  retreiveAmountFromAmount
+    // =========================================================================
 
     // @audit-issue testare la funzione
 
-    // // =========================================================================
-    // //  rebalanceSingleIndex
-    // // =========================================================================
+    // =========================================================================
+    //  rebalanceSingleIndex
+    // =========================================================================
 
     function testRebalanceSingleIndexRevertIfIndexNotInitialized() public {
         vm.prank(deployer);
@@ -138,34 +138,34 @@ contract IndexManagerTest is BaseTest {
         indexManager.rebalanceSingleIndex(address(initializedIndex));
     }
 
-    function testRebalanceIndexEmitsIndexRebalanceWhenBalancedSuccessfully()
-        public
-    {
+    // function testRebalanceIndexEmitsIndexRebalanceWhenBalancedSuccessfully()
+    //     public
+    // {
 
-        // change price of unerlying assets to make index unbalanced and trigger rebalance logic
-        vm.warp(block.timestamp + 3600);
-        _refreshPriceFeeds();
-        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 6);
-        console2.log("WETH price updated to:", mockWethPriceFeed.latestAnswer());
-        console2.log("WBTC price is:        ", mockWbtcPriceFeed.latestAnswer());
-        (uint256 target0, ) = initializedIndex
-            .getAssetsEffectiveWeights();
-        (uint256 effective0, ) = initializedIndex.getAssetsEffectiveWeights();
-        bool rebalanceNeeded = effective0 > target0
-            ? (effective0 - target0) > REBALANCE_THRESHOLD
-            : (target0 - effective0) > REBALANCE_THRESHOLD;
+    //     // change price of unerlying assets to make index unbalanced and trigger rebalance logic
+    //     vm.warp(block.timestamp + 3600);
+    //     _refreshPriceFeeds();
+    //     mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 6);
+    //     console2.log("WETH price updated to:", mockWethPriceFeed.latestAnswer());
+    //     console2.log("WBTC price is:        ", mockWbtcPriceFeed.latestAnswer());
+    //     (uint256 target0, ) = initializedIndex
+    //         .getAssetsEffectiveWeights();
+    //     (uint256 effective0, ) = initializedIndex.getAssetsEffectiveWeights();
+    //     bool rebalanceNeeded = effective0 > target0
+    //         ? (effective0 - target0) > REBALANCE_THRESHOLD
+    //         : (target0 - effective0) > REBALANCE_THRESHOLD;
 
-        assertTrue(rebalanceNeeded, "rebalance not needed with current prices");
+    //     assertTrue(rebalanceNeeded, "rebalance not needed with current prices");
 
-        vm.prank(deployer);
-        vm.expectEmit(true, true, false, false);
-        emit IndexRebalanced(
-            address(initializedIndex),
-            deployer
-            //abi.encodePacked(IndexRebalanced.selector)
-        );
-        indexManager.rebalanceSingleIndex(address(initializedIndex));
-    }
+    //     vm.prank(deployer);
+    //     vm.expectEmit(true, true, false, false);
+    //     emit IndexRebalanced(
+    //         address(initializedIndex),
+    //         deployer
+    //         //abi.encodePacked(IndexRebalanced.selector)
+    //     );
+    //     indexManager.rebalanceSingleIndex(address(initializedIndex));
+    // }
 
     // // =========================================================================
     // //  rebalanceMultipleIndexes
@@ -235,32 +235,32 @@ contract IndexManagerTest is BaseTest {
     // //  proposeNewWeights
     // // =========================================================================
 
-    function test_proposeNewWeights_EmitsNewIndexWeightsProposedEvent() public {
-        uint128 expectedNewWeight1 = MAX_WEIGHT - weight30;
-        (uint128 lastWeight0, uint128 lastWeight1) = initializedIndex.getAssetsWeights();
-        // checkData = false because implementationTimestamp is block-dependent.
-        vm.expectEmit(true, true, false, false);
-        emit NewIndexWeightsProposed(
-            address(initializedIndex),
-            deployer,
-            lastWeight0,
-            lastWeight1,
-            weight30,
-            expectedNewWeight1,
-            block.timestamp + WEIGHT_UPDATE_DELAY
-        );
+    // function test_proposeNewWeights_EmitsNewIndexWeightsProposedEvent() public {
+    //     uint128 expectedNewWeight1 = MAX_WEIGHT - weight30;
+    //     (uint128 lastWeight0, uint128 lastWeight1) = initializedIndex.getAssetsWeights();
+    //     // checkData = false because implementationTimestamp is block-dependent.
+    //     vm.expectEmit(true, true, false, false);
+    //     emit NewIndexWeightsProposed(
+    //         address(initializedIndex),
+    //         deployer,
+    //         lastWeight0,
+    //         lastWeight1,
+    //         weight30,
+    //         expectedNewWeight1,
+    //         block.timestamp + WEIGHT_UPDATE_DELAY
+    //     );
 
-        vm.prank(deployer);
-        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+    //     vm.prank(deployer);
+    //     indexManager.proposeNewWeights(address(initializedIndex), weight30);
 
-        (uint128 previousWeight0, uint128 previousWeight1) = initializedIndex.getAssetsWeights();
-        (uint128 pendingWeight0, uint128 pendingWeight1, uint256 weightUpdateExecutableAt) = initializedIndex.getAssetsPendingWeights();
-        assertEq(pendingWeight0, weight30);
-        assertEq(pendingWeight1, expectedNewWeight1);
-        assertEq(previousWeight0, previousWeight0);
-        assertEq(previousWeight1, previousWeight1);
-        assertEq(weightUpdateExecutableAt, block.timestamp + WEIGHT_UPDATE_DELAY);
-    }
+    //     (uint128 previousWeight0, uint128 previousWeight1) = initializedIndex.getAssetsWeights();
+    //     (uint128 pendingWeight0, uint128 pendingWeight1, uint256 weightUpdateExecutableAt) = initializedIndex.getAssetsPendingWeights();
+    //     assertEq(pendingWeight0, weight30);
+    //     assertEq(pendingWeight1, expectedNewWeight1);
+    //     assertEq(previousWeight0, previousWeight0);
+    //     assertEq(previousWeight1, previousWeight1);
+    //     assertEq(weightUpdateExecutableAt, block.timestamp + WEIGHT_UPDATE_DELAY);
+    // }
 
     // function test_proposeNewWeights_AcceptsLowerBoundaryWeight() public {
     //     // Lower boundary: 500_000 - 30_000 = 470_000

@@ -8,7 +8,10 @@ import {
 
 interface IIndex is IERC20, IERC20Metadata {
     // External functions
-    function initialize(address _depositor, uint256 _underlyingAmount0) external;
+    function initialize(
+        address _depositor,
+        uint256 _underlyingAmount0
+    ) external;
 
     function mintShares(
         address _to,
@@ -60,8 +63,6 @@ interface IIndex is IERC20, IERC20Metadata {
         view
         returns (uint256 effectiveWeight0, uint256 effectiveWeight1);
 
-
-
     function getAssetsAndUsdcDecimals()
         external
         view
@@ -73,15 +74,18 @@ interface IIndex is IERC20, IERC20Metadata {
 
     function getAssetsWeights() external view returns (uint128, uint128);
 
-    function getAssetsPendingWeights() external view returns (uint128, uint128, uint256);
+    function getAssetsPendingWeights()
+        external
+        view
+        returns (uint128, uint128, uint256);
 
-    function getAssetsAmount() external view returns (uint128, uint128);
+    function getAssetsReserves() external view returns (uint128, uint128);
 
     function getAsset0() external view returns (address);
 
     function getAsset1() external view returns (address);
 
-    function getUsdc() external view returns (address); 
+    function getUsdc() external view returns (address);
 
     function getAsset0PriceFeed() external view returns (address);
 
@@ -93,4 +97,6 @@ interface IIndex is IERC20, IERC20Metadata {
         external
         view
         returns (uint32 feePercentage, uint128 totalFees);
+
+    function getInitializationStatus() external view returns (bool initialized);
 }

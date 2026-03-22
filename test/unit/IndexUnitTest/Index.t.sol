@@ -22,11 +22,8 @@ import "../../../src/errors/IndexErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 
 contract IndexTest is BaseTest {
-  
-
     function setUp() public override {
         super.setUp();
-        
     }
 
     function testIndexDeployment() public {
@@ -95,5 +92,163 @@ contract IndexTest is BaseTest {
         initializedIndex.initialize(address(deployer), initAmount);
     }
 
-    
+    function testInitializarionRevertIfNotCalledByIndexManager() public {
+        uint256 initAmount = 10 * 10 ** mockWeth.decimals();
+
+        bytes32 indexManagerRole = nonInitializedIndex.INDEX_MANAGER_ROLE();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(
+                    keccak256(
+                        "AccessControlUnauthorizedAccount(address,bytes32)"
+                    )
+                ),
+                user1,
+                indexManagerRole
+            )
+        );
+        vm.prank(user1);
+        nonInitializedIndex.initialize(address(deployer), initAmount);
+    }
+
+    function testInitializationRevertIfAmountIsZero() public {
+        uint256 initAmount = 0;
+
+        vm.expectRevert(Index__InvalidUnderlyingAmount.selector);
+        vm.prank(address(indexManager));
+        nonInitializedIndex.initialize(address(deployer), initAmount);
+    }
+
+    function testInitializationRevertIfDeployerHasInsufficientBalanceOfAsset0()
+        public
+    {
+        uint256 initAmount = 10 * 10 ** mockWeth.decimals();
+        vm.startPrank(deployer);
+        mockWeth.approve(address(nonInitializedIndex), initAmount);
+        mockWeth.transfer(user1, mockWeth.balanceOf(deployer));
+        vm.stopPrank();
+        assertEq(
+            mockWeth.balanceOf(deployer),
+            0,
+            "Deployer should have 0 WETH balance"
+        );
+
+        vm.expectRevert();
+        vm.prank(address(indexManager));
+        nonInitializedIndex.initialize(address(deployer), initAmount);
+    }
+
+    function testInitializationRevertIfDeployerHasInsufficientBalanceOfAsset1()
+        public
+    {
+        uint256 initAmount = 10 * 10 ** mockWbtc.decimals();
+        vm.startPrank(deployer);
+        mockWbtc.approve(address(nonInitializedIndex), initAmount);
+        mockLink.transfer(user1, mockLink.balanceOf(deployer));
+        vm.stopPrank();
+        assertEq(
+            mockLink.balanceOf(deployer),
+            0,
+            "Deployer should have 0 LINK balance"
+        );
+        assertTrue(
+            mockWbtc.balanceOf(deployer) > initAmount,
+            "Deployer should have sufficient WBTC balance"
+        );
+
+        vm.expectRevert();
+        vm.prank(address(indexManager));
+        nonInitializedIndex.initialize(address(deployer), initAmount);
+    }
+
+    function testIndexInitializationWorksAndUpdateStateCorrectly() public {
+        assertEq(nonInitializedToken0, address(mockWbtc));
+        assertEq(nonInitializedToken1, address(mockLink));
+        assertEq(nonInitializedIndex.getInitializationStatus(), false);
+
+        vm.startPrank(deployer);
+        uint256 initAmount = 10 * 10 ** mockWbtc.decimals();
+        mockWbtc.approve(address(nonInitializedIndex), initAmount);
+        mockLink.approve(address(nonInitializedIndex), type(uint256).max);
+        vm.stopPrank();
+
+        vm.prank(address(indexManager));
+        nonInitializedIndex.initialize(address(deployer), initAmount);
+
+        assertEq(nonInitializedIndex.getInitializationStatus(), true);
+
+        (uint128 reserve0, uint128 reserve1) = nonInitializedIndex
+            .getAssetsReserves();
+        (uint8 decimals0, , ) = nonInitializedIndex.getAssetsAndUsdcDecimals();
+
+        uint8 multiplier0 = DECIMALS_STANDARD - decimals0;
+
+        uint256 amount0InUsd = (initAmount *
+            uint256(mockWbtcPriceFeed.latestAnswer()) *
+            10 ** multiplier0) / 10 ** mockWbtcPriceFeed.decimals();
+
+        (uint128 weight0, uint128 weight1) = nonInitializedIndex
+            .getAssetsWeights();
+
+        uint256 amount1InUsd = (amount0InUsd * weight1) / weight0;
+
+        uint256 amount1InToken1 = (amount1InUsd *
+            10 ** mockLinkPriceFeed.decimals()) /
+            uint256(mockLinkPriceFeed.latestAnswer());
+
+        uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
+
+        assertEq(
+            reserve0,
+            initAmount * 10 ** multiplier0,
+            "Asset0 reserve should be equal to the initial amount"
+        );
+
+        assertEq(reserve1, amount1InToken1);
+        assertEq(
+            nonInitializedIndex.balanceOf(deployer),
+            nonInitializedIndex.totalSupply()
+        );
+        assertEq(
+            nonInitializedIndex.totalSupply(),
+            amount0InUsd + amount1InUsd
+        );
+    }
+
+    function testInitializeEmitEvent() public {
+        vm.startPrank(deployer);
+        uint256 initAmount = 10 * 10 ** mockWbtc.decimals();
+        mockWbtc.approve(address(nonInitializedIndex), initAmount);
+        mockLink.approve(address(nonInitializedIndex), type(uint256).max);
+        vm.stopPrank();
+        (uint8 decimals0, , ) = nonInitializedIndex.getAssetsAndUsdcDecimals();
+        uint8 multiplier0 = DECIMALS_STANDARD - decimals0;
+
+        uint256 amount0InUsd = (initAmount *
+            uint256(mockWbtcPriceFeed.latestAnswer()) *
+            10 ** multiplier0) / 10 ** mockWbtcPriceFeed.decimals();
+
+        (uint128 weight0, uint128 weight1) = nonInitializedIndex
+            .getAssetsWeights();
+
+        uint256 amount1InUsd = (amount0InUsd * weight1) / weight0;
+
+        uint256 amount1InToken1 = (amount1InUsd *
+            10 ** mockLinkPriceFeed.decimals()) /
+            uint256(mockLinkPriceFeed.latestAnswer());
+
+        uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
+
+        vm.expectEmit(true, true, true, true);
+        emit IndexInitialized(
+            initAmount * 10 ** multiplier0,
+            amount1InToken1,
+            amount0InUsd,
+            amount1InUsd,
+            expectedInitialShares
+        );
+
+        vm.prank(address(indexManager));
+        nonInitializedIndex.initialize(address(deployer), initAmount);
+    }
 }

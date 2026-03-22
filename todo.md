@@ -14,4 +14,5 @@ router
 
 - check CEI pattern
 
-creare contratto timelock
+test fuzz
+- su prezzo di USDC da 0.95 a 1.05

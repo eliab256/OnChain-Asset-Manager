@@ -30,8 +30,14 @@ INDEX_MANAGER_UNIT_TEST_PATH ?= test/unit/IndexmanagerUnitTest/*.sol
 INTEGRATION_TEST_PATH 		?= test/integration/**/*.sol
 FUZZ_TEST_PATH 			?= test/fuzz/**/*.sol
 
+# ─── Coverage ────────────────────────────────────────────────────────────────
+# Usage: make coverage-contract CONTRACT=src/IndexManager.sol
+CONTRACT 				?=
+
+
+
 # ─── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single
+.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract
 
 build:
 	forge build

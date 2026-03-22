@@ -77,6 +77,7 @@ abstract contract BaseTest is Test, CodeConstants {
     int256 public constant WETH_INITIAL_PRICE = 2000 * 10 ** 8; // $2000 with 8 decimals
     int256 public constant WBTC_INITIAL_PRICE = 30000 * 10 ** 8; // $30000 with 8 decimals
     int256 public constant LINK_INITIAL_PRICE = 7 * 10 ** 8; // $7 with 8 decimals
+    //int256 public constant USDC_INITIAL_PRICE = 9979999; // $1 with
     int256 public constant USDC_INITIAL_PRICE = 1 * 10 ** 8; // $1 with
 
     function setUp() public virtual {

@@ -173,7 +173,7 @@ contract Router is IRouter, ReentrancyGuard {
         address _indexAddress,
         uint256 _usdcAmount,
         uint256 _maxTolerance
-    ) external view returns (uint256 minSharesAmount) {
+    ) external view validTolerance(_maxTolerance) returns (uint256 minSharesAmount) {
         IIndex index = IIndex(_indexAddress);
         minSharesAmount = index.minMintPreview(_usdcAmount, _maxTolerance);
     }
@@ -191,7 +191,7 @@ contract Router is IRouter, ReentrancyGuard {
     }
 
     function _validTolerance(uint256 _tolerance) internal pure {
-        if (_tolerance >= 10000 || _tolerance == 0) {
+        if (_tolerance >= 10_000 || _tolerance == 0) {
             revert Router__InvalidTolerance();
         }
     }

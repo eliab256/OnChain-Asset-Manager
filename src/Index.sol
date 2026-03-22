@@ -113,6 +113,10 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         _grantRole(ROUTER_ROLE, _router);
     }
 
+    // =========================================================================
+    //  public and external functions
+    // =========================================================================
+
     /**
      * @dev Initializes the index with the specified underlying amount of asset0.
      * @param _underlyingAmount0 The amount (in wei) of asset0 to initialize the index with.
@@ -327,42 +331,6 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     }
 
     /**
-     * @dev Computes the shares to mint and checks whether the swap result stayed within tolerance.
-     * @param _usdcAmountIn The net USDC input amount in 18-decimal standard units.
-     * @param _maxTolerance The maximum tolerated deviation.
-     * @param _totalAssetUsdValueBefore The total index value before the mint operation.
-     * @param asset0ReceivedUsdValue The USD value received in asset0.
-     * @param asset1ReceivedUsdValue The USD value received in asset1.
-     * @return sharesToMint The number of shares to mint.
-     * @return toleranceExceeded True if the actual result is below the tolerated minimum.
-     */
-    function _calculateShareToMintAndValidateTolerance(
-        uint256 _usdcAmountIn,
-        uint256 _maxTolerance,
-        uint256 _totalAssetUsdValueBefore,
-        uint256 asset0ReceivedUsdValue,
-        uint256 asset1ReceivedUsdValue
-    ) internal view returns (uint256 sharesToMint, bool toleranceExceeded) {
-        uint256 expectedShares = _mintPreview(
-            _usdcAmountIn,
-            _totalAssetUsdValueBefore
-        );
-        uint256 minimumSharesToMint = expectedShares
-            .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
-
-        sharesToMint = _mintPreview(
-            asset0ReceivedUsdValue + asset1ReceivedUsdValue,
-            _totalAssetUsdValueBefore
-        );
-
-        if (sharesToMint < minimumSharesToMint) {
-            return (0, true);
-        } else {
-            return (sharesToMint, false);
-        }
-    }
-
-    /**
      * @dev Previews the amount of shares to mint for a given USDC amount and tolerance.
      * @param _usdcAmountIn The amount of USDC to mint shares with (in token decimals).
      * @param _maxTolerance The maximum acceptable tolerance (in basis points).
@@ -389,23 +357,6 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         minimumSharesToMint = _mintPreview(
             minimumUsdAmount,
             totalAssetUsdValue
-        );
-    }
-
-    /**
-     * @dev Calculates the shares minted for a given normalized USDC amount.
-     * @param _usdcAmountIn The normalized USDC amount in 18-decimal standard units.
-     * @param _totalAssetUsdValueBefore The total index value before minting.
-     * @return sharesToMint The number of shares to mint.
-     */
-    function _mintPreview(
-        uint256 _usdcAmountIn,
-        uint256 _totalAssetUsdValueBefore
-    ) internal view returns (uint256 sharesToMint) {
-        uint256 totalShares = totalSupply();
-        sharesToMint = _usdcAmountIn.calculateSharesToMintFromUsdcAmount(
-            _totalAssetUsdValueBefore,
-            totalShares
         );
     }
 
@@ -551,82 +502,6 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     }
 
     /**
-     * @dev Previews the amount of USDC to receive for a given amount of shares.
-     * @param _sharesAmountIn The amount of shares to redeem (in wei).
-     * @param _totalAssetUsdValueBefore The total asset USD value before redemption.
-     * @return usdcToReceiveBeforeFees The amount of USDC to receive before fees (in 18 decimals).
-     */
-    function _redeemPreview(
-        uint256 _sharesAmountIn,
-        uint256 _totalAssetUsdValueBefore
-    ) internal view returns (uint256 usdcToReceiveBeforeFees) {
-        uint256 totalShares = totalSupply();
-        usdcToReceiveBeforeFees = _sharesAmountIn.calculateShareValueInUsd(
-            _totalAssetUsdValueBefore,
-            totalShares
-        );
-    }
-
-    /**
-     * @notice Assumes the USDC amount has already been converted to the 18-decimal standard.
-     * @dev Calculates the fees for a given USDC amount.
-     * @param _usdcAmountIn The amount of USDC to calculate fees for (in 18 decimals).
-     * @return feeAmount The calculated fee amount (in 18 decimals).
-     * @return netUsdcAmount The net USDC amount after deducting fees (in 18 decimals).
-     */
-    function _calculateFees(
-        uint256 _usdcAmountIn
-    ) internal view returns (uint128 feeAmount, uint256 netUsdcAmount) {
-        feeAmount = ((_usdcAmountIn * s_feePercentage) / MAX_PERCENTAGE)
-            .toUint128();
-        netUsdcAmount = _usdcAmountIn - feeAmount;
-    }
-
-    /**
-     * @notice Returns the latest normalized Chainlink price for a supported asset.
-     * @param _asset The asset address whose price is requested.
-     * @return price The asset price in USD with 18 decimals.
-     */
-    function getLatestPrice(address _asset) public view returns (uint256) {
-        AggregatorV3Interface feed;
-        if (_asset == address(i_asset0)) {
-            feed = i_asset0PriceFeed;
-        } else if (_asset == address(i_asset1)) {
-            feed = i_asset1PriceFeed;
-        } else if (_asset == address(i_usdc)) {
-            feed = i_usdcPriceFeed;
-        } else {
-            revert Index__AssetNotSupported();
-        }
-        (
-            uint80 roundId,
-            int256 answer,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = feed.latestRoundData();
-
-        if (answer <= 0) {
-            revert Index__PriceFeedNotAvailable();
-        }
-
-        if (answeredInRound < roundId) {
-            revert Index__PriceFeedRoundStale();
-        }
-
-        if (block.timestamp - updatedAt > MAX_DELAY) {
-            revert Index__PriceIsStale();
-        }
-
-        uint256 priceNormalized = _convertToDecimalStandard(
-            uint256(answer),
-            feed.decimals()
-        );
-
-        return priceNormalized;
-    }
-
-    /**
      * @notice Proposes a new target weight for asset0.
      * @param _newWeightAsset0 The proposed weight for asset0.
      * @return implementationTimestamp The timestamp after which the update can be executed.
@@ -670,7 +545,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     /**
      * @notice Executes a pending weight update and triggers a rebalance.
      */
-    function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE)  {
+    function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
         if (
             s_weightUpdateExecutableAt == 0 ||
             block.timestamp < s_weightUpdateExecutableAt
@@ -695,34 +570,6 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         }
 
         emit IndexWeightsUpdated(s_weight0, s_weight1, block.timestamp);
-        
-    }
-
-    /**
-     * @dev Tries to rebalance without reverting the caller and returns the failure reason.
-     * @return success True if rebalance succeeded.
-     * @return reasonData ABI-encoded revert reason/custom error data when failed.
-     */
-    function _tryRebalanceIndex()
-        internal
-        returns (bool success, bytes memory reasonData)
-    {
-        try this.rebalanceIndex() {
-            return (true, "");
-        } catch Error(string memory reason) {
-            return (
-                false,
-                abi.encodeWithSelector(
-                    bytes4(keccak256("Error(string)")),
-                    reason
-                )
-            );
-        } catch (bytes memory lowLevelData) {
-            if (lowLevelData.length > 0) {
-                return (false, lowLevelData);
-            }
-            return (false, bytes("Unknown error"));
-        }
     }
 
     /**
@@ -834,6 +681,122 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         );
     }
 
+    // =========================================================================
+    //  private and internal functions
+    // =========================================================================
+
+    /**
+     * @dev Calculates the shares minted for a given normalized USDC amount.
+     * @param _usdcAmountIn The normalized USDC amount in 18-decimal standard units.
+     * @param _totalAssetUsdValueBefore The total index value before minting.
+     * @return sharesToMint The number of shares to mint.
+     */
+    function _mintPreview(
+        uint256 _usdcAmountIn,
+        uint256 _totalAssetUsdValueBefore
+    ) internal view returns (uint256 sharesToMint) {
+        uint256 totalShares = totalSupply();
+        sharesToMint = _usdcAmountIn.calculateSharesToMintFromUsdcAmount(
+            _totalAssetUsdValueBefore,
+            totalShares
+        );
+    }
+
+    /**
+     * @dev Computes the shares to mint and checks whether the swap result stayed within tolerance.
+     * @param _usdcAmountIn The net USDC input amount in 18-decimal standard units.
+     * @param _maxTolerance The maximum tolerated deviation.
+     * @param _totalAssetUsdValueBefore The total index value before the mint operation.
+     * @param asset0ReceivedUsdValue The USD value received in asset0.
+     * @param asset1ReceivedUsdValue The USD value received in asset1.
+     * @return sharesToMint The number of shares to mint.
+     * @return toleranceExceeded True if the actual result is below the tolerated minimum.
+     */
+    function _calculateShareToMintAndValidateTolerance(
+        uint256 _usdcAmountIn,
+        uint256 _maxTolerance,
+        uint256 _totalAssetUsdValueBefore,
+        uint256 asset0ReceivedUsdValue,
+        uint256 asset1ReceivedUsdValue
+    ) internal view returns (uint256 sharesToMint, bool toleranceExceeded) {
+        uint256 expectedShares = _mintPreview(
+            _usdcAmountIn,
+            _totalAssetUsdValueBefore
+        );
+        uint256 minimumSharesToMint = expectedShares
+            .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
+
+        sharesToMint = _mintPreview(
+            asset0ReceivedUsdValue + asset1ReceivedUsdValue,
+            _totalAssetUsdValueBefore
+        );
+
+        if (sharesToMint < minimumSharesToMint) {
+            return (0, true);
+        } else {
+            return (sharesToMint, false);
+        }
+    }
+
+    /**
+     * @dev Previews the amount of USDC to receive for a given amount of shares.
+     * @param _sharesAmountIn The amount of shares to redeem (in wei).
+     * @param _totalAssetUsdValueBefore The total asset USD value before redemption.
+     * @return usdcToReceiveBeforeFees The amount of USDC to receive before fees (in 18 decimals).
+     */
+    function _redeemPreview(
+        uint256 _sharesAmountIn,
+        uint256 _totalAssetUsdValueBefore
+    ) internal view returns (uint256 usdcToReceiveBeforeFees) {
+        uint256 totalShares = totalSupply();
+        usdcToReceiveBeforeFees = _sharesAmountIn.calculateShareValueInUsd(
+            _totalAssetUsdValueBefore,
+            totalShares
+        );
+    }
+
+    /**
+     * @notice Assumes the USDC amount has already been converted to the 18-decimal standard.
+     * @dev Calculates the fees for a given USDC amount.
+     * @param _usdcAmountIn The amount of USDC to calculate fees for (in 18 decimals).
+     * @return feeAmount The calculated fee amount (in 18 decimals).
+     * @return netUsdcAmount The net USDC amount after deducting fees (in 18 decimals).
+     */
+    function _calculateFees(
+        uint256 _usdcAmountIn
+    ) internal view returns (uint128 feeAmount, uint256 netUsdcAmount) {
+        feeAmount = ((_usdcAmountIn * s_feePercentage) / MAX_PERCENTAGE)
+            .toUint128();
+        netUsdcAmount = _usdcAmountIn - feeAmount;
+    }
+
+    /**
+     * @dev Tries to rebalance without reverting the caller and returns the failure reason.
+     * @return success True if rebalance succeeded.
+     * @return reasonData ABI-encoded revert reason/custom error data when failed.
+     */
+    function _tryRebalanceIndex()
+        internal
+        returns (bool success, bytes memory reasonData)
+    {
+        try this.rebalanceIndex() {
+            return (true, "");
+        } catch Error(string memory reason) {
+            return (
+                false,
+                abi.encodeWithSelector(
+                    bytes4(keccak256("Error(string)")),
+                    reason
+                )
+            );
+        } catch (bytes memory lowLevelData) {
+            if (lowLevelData.length > 0) {
+                return (false, lowLevelData);
+            }
+            return (false, bytes("Unknown error"));
+        }
+    }
+
     /**
      * @dev Checks whether the current effective weight is outside the rebalance threshold.
      * @param _token0UsdValue The USD value of token0.
@@ -890,7 +853,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         priceUsdc = getLatestPrice(address(i_usdc));
 
         // Read the current reserves from storage.
-        (initialAsset0Reserve, initialAsset1Reserve) = getAssetsAmount();
+        (initialAsset0Reserve, initialAsset1Reserve) = getAssetsReserves();
 
         // Calculate the USD value of the asset reserves.
         asset0UsdValue = UnderlyingMath
@@ -1265,6 +1228,80 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
     }
 
     /**
+     * @dev Calculates the effective weights of the two assets.
+     * @param asset0UsdValue The USD value of asset0.
+     * @param totalAssetUsdValue The total USD value of the index.
+     * @return effectiveWeight0 The effective weight of asset0.
+     * @return effectiveWeight1 The effective weight of asset1.
+     */
+    function _getAssetsEffectiveWights(
+        uint256 asset0UsdValue,
+        uint256 totalAssetUsdValue
+    )
+        internal
+        pure
+        returns (uint128 effectiveWeight0, uint128 effectiveWeight1)
+    {
+        (uint256 weight0, uint256 weight1) = UnderlyingMath
+            .calculateEffectiveWeights(
+                asset0UsdValue,
+                totalAssetUsdValue,
+                MAX_PERCENTAGE
+            );
+
+        effectiveWeight0 = weight0.toUint128();
+        effectiveWeight1 = weight1.toUint128();
+    }
+
+    // =========================================================================
+    //  Getters
+    // =========================================================================
+
+    /**
+     * @notice Returns the latest normalized Chainlink price for a supported asset.
+     * @param _asset The asset address whose price is requested.
+     * @return price The asset price in USD with 18 decimals.
+     */
+    function getLatestPrice(address _asset) public view returns (uint256) {
+        AggregatorV3Interface feed;
+        if (_asset == address(i_asset0)) {
+            feed = i_asset0PriceFeed;
+        } else if (_asset == address(i_asset1)) {
+            feed = i_asset1PriceFeed;
+        } else if (_asset == address(i_usdc)) {
+            feed = i_usdcPriceFeed;
+        } else {
+            revert Index__AssetNotSupported();
+        }
+        (
+            uint80 roundId,
+            int256 answer,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = feed.latestRoundData();
+
+        if (answer <= 0) {
+            revert Index__PriceFeedNotAvailable();
+        }
+
+        if (answeredInRound < roundId) {
+            revert Index__PriceFeedRoundStale();
+        }
+
+        if (block.timestamp - updatedAt > MAX_DELAY) {
+            revert Index__PriceIsStale();
+        }
+
+        uint256 priceNormalized = _convertToDecimalStandard(
+            uint256(answer),
+            feed.decimals()
+        );
+
+        return priceNormalized;
+    }
+
+    /**
      * @dev Gets the total USD value of the underlying assets in the index.
      * @dev This performs two price-feed reads, which is unnecessary for some internal flows.
      * @return asset0TotalUsdValue The total USD value of asset0 in the index.
@@ -1315,32 +1352,6 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         );
     }
 
-    /**
-     * @dev Calculates the effective weights of the two assets.
-     * @param asset0UsdValue The USD value of asset0.
-     * @param totalAssetUsdValue The total USD value of the index.
-     * @return effectiveWeight0 The effective weight of asset0.
-     * @return effectiveWeight1 The effective weight of asset1.
-     */
-    function _getAssetsEffectiveWights(
-        uint256 asset0UsdValue,
-        uint256 totalAssetUsdValue
-    )
-        internal
-        pure
-        returns (uint128 effectiveWeight0, uint128 effectiveWeight1)
-    {
-        (uint256 weight0, uint256 weight1) = UnderlyingMath
-            .calculateEffectiveWeights(
-                asset0UsdValue,
-                totalAssetUsdValue,
-                MAX_PERCENTAGE
-            );
-
-        effectiveWeight0 = weight0.toUint128();
-        effectiveWeight1 = weight1.toUint128();
-    }
-
     function getAssetsAndUsdcDecimals()
         public
         view
@@ -1361,7 +1372,7 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         return (s_pendingWeight0, s_pendingWeight1, s_weightUpdateExecutableAt);
     }
 
-    function getAssetsAmount() public view returns (uint128, uint128) {
+    function getAssetsReserves() public view returns (uint128, uint128) {
         return (s_asset0Reserve, s_asset1Reserve);
     }
 
@@ -1395,5 +1406,9 @@ contract Index is IIndex, ERC20, AccessControl, CodeConstants {
         returns (uint32 feePercentage, uint128 totalFees)
     {
         return (s_feePercentage, s_totalFees);
+    }
+
+    function getInitializationStatus() public view returns (bool initialized) {
+        return s_initialized;
     }
 }
