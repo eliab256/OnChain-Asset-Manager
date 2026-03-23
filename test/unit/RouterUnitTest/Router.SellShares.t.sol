@@ -13,12 +13,7 @@ import {console2} from "forge-std/console2.sol";
 import "../../../src/errors/RouterErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 
-
 contract RouterTest is BaseTest {
-
-    /// Valid tolerance: 5% expressed with 4-decimal precision (5 * 100 = 500 / 10_000).
-    uint256 constant VALID_TOLERANCE = 500;
-
     function setUp() public override {
         super.setUp();
         _setupMockRouterForWethWbtcIndex();
@@ -136,7 +131,7 @@ contract RouterTest is BaseTest {
             10_000
         );
     }
-    
+
     function testSellSharesBurnsSharesAndTransfersUsdcToCaller() public {
         uint256 usdcAmount = 4_000e6;
         uint256 sharesBought = _buySharesForUser(user1, usdcAmount);
@@ -229,7 +224,11 @@ contract RouterTest is BaseTest {
                 address userFromEvent = address(
                     uint160(uint256(logs[i].topics[1]))
                 );
-                assertEq(userFromEvent, user1, "event must log user1 as redeemer");
+                assertEq(
+                    userFromEvent,
+                    user1,
+                    "event must log user1 as redeemer"
+                );
 
                 (uint256 logShares, , , uint256 logUsdcOut) = abi.decode(
                     logs[i].data,
@@ -257,7 +256,11 @@ contract RouterTest is BaseTest {
         );
 
         (, uint128 feesAfterRedeem) = initializedIndex.getFeesInfo();
-        assertGe(feesAfterRedeem, feesBeforeRedeem, "fees must not decrease after redeem");
+        assertGe(
+            feesAfterRedeem,
+            feesBeforeRedeem,
+            "fees must not decrease after redeem"
+        );
     }
 
     function testSellSharesUsdcReceivedIsLessOrEqualToDeposited() public {
@@ -330,8 +333,16 @@ contract RouterTest is BaseTest {
             shares1,
             VALID_TOLERANCE
         );
-        assertEq(initializedIndex.balanceOf(user1), 0, "user1 shares must be 0");
-        assertGt(initializedIndex.balanceOf(user2), 0, "user2 shares must remain");
+        assertEq(
+            initializedIndex.balanceOf(user1),
+            0,
+            "user1 shares must be 0"
+        );
+        assertGt(
+            initializedIndex.balanceOf(user2),
+            0,
+            "user2 shares must remain"
+        );
 
         // User2 sells all shares
         vm.prank(user2);
@@ -340,7 +351,11 @@ contract RouterTest is BaseTest {
             shares2,
             VALID_TOLERANCE
         );
-        assertEq(initializedIndex.balanceOf(user2), 0, "user2 shares must be 0");
+        assertEq(
+            initializedIndex.balanceOf(user2),
+            0,
+            "user2 shares must be 0"
+        );
     }
 
     function testMinMintPreviewBoundIsHonouredByActualMint() public {

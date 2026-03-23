@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
@@ -77,8 +77,11 @@ abstract contract BaseTest is Test, CodeConstants {
     int256 public constant WETH_INITIAL_PRICE = 2000 * 10 ** 8; // $2000 with 8 decimals
     int256 public constant WBTC_INITIAL_PRICE = 30000 * 10 ** 8; // $30000 with 8 decimals
     int256 public constant LINK_INITIAL_PRICE = 7 * 10 ** 8; // $7 with 8 decimals
-    //int256 public constant USDC_INITIAL_PRICE = 9979999; // $1 with
-    int256 public constant USDC_INITIAL_PRICE = 1 * 10 ** 8; // $1 with
+    //int256 public constant USDC_INITIAL_PRICE = 9979999;
+    int256 public constant USDC_INITIAL_PRICE = 1 * 10 ** 8; // $1 with 8 decimals, to be consistent with other price feeds
+
+    /// Valid tolerance: 0,5% expressed with 4-decimal precision.
+    uint256 constant VALID_TOLERANCE = (5 * PERCENTAGE_FEE_PRECISION) / 10; // 0,5%
 
     function setUp() public virtual {
         deployerPeriphery = new DeployPeriphery();
@@ -184,6 +187,12 @@ abstract contract BaseTest is Test, CodeConstants {
         nonInitializedIndex = Index(nonInitializedIndexAddress);
         nonInitializedToken0 = notinitToken0;
         nonInitializedToken1 = notinitToken1;
+
+        vm.label(address(router), "Router");
+        vm.label(address(indexManager), "IndexManager");
+        vm.label(address(swapManager), "SwapManager");
+        vm.label(address(initializedIndex), "InitializedIndex");
+        vm.label(address(nonInitializedIndex), "NonInitializedIndex");
     }
 
     /**

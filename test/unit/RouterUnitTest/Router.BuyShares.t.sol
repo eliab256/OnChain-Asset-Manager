@@ -16,9 +16,6 @@ import "../../../src/events/IndexEvents.sol";
 
 contract RouterBuySharesTest is BaseTest {
 
-    /// Valid tolerance: 5% expressed with 4-decimal precision (5 * 100 = 500 / 10_000).
-    uint256 constant VALID_TOLERANCE = 500;
-
     function setUp() public override {
         super.setUp();
         _setupMockRouterForWethWbtcIndex();
