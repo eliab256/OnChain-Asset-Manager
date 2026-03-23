@@ -26,6 +26,9 @@ contract IndexTest is BaseTest {
         super.setUp();
     }
 
+    // =========================================================================
+    //  deployment and constructor
+    // =========================================================================
     function testIndexDeployment() public {
         (address effectiveToken0, address effectiveToken1) = indexManager
             .sortAssets(address(mockLink), address(mockWbtc));
@@ -79,6 +82,10 @@ contract IndexTest is BaseTest {
             false
         );
     }
+
+    // =========================================================================
+    //  initialization
+    // =========================================================================
 
     function testIndexInitializationRevertIfAlreadyInitialized() public {
         assertEq(
@@ -179,10 +186,19 @@ contract IndexTest is BaseTest {
 
         (uint128 reserve0, uint128 reserve1) = nonInitializedIndex
             .getAssetsReserves();
-        (uint8 decimals0, , ) = nonInitializedIndex.getAssetsAndUsdcDecimals();
+        (uint8 decimals0, uint8 decimals1, ) = nonInitializedIndex
+            .getAssetsAndUsdcDecimals();
 
+        // Reserves are now stored in token decimals
+        // reserve0 should equal initAmount (token decimals)
+        assertEq(
+            reserve0,
+            initAmount,
+            "Asset0 reserve should equal initAmount in token decimals"
+        );
+
+        // Compute expected amount1 in token decimals
         uint8 multiplier0 = DECIMALS_STANDARD - decimals0;
-
         uint256 amount0InUsd = (initAmount *
             uint256(mockWbtcPriceFeed.latestAnswer()) *
             10 ** multiplier0) / 10 ** mockWbtcPriceFeed.decimals();
@@ -192,27 +208,33 @@ contract IndexTest is BaseTest {
 
         uint256 amount1InUsd = (amount0InUsd * weight1) / weight0;
 
-        uint256 amount1InToken1 = (amount1InUsd *
+        // amount1 in std decimals (18-dec)
+        uint256 amount1InStd = (amount1InUsd *
             10 ** mockLinkPriceFeed.decimals()) /
             uint256(mockLinkPriceFeed.latestAnswer());
 
-        uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
+        // Convert from std decimals to token1 decimals
+        uint256 expectedReserve1;
+        if (decimals1 < DECIMALS_STANDARD) {
+            expectedReserve1 =
+                amount1InStd /
+                (10 ** (DECIMALS_STANDARD - decimals1));
+        } else {
+            expectedReserve1 = amount1InStd;
+        }
 
         assertEq(
-            reserve0,
-            initAmount * 10 ** multiplier0,
-            "Asset0 reserve should be equal to the initial amount"
+            reserve1,
+            expectedReserve1,
+            "Asset1 reserve in token decimals"
         );
 
-        assertEq(reserve1, amount1InToken1);
+        uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
         assertEq(
             nonInitializedIndex.balanceOf(deployer),
             nonInitializedIndex.totalSupply()
         );
-        assertEq(
-            nonInitializedIndex.totalSupply(),
-            amount0InUsd + amount1InUsd
-        );
+        assertEq(nonInitializedIndex.totalSupply(), expectedInitialShares);
     }
 
     function testInitializeEmitEvent() public {
@@ -221,7 +243,8 @@ contract IndexTest is BaseTest {
         mockWbtc.approve(address(nonInitializedIndex), initAmount);
         mockLink.approve(address(nonInitializedIndex), type(uint256).max);
         vm.stopPrank();
-        (uint8 decimals0, , ) = nonInitializedIndex.getAssetsAndUsdcDecimals();
+        (uint8 decimals0, uint8 decimals1, ) = nonInitializedIndex
+            .getAssetsAndUsdcDecimals();
         uint8 multiplier0 = DECIMALS_STANDARD - decimals0;
 
         uint256 amount0InUsd = (initAmount *
@@ -233,16 +256,27 @@ contract IndexTest is BaseTest {
 
         uint256 amount1InUsd = (amount0InUsd * weight1) / weight0;
 
-        uint256 amount1InToken1 = (amount1InUsd *
+        // amount1 in std decimals
+        uint256 amount1InStd = (amount1InUsd *
             10 ** mockLinkPriceFeed.decimals()) /
             uint256(mockLinkPriceFeed.latestAnswer());
+
+        // Convert from std decimals to token1 decimals
+        uint256 amount1TokenDec;
+        if (decimals1 < DECIMALS_STANDARD) {
+            amount1TokenDec =
+                amount1InStd /
+                (10 ** (DECIMALS_STANDARD - decimals1));
+        } else {
+            amount1TokenDec = amount1InStd;
+        }
 
         uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
 
         vm.expectEmit(true, true, true, true);
         emit IndexInitialized(
-            initAmount * 10 ** multiplier0,
-            amount1InToken1,
+            initAmount, // token decimals, not std
+            amount1TokenDec, // token decimals, not std
             amount0InUsd,
             amount1InUsd,
             expectedInitialShares
@@ -251,4 +285,11 @@ contract IndexTest is BaseTest {
         vm.prank(address(indexManager));
         nonInitializedIndex.initialize(address(deployer), initAmount);
     }
+
+    // =========================================================================
+    //  minting functions
+    // =========================================================================
+
+
+
 }

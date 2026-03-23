@@ -81,6 +81,11 @@ interface IIndex is IERC20, IERC20Metadata {
 
     function getAssetsReserves() external view returns (uint128, uint128);
 
+    function getAssetsReservesStdDecimals()
+        external
+        view
+        returns (uint256, uint256);
+
     function getAsset0() external view returns (address);
 
     function getAsset1() external view returns (address);
