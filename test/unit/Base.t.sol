@@ -20,9 +20,9 @@ import {
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {UniversalRouterMock} from "../mocks/UniversalRouterMock.sol";
 import {IndexAsset, AssetAvailable} from "../../src/types.sol";
-import {CodeConstants} from "../../src/CodeConstants.sol";
+import {ContractCodeConstants} from "../../src/ContractCodeConstants.sol";
 
-abstract contract BaseTest is Test, CodeConstants {
+abstract contract BaseTest is Test, ContractCodeConstants {
     DeployPeriphery public deployerPeriphery;
     HelperConfig public helperConfig;
     Router public router;

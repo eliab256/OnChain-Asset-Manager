@@ -2,8 +2,6 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
-import {console} from "forge-std/console.sol";
-import {BaseTest} from "../Base.t.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
 import {Router} from "../../../src/Router.sol";
@@ -12,7 +10,7 @@ import {Index} from "../../../src/Index.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 
-contract DeployPeripheryTest is BaseTest, CodeConstants {
+contract DeployPeripheryTest is Test, CodeConstants {
     IndexManager public mainnetIndexManager;
     Router public mainnetRouter;
     SwapManager public mainnetSwapManager;
@@ -24,8 +22,8 @@ contract DeployPeripheryTest is BaseTest, CodeConstants {
         _;
     }
     
-    function setUp() public override {
-        super.setUp();
+    function setUp() public {
+        
     }
 
     function testDeployPeripheryOnMainnet() public selectFork("mainnet") {

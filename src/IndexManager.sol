@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {CodeConstants} from "./CodeConstants.sol";
+import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
@@ -19,7 +19,7 @@ import {
 import {IIndex} from "./Interface/IIndex.sol";
 import {console2} from "forge-std/console2.sol";
 
-contract IndexManager is IIndexManager, AccessControl, CodeConstants {
+contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     using SafeERC20 for IERC20;
 
     struct IndexAssets {

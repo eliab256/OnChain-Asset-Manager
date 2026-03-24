@@ -34,10 +34,14 @@ FUZZ_TEST_PATH 			?= test/fuzz/**/*.sol
 # Usage: make coverage-contract CONTRACT=src/IndexManager.sol
 CONTRACT 				?=
 
+# Usage: make coverage  (shows coverage only for src/ and script/ files)
+coverage:
+	@forge coverage --report summary 2>&1 | grep -E '(File|^\| src/|^\| script/|^Total)'
+
 
 
 # ─── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract
+.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract coverage
 
 build:
 	forge build

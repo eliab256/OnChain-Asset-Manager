@@ -20,7 +20,7 @@ import {
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
-import {CodeConstants} from "./CodeConstants.sol";
+import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {console} from "forge-std/console.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {
@@ -36,7 +36,7 @@ import {console2} from "forge-std/console2.sol";
  * (i.e. the native decimals of each underlying asset).
  *
  */
-contract Index is IIndex, ERC20, AccessControl, CodeConstants {
+contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;

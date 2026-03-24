@@ -17,7 +17,13 @@ contract DeployPeriphery is Script, CodeConstants {
 
     function run()
         external
-        returns (IndexManager, Router, HelperConfig, SwapManager, address deployer)
+        returns (
+            IndexManager,
+            Router,
+            HelperConfig,
+            SwapManager,
+            address deployer
+        )
     {
         helperConfig = new HelperConfig();
         NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
@@ -27,18 +33,20 @@ contract DeployPeriphery is Script, CodeConstants {
         bool isAnvil = block.chainid == ANVIL_CHAIN_ID;
 
         vm.startBroadcast(deployer);
-        
-        console.log(
-            "======================= Contracts Deployment ================="
-        );
+
+        console.log("============== Contracts Deployment ==============");
         // 1. Deploy IndexManager
-        indexManager = new IndexManager(config.usdcAddress, config.usdcPriceFeedAddress, config.uniswapUniversalRouter);
+        indexManager = new IndexManager(
+            config.usdcAddress,
+            config.usdcPriceFeedAddress,
+            config.uniswapUniversalRouter
+        );
 
         // 2. Deploy Router with the address of the deployed IndexManager
         router = new Router(address(indexManager));
 
         // 3. Deploy SwapManager with the address of the deployed IndexManager
-        swapManager = new SwapManager( address(indexManager));
+        swapManager = new SwapManager(address(indexManager));
 
         // 4. Set the Router address in the IndexManager
         indexManager.setRouterAddress(address(router));
@@ -46,9 +54,8 @@ contract DeployPeriphery is Script, CodeConstants {
         // 5. Set the SwapManager address in the IndexManager
         indexManager.setSwapManagerAddress(address(swapManager));
 
-        console.log(
-            "======================= Deployment Summary ================="
-        );
+        console.log("============== Deployment Summary ==============");
+        
         if (!isAnvil) {
             console.log("Deployer Address:", deployer);
             console.log("IndexManager Address:", address(indexManager));

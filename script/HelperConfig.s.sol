@@ -4,9 +4,7 @@ pragma solidity ^0.8.0;
 import {CodeConstants} from "./CodeConstants.sol";
 import {Script} from "forge-std/Script.sol";
 import {MockUSDC} from "../test/mocks/USDCMock.sol";
-import {
-    UniversalRouterMock
-} from "../test/mocks/UniversalRouterMock.sol";
+import {UniversalRouterMock} from "../test/mocks/UniversalRouterMock.sol";
 import {AssetTokenMock} from "../test/mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
@@ -33,6 +31,7 @@ struct NetworkConfig {
 contract HelperConfig is CodeConstants, Script {
     error HelperConfig__InvalidChainId();
     error HelperConfig__InvalidIndexConfig();
+    error HelperConfig__GetRealContractsOnMainnet();
 
     uint24 public constant DEFAULT_V4_POOL_FEE = 3000;
     int24 public constant DEFAULT_V4_TICK_SPACING = 60;
@@ -297,6 +296,9 @@ contract HelperConfig is CodeConstants, Script {
         view
         returns (AssetTokenMock, MockUSDC, AssetTokenMock, AssetTokenMock)
     {
+        if (block.chainid != ANVIL_CHAIN_ID) {
+            revert HelperConfig__GetRealContractsOnMainnet();
+        }
         AssetConfig memory usdcConfig = getActiveAssetConfig(
             AssetAvailable.USDC
         );
@@ -328,6 +330,9 @@ contract HelperConfig is CodeConstants, Script {
             MockV3Aggregator
         )
     {
+        if (block.chainid != ANVIL_CHAIN_ID) {
+            revert HelperConfig__GetRealContractsOnMainnet();
+        }
         AssetConfig memory usdcConfig = getActiveAssetConfig(
             AssetAvailable.USDC
         );
@@ -349,7 +354,11 @@ contract HelperConfig is CodeConstants, Script {
         );
     }
 
-    function getUniswapUniversalRouter() public view returns (UniversalRouterMock) {
+    function getUniswapUniversalRouter()
+        public
+        view
+        returns (UniversalRouterMock)
+    {
         return UniversalRouterMock(activeNetworkConfig.uniswapUniversalRouter);
     }
 }
