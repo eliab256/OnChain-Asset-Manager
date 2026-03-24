@@ -169,6 +169,10 @@ library UnderlyingMath {
         pure
         returns (uint256 token0DepositAmountUsd, uint256 token1DepositAmountUsd)
     {
+        if (_depositAmountUsd == 0) {
+            return (0, 0);
+        }
+
         uint256 updatedTotalAssetUsdValue = _initTotalAssetUsdValue +
             _depositAmountUsd;
         uint256 maxPercentage = _targetWeight0 + _targetWeight1;
