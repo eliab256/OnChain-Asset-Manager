@@ -189,7 +189,7 @@ contract HelperConfigTest is Test, CodeConstants {
 
     function testHelperConfigRevertIfUnsupportedChain() public {
         // Create and select a fork of an unsupported chain (e.g., Polygon)
-        uint256 polygonForkId = vm.createSelectFork(vm.rpcUrl("polygon"));
+        vm.createSelectFork(vm.rpcUrl("polygon"));
 
         // Expect the constructor to revert with the correct error message
         vm.expectRevert(HelperConfig.HelperConfig__InvalidChainId.selector);

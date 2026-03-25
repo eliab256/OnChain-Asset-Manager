@@ -1004,7 +1004,7 @@ contract SwapManagerTest is BaseTest {
         assertEq(route.v3Path.length, 0);
     }
 
-    function testGetRouteReturnsDifferentRoutesForDifferentSwapTypes() public {
+    function testGetRouteReturnsDifferentRoutesForDifferentSwapTypes() public view {
         SwapRoute memory r0 = swapManager.getRoute(
             address(initializedIndex),
             SwapType.ASSET0_USDC
@@ -1034,7 +1034,7 @@ contract SwapManagerTest is BaseTest {
     }
 
     function testGetRouteAllThreeSwapTypesAreStoredForInitializedIndex()
-        public
+        public view
     {
         SwapRoute memory r0 = swapManager.getRoute(
             address(initializedIndex),

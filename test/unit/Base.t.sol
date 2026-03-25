@@ -137,19 +137,19 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         // mint tokens to users
         mockWeth.mint(
             user1,
-            INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals() /100
+            (INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals()) / 100
         );
         mockWbtc.mint(
             user1,
-            INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals() /100
+            (INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals()) / 100
         );
         mockLink.mint(
             user1,
-            INITIAL_LINK_BALANCE * 10 ** mockLink.decimals() /100
+            (INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()) / 100
         );
         mockUsdc.mint(
             user1,
-            INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals() /100
+            (INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()) / 100
         );
         mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
         mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
@@ -211,6 +211,90 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         vm.label(address(swapManager), "SwapManager");
         vm.label(address(initializedIndex), "InitializedIndex");
         vm.label(address(nonInitializedIndex), "NonInitializedIndex");
+
+        // Configure mock router exchange rates
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockWeth),
+            mockUniRouter.computeRate(uint256(USDC_INITIAL_PRICE), 1e18)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockWbtc),
+            mockUniRouter.computeRate(uint256(WBTC_INITIAL_PRICE), 1e8)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockLink),
+            mockUniRouter.computeRate(uint256(LINK_INITIAL_PRICE), 1e18)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e18, uint256(USDC_INITIAL_PRICE))
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e8, uint256(WBTC_INITIAL_PRICE))
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e18, uint256(LINK_INITIAL_PRICE))
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockWbtc),
+            mockUniRouter.computeRate(15e18, 1e8) // No direct constant for 15 WETH, keep as is
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockWeth),
+            mockUniRouter.computeRate(1e8, 15e18) // No direct constant for 15 WETH, keep as is
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockLink),
+            mockUniRouter.computeRate(
+                1e18,
+                ((uint256(USDC_INITIAL_PRICE) * 1e18) /
+                    uint256(LINK_INITIAL_PRICE))
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockWeth),
+            mockUniRouter.computeRate(
+                ((uint256(USDC_INITIAL_PRICE) * 1e18) /
+                    uint256(LINK_INITIAL_PRICE)),
+                1e18
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockLink),
+            mockUniRouter.computeRate(
+                1e8,
+                ((uint256(WBTC_INITIAL_PRICE) * 1e18) /
+                    uint256(LINK_INITIAL_PRICE))
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockWbtc),
+            mockUniRouter.computeRate(
+                ((uint256(WBTC_INITIAL_PRICE) * 1e18) /
+                    uint256(LINK_INITIAL_PRICE)),
+                1e8
+            )
+        );
+
+        // Fund mock router with tokens for swaps
+        deal(address(mockWeth), address(mockUniRouter), INITIAL_WETH_BALANCE);
+        deal(address(mockWbtc), address(mockUniRouter), INITIAL_WBTC_BALANCE);
+        deal(address(mockLink), address(mockUniRouter), INITIAL_LINK_BALANCE);
+        deal(address(mockUsdc), address(mockUniRouter), INITIAL_USDC_BALANCE);
     }
 
     /**

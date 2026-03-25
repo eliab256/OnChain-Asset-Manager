@@ -77,4 +77,48 @@ contract IndexMintTest is BaseTest {
         vm.prank(address(router));
         initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
+
+     function testMintSharesRevertsIfUserHasNoUsdcBalance() public {
+        address userNoBalance = makeAddr("userNoBalance");
+
+        // Grant unlimited allowance to the Index — allowance check will pass.
+        vm.prank(userNoBalance);
+        mockUsdc.approve(address(initializedIndex), type(uint256).max);
+
+        // Balance is 0, so the transfer must revert.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IERC20Errors.ERC20InsufficientBalance.selector,
+                userNoBalance,
+                0,
+                VALID_USDC_AMOUNT
+            )
+        );
+        vm.prank(address(router));
+        initializedIndex.mintShares(userNoBalance, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testMintSharesUpdateStorageAndSendShares() public {
+        uint256 user1InitialShares = initializedIndex.balanceOf(user1);
+        (uint128 initialReserve0, uint128 initialReserve1) = initializedIndex.getAssetsReserves();
+        (,,uint256 initialTotalUsdValueOnIndex) = initializedIndex.getAssetsUsdValue();
+
+        vm.prank(user1);
+        mockUsdc.approve(address(initializedIndex), VALID_USDC_AMOUNT);
+        vm.prank(address(router));
+        initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+
+        uint256 user1FinalShares = initializedIndex.balanceOf(user1);
+        (uint128 finalReserve0, uint128 finalReserve1) = initializedIndex.getAssetsReserves();
+        (,,uint256 finalTotalUsdValueOnIndex) = initializedIndex.getAssetsUsdValue();
+        (uint32 feePercentage, uint128 totalFeesCollected) = initializedIndex.getFeesInfo();
+        uint256 expectedFees = (VALID_USDC_AMOUNT * feePercentage) / PERCENTAGE_FEE_PRECISION;
+        
+        assertGt(user1FinalShares, user1InitialShares, "User should receive more shares after minting");
+        assertGt(finalReserve0, initialReserve0, "Reserve0 should increase after minting");
+        assertGt(finalReserve1, initialReserve1, "Reserve1 should increase after minting");
+        assertGt(finalTotalUsdValueOnIndex, initialTotalUsdValueOnIndex, "Total USD value on index should increase after minting");
+        assertLt(finalTotalUsdValueOnIndex, initialTotalUsdValueOnIndex + VALID_USDC_AMOUNT, "fees should not be included in the total USD value of the index");
+        assertEq(totalFeesCollected, expectedFees, "Fees collected should match expected fees");
+    }
 }
