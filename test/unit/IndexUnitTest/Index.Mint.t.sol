@@ -50,7 +50,7 @@ contract IndexMintTest is BaseTest {
         address poorUser = makeAddr("poorUser");
         vm.prank(poorUser);
         mockUsdc.approve(address(router), VALID_USDC_AMOUNT);
-        
+
         vm.expectRevert(
             abi.encodeWithSelector(
                 IERC20Errors.ERC20InsufficientAllowance.selector,
@@ -65,5 +65,16 @@ contract IndexMintTest is BaseTest {
             VALID_USDC_AMOUNT,
             VALID_TOLERANCE
         );
+    }
+
+    function testMintRevertsIfPriceStealed() public {
+        vm.prank(user1);
+        mockUsdc.approve(address(initializedIndex), VALID_USDC_AMOUNT);
+
+        vm.warp(block.timestamp + 1 days); // Move forward in time to make the price stale
+
+        vm.expectRevert(abi.encodeWithSelector(Index__PriceIsStale.selector));
+        vm.prank(address(router));
+        initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
 }

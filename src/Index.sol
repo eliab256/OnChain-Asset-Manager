@@ -86,7 +86,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
     uint128 internal s_asset0Reserve; // token decimals of i_asset0
     uint128 internal s_asset1Reserve; // token decimals of i_asset1
 
-    uint128 internal s_totalFees; // 18-decimal standard
+    uint128 internal s_totalFees; // usdc-decimals
 
     uint32 internal s_feePercentage;
     bool internal s_initialized;
@@ -225,6 +225,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
 
     /**
      * @notice Mints index shares by depositing USDC.
+     * @notice Check on user usdc balance is done in the router before calling this function.
      * @param _to           Recipient of the minted shares.
      * @param _usdcAmountIn USDC amount in token decimals.
      * @param _maxTolerance Maximum tolerated value deviation.
@@ -250,15 +251,19 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         ) = _initFunctionValues();
 
         // 2. Fees (work in std decimals throughout).
-        uint256 netUsdcAmount;
+        uint256 netUsdcAmountStdDecimlas;
         {
-            uint256 usdcAmountInNormalized = _convertToDecimalStandard(
-                _usdcAmountIn,
+            // 2.1 Calculate fees on token decimals avoid future rounding error
+            uint128 feeAmount;
+            uint256 netUsdcAmount;
+            (feeAmount, netUsdcAmount) = _calculateFees(_usdcAmountIn);
+            s_totalFees += feeAmount;
+
+            // 2.2 Normalize netUsdcAmount to std decimlas for internal calculations.
+            netUsdcAmountStdDecimlas = _convertToDecimalStandard(
+                netUsdcAmount,
                 i_decimalsUsdc
             );
-            uint128 feeAmount;
-            (feeAmount, netUsdcAmount) = _calculateFees(usdcAmountInNormalized);
-            s_totalFees += feeAmount;
         }
 
         // 3. Swaps.
@@ -279,7 +284,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 uint256 usdcAmount1ToSwap
             ) = UnderlyingMath.calculateDepositAllocationInUsd(
                     initState.totalAssetUsdValue,
-                    netUsdcAmount,
+                    netUsdcAmountStdDecimlas,
                     weight0,
                     weight1,
                     effectiveWeight0
@@ -311,7 +316,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 uint256 sharesToMintTemp,
                 bool toleranceExceeded
             ) = _calculateShareToMintAndValidateTolerance(
-                    netUsdcAmount,
+                    netUsdcAmountStdDecimlas,
                     _maxTolerance,
                     initState.totalAssetUsdValue,
                     asset0ReceivedUsdValue,

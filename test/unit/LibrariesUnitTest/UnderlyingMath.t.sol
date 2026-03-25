@@ -64,7 +64,7 @@ contract UnderlyingMathTest is Test {
     //  calculateAmount1UsdFromAmount0UsdAndIndexWeights
     // =========================================================================
 
-    function testCalculateAmount1Usd_EqualWeights_ReturnSameAmount()
+    function testCalculateAmount1UsdEqualWeightsReturnSameAmount()
         public
         pure
     {
@@ -78,7 +78,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, USD_2000);
     }
 
-    function testCalculateAmount1Usd_SixtyFortyWeights_ReturnTwoThirdsOfAmount0()
+    function testCalculateAmount1UsdSixtyFortyWeightsReturnTwoThirdsOfAmount0()
         public
         pure
     {
@@ -94,7 +94,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, expected);
     }
 
-    function testCalculateAmount1Usd_ThirtySeventy_ReturnCorrectRatio()
+    function testCalculateAmount1UsdThirtySeventyReturnCorrectRatio()
         public
         pure
     {
@@ -108,7 +108,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, expected);
     }
 
-    function testCalculateAmount1Usd_ZeroAmount0_ReturnZero() public pure {
+    function testCalculateAmount1UsdZeroAmount0ReturnZero() public pure {
         uint256 result = UnderlyingMath
             .calculateAmount1UsdFromAmount0UsdAndIndexWeights(
                 0,
@@ -118,7 +118,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, 0);
     }
 
-    function testCalculateAmount1Usd_InvariantTotalValueConsistency()
+    function testCalculateAmount1UsdInvariantTotalValueConsistency()
         public
         pure
     {
@@ -144,7 +144,7 @@ contract UnderlyingMathTest is Test {
     // ── Branch 1: decimalsPrecision == tokenDecimals ──────────────────────────
     // Example: WETH (18 dec), precision = 18 dec
 
-    function testCalculateUsdValueOfToken_WhenPrecisionEqualsTokenDecimals_ReturnsCorrectValue()
+    function testCalculateUsdValueOfTokenWhenPrecisionEqualsTokenDecimalsReturnsCorrectValue()
         public
         pure
     {
@@ -159,7 +159,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, WETH_PRICE_STD);
     }
 
-    function testCalculateUsdValueOfToken_PrecisionEqualsTokenDecimals_TenTokens()
+    function testCalculateUsdValueOfTokenWhenPrecisionEqualsTokenDecimalsTenTokens()
         public
         pure
     {
@@ -177,7 +177,7 @@ contract UnderlyingMathTest is Test {
     // ── Branch 2: decimalsPrecision > tokenDecimals ───────────────────────────
     // Example: WBTC (8 dec), precision = 18 dec
 
-    function testCalculateUsdValueOfToken_WhenPrecisionGreaterThanTokenDecimals_ReturnsCorrectValue()
+    function testCalculateUsdValueOfTokenWhenPrecisionGreaterThanTokenDecimalsReturnsCorrectValue()
         public
         pure
     {
@@ -193,7 +193,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, WBTC_PRICE_STD);
     }
 
-    function testCalculateUsdValueOfToken_UsdcToken_PrecisionGreaterThanTokenDecimals()
+    function testCalculateUsdValueOfTokenUsdcTokenPrecisionGreaterThanTokenDecimals()
         public
         pure
     {
@@ -212,7 +212,7 @@ contract UnderlyingMathTest is Test {
     // ── Branch 3: decimalsPrecision < tokenDecimals ───────────────────────────
     // Example: 18-dec token, precision = 6 dec (like USDC)
 
-    function testCalculateUsdValueOfToken_WhenPrecisionLessThanTokenDecimals_ReturnsCorrectValue()
+    function testCalculateUsdValueOfTokenWhenPrecisionLessThanTokenDecimalsReturnsCorrectValue()
         public
         pure
     {
@@ -231,7 +231,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, expected);
     }
 
-    function testCalculateUsdValueOfToken_ZeroAmount_ReturnsZeroForAllBranches()
+    function testCalculateUsdValueOfTokenZeroAmountReturnZeroForAllBranches()
         public
         pure
     {
@@ -274,7 +274,7 @@ contract UnderlyingMathTest is Test {
     //  calculateUSDValueOfTokenAmountStdDecimals
     // =========================================================================
 
-    function testCalculateUsdValueStdDecimals_OneWeth_ReturnsCorrectUsdValue()
+    function testCalculateUsdValueStdDecimalsOneWethReturnsCorrectUsdValue()
         public
         pure
     {
@@ -290,7 +290,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, WETH_PRICE_STD);
     }
 
-    function testCalculateUsdValueStdDecimals_TenWeth_ReturnsTenTimesPrice()
+    function testCalculateUsdValueStdDecimalsTenWethReturnsTenTimesPrice()
         public
         pure
     {
@@ -303,7 +303,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, USD_20000);
     }
 
-    function testCalculateUsdValueStdDecimals_ZeroAmount_ReturnsZero()
+    function testCalculateUsdValueStdDecimalsZeroAmountReturnsZero()
         public
         pure
     {
@@ -316,7 +316,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, 0);
     }
 
-    function testCalculateUsdValueStdDecimals_ZeroPrice_ReturnsZero()
+    function testCalculateUsdValueStdDecimalsZeroPriceReturnsZero()
         public
         pure
     {
@@ -329,7 +329,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, 0);
     }
 
-    function testCalculateUsdValueStdDecimals_WbtcInStdDecimals_ReturnsCorrectValue()
+    function testCalculateUsdValueStdDecimalsWbtcInStdDecimalsReturnsCorrectValue()
         public
         pure
     {
@@ -349,7 +349,7 @@ contract UnderlyingMathTest is Test {
     //  calculateTokenAmountFromUsdValue
     // =========================================================================
 
-    function testCalculateTokenAmountFromUsd_WethFromUsdValue_ReturnsCorrectAmount()
+    function testCalculateTokenAmountFromUsdWethFromUsdValueReturnsCorrectAmount()
         public
         pure
     {
@@ -363,7 +363,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, ONE_WETH);
     }
 
-    function testCalculateTokenAmountFromUsd_WbtcFromUsdValue_ReturnsCorrectAmount()
+    function testCalculateTokenAmountFromUsdWbtcFromUsdValueReturnsCorrectAmount()
         public
         pure
     {
@@ -377,7 +377,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, ONE_WETH); // 1e18 in std-dec regardless of underlying token
     }
 
-    function testCalculateTokenAmountFromUsd_ZeroUsdValue_ReturnsZero()
+    function testCalculateTokenAmountFromUsdZeroUsdValueReturnsZero()
         public
         pure
     {
@@ -389,7 +389,7 @@ contract UnderlyingMathTest is Test {
         assertEq(result, 0);
     }
 
-    function testCalculateTokenAmountFromUsd_DoubleUsdValue_ReturnsDoubleTokenAmount()
+    function testCalculateTokenAmountFromUsdDoubleUsdValueReturnsDoubleTokenAmount()
         public
         pure
     {
@@ -412,7 +412,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 1: currentDecimals == targetDecimals ───────────────────────────
 
-    function testConvertToSpecificDecimal_EqualDecimals_ReturnUnchangedAmountAndZeroDiff()
+    function testConvertToSpecificDecimalEqualDecimalsReturnsUnchangedAmountAndZeroDiff()
         public
         pure
     {
@@ -422,7 +422,7 @@ contract UnderlyingMathTest is Test {
         assertEq(diff, 0);
     }
 
-    function testConvertToSpecificDecimal_EqualDecimals_EightBit_ReturnUnchanged()
+    function testConvertToSpecificDecimalEqualDecimalsEightBitReturnsUnchanged()
         public
         pure
     {
@@ -434,7 +434,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 2: targetDecimals > currentDecimals (scale up) ────────────────
 
-    function testConvertToSpecificDecimal_ScaleUpWbtcToStd_ReturnScaledAmountAndCorrectDiff()
+    function testConvertToSpecificDecimalScaleUpWbtcToStdReturnsScaledAmountAndCorrectDiff()
         public
         pure
     {
@@ -445,7 +445,7 @@ contract UnderlyingMathTest is Test {
         assertEq(diff, STD_DECIMALS - WBTC_DECIMALS);
     }
 
-    function testConvertToSpecificDecimal_ScaleUpUsdcToStd_ReturnScaledAmount()
+    function testConvertToSpecificDecimalScaleUpUsdcToStdReturnsScaledAmount()
         public
         pure
     {
@@ -456,7 +456,7 @@ contract UnderlyingMathTest is Test {
         assertEq(diff, STD_DECIMALS - USDC_DECIMALS);
     }
 
-    function testConvertToSpecificDecimal_ScaleUp_ZeroAmount_ReturnZeroAndCorrectDiff()
+    function testConvertToSpecificDecimalScaleUpZeroAmountReturnsZeroAndCorrectDiff()
         public
         pure
     {
@@ -468,7 +468,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 3: targetDecimals < currentDecimals (scale down) ──────────────
 
-    function testConvertToSpecificDecimal_ScaleDownStdToWbtc_ReturnScaledAmountAndCorrectDiff()
+    function testConvertToSpecificDecimalScaleDownStdToWbtcReturnsScaledAmountAndCorrectDiff()
         public
         pure
     {
@@ -480,7 +480,7 @@ contract UnderlyingMathTest is Test {
         assertEq(diff, STD_DECIMALS - WBTC_DECIMALS);
     }
 
-    function testConvertToSpecificDecimal_ScaleDownStdToUsdc_ReturnScaledAmount()
+    function testConvertToSpecificDecimalScaleDownStdToUsdcReturnsScaledAmount()
         public
         pure
     {
@@ -491,7 +491,7 @@ contract UnderlyingMathTest is Test {
         assertEq(diff, STD_DECIMALS - USDC_DECIMALS);
     }
 
-    function testConvertToSpecificDecimal_ScaleDown_ZeroAmount_ReturnZeroAndCorrectDiff()
+    function testConvertToSpecificDecimalScaleDownZeroAmountReturnsZeroAndCorrectDiff()
         public
         pure
     {
@@ -501,7 +501,7 @@ contract UnderlyingMathTest is Test {
         assertEq(diff, STD_DECIMALS - WBTC_DECIMALS);
     }
 
-    function testConvertToSpecificDecimal_RoundTrip_ScaleUpThenDown_ReturnOriginal()
+    function testConvertToSpecificDecimalRoundTripScaleUpThenDownReturnsOriginal()
         public
         pure
     {
@@ -525,7 +525,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 1: effectiveWeight0 > weight0 (swap token0 → token1) ──────────
 
-    function testCalculateRebalanceAmounts_Token0Overweight_ReturnsAmount0ToSwap()
+    function testCalculateRebalanceAmountsToken0OverweightReturnsAmount0ToSwap()
         public
         pure
     {
@@ -566,7 +566,7 @@ contract UnderlyingMathTest is Test {
         );
     }
 
-    function testCalculateRebalanceAmounts_Token0Overweight_Amount1ToSwapIsZero()
+    function testCalculateRebalanceAmountsToken0OverweightAmount1ToSwapIsZero()
         public
         pure
     {
@@ -589,7 +589,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 2: effectiveWeight0 <= weight0 (swap token1 → token0) ─────────
 
-    function testCalculateRebalanceAmounts_Token1Overweight_ReturnsAmount1ToSwap()
+    function testCalculateRebalanceAmountsToken1OverweightReturnsAmount1ToSwap()
         public
         pure
     {
@@ -628,7 +628,7 @@ contract UnderlyingMathTest is Test {
         );
     }
 
-    function testCalculateRebalanceAmounts_Token1Overweight_Amount0ToSwapIsZero()
+    function testCalculateRebalanceAmountsToken1OverweightAmount0ToSwapIsZero()
         public
         pure
     {
@@ -649,7 +649,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount0ToSwap, 0);
     }
 
-    function testCalculateRebalanceAmounts_ExactlyBalanced_SwapsToken1()
+    function testCalculateRebalanceAmountsExactlyBalancedSwapsToken1()
         public
         pure
     {
@@ -682,7 +682,7 @@ contract UnderlyingMathTest is Test {
     //  calculateSwapFromUsdcAmount
     // =========================================================================
 
-    function testCalculateSwapFromUsdc_EqualWeights_ReturnHalfToEach()
+    function testCalculateSwapFromUsdcEqualWeightsReturnHalfToEach()
         public
         pure
     {
@@ -692,7 +692,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount1, USD_1000 / 2);
     }
 
-    function testCalculateSwapFromUsdc_SixtyForty_ReturnCorrectSplit()
+    function testCalculateSwapFromUsdcSixtyFortyReturnCorrectSplit()
         public
         pure
     {
@@ -707,7 +707,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount1, expectedAmount1);
     }
 
-    function testCalculateSwapFromUsdc_ZeroUsdc_ReturnZeroForBoth()
+    function testCalculateSwapFromUsdcZeroUsdcReturnsZeroForBoth()
         public
         pure
     {
@@ -717,7 +717,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount1, 0);
     }
 
-    function testCalculateSwapFromUsdc_SumEqualsInput() public pure {
+    function testCalculateSwapFromUsdcSumEqualsInput() public pure {
         (uint256 amount0, uint256 amount1) = UnderlyingMath
             .calculateSwapFromUsdcAmount(USD_10000, WEIGHT_60, WEIGHT_40);
         assertEq(amount0 + amount1, USD_10000);
@@ -729,7 +729,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 1: targetToken0 <= currentToken0 (asset0 overweight, buy only asset1) ──
 
-    function testCalculateDepositAllocation_WhenAsset0Overweight_BuyOnlyAsset1()
+    function testCalculateDepositAllocationWhenAsset0OverweightBuyOnlyAsset1()
         public
         pure
     {
@@ -751,7 +751,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount1, USD_1000);
     }
 
-    function testCalculateDepositAllocation_WhenAsset0Overweight_AllGoesToAsset1()
+    function testCalculateDepositAllocationWhenAsset0OverweightAllGoesToAsset1()
         public
         pure
     {
@@ -769,7 +769,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 2: targetToken0 > currentToken0 (buy asset0 to rebalance) ─────
 
-    function testCalculateDepositAllocation_WhenAsset1Overweight_SplitDeposit()
+    function testCalculateDepositAllocationWhenAsset1OverweightSplitDeposit()
         public
         pure
     {
@@ -815,7 +815,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount1, expectedAmount1);
     }
 
-    function testCalculateDepositAllocation_BothBranches_SumEqualsDeposit()
+    function testCalculateDepositAllocationBothBranchesSumEqualsDeposit()
         public
         pure
     {
@@ -842,7 +842,7 @@ contract UnderlyingMathTest is Test {
         assertEq(a0Branch2 + a1Branch2, deposit);
     }
 
-    function testCalculateDepositAllocation_ZeroDeposit_ReturnZeroForBoth()
+    function testCalculateDepositAllocationZeroDepositReturnsZeroForBoth()
         public
         pure
     {
@@ -864,7 +864,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 1: targetToken0 >= currentToken0 (asset0 underweight, sell only asset1) ──
 
-    function testCalculateWithdraw_WhenAsset0Underweight_SellOnlyAsset1()
+    function testCalculateWithdrawWhenAsset0UnderweightSellOnlyAsset1()
         public
         pure
     {
@@ -892,7 +892,7 @@ contract UnderlyingMathTest is Test {
 
     // ── Branch 2: targetToken0 < currentToken0 (asset0 overweight, split) ────
 
-    function testCalculateWithdraw_WhenAsset0Overweight_SplitWithdrawal()
+    function testCalculateWithdrawWhenAsset0OverweightSplitWithdrawal()
         public
         pure
     {
@@ -929,7 +929,7 @@ contract UnderlyingMathTest is Test {
         assertEq(amount1, expectedAmount1);
     }
 
-    function testCalculateWithdraw_BothBranches_SumEqualsWithdrawAmount()
+    function testCalculateWithdrawBothBranchesSumEqualsWithdrawAmount()
         public
         pure
     {
@@ -958,7 +958,7 @@ contract UnderlyingMathTest is Test {
         assertEq(a0B2 + a1B2, withdraw);
     }
 
-    function testCalculateWithdraw_ZeroWithdraw_ReturnZeroForBoth()
+    function testCalculateWithdrawZeroWithdrawReturnsZeroForBoth()
         public
         pure
     {
@@ -978,7 +978,7 @@ contract UnderlyingMathTest is Test {
     //  calculateEffectiveWeights
     // =========================================================================
 
-    function testCalculateEffectiveWeights_EqualValues_ReturnHalfHalf()
+    function testCalculateEffectiveWeightsEqualValuesReturnHalfHalf()
         public
         pure
     {
@@ -992,7 +992,7 @@ contract UnderlyingMathTest is Test {
         assertEq(eff1, uint256(MAX_WEIGHT) - uint256(WEIGHT_50));
     }
 
-    function testCalculateEffectiveWeights_SixtyForty_ReturnCorrectWeights()
+    function testCalculateEffectiveWeightsSixtyFortyReturnCorrectWeights()
         public
         pure
     {
@@ -1006,7 +1006,7 @@ contract UnderlyingMathTest is Test {
         assertEq(eff1, uint256(WEIGHT_40));
     }
 
-    function testCalculateEffectiveWeights_SumAlwaysEqualsTotalWeight()
+    function testCalculateEffectiveWeightsSumAlwaysEqualsTotalWeight()
         public
         pure
     {
@@ -1018,7 +1018,7 @@ contract UnderlyingMathTest is Test {
         assertEq(eff0 + eff1, uint256(MAX_WEIGHT));
     }
 
-    function testCalculateEffectiveWeights_Token0IsZero_ReturnZeroAndFullWeight()
+    function testCalculateEffectiveWeightsToken0IsZeroReturnZeroAndFullWeight()
         public
         pure
     {
@@ -1031,7 +1031,7 @@ contract UnderlyingMathTest is Test {
         assertEq(eff1, uint256(MAX_WEIGHT));
     }
 
-    function testCalculateEffectiveWeights_Token0EqualsTotal_ReturnFullAndZero()
+    function testCalculateEffectiveWeightsToken0EqualsTotalReturnFullAndZero()
         public
         pure
     {
@@ -1044,7 +1044,7 @@ contract UnderlyingMathTest is Test {
         assertEq(eff1, 0);
     }
 
-    function testCalculateEffectiveWeights_ThirtyPercent_ReturnsCorrectWeights()
+    function testCalculateEffectiveWeightsThirtyPercentReturnsCorrectWeights()
         public
         pure
     {
@@ -1057,7 +1057,7 @@ contract UnderlyingMathTest is Test {
         assertEq(eff0, uint256(WEIGHT_30));
     }
 
-    function testCalculateEffectiveWeights_CustomTotalWeight_ScalesCorrectly()
+    function testCalculateEffectiveWeightsCustomTotalWeightScalesCorrectly()
         public
         pure
     {
@@ -1077,7 +1077,7 @@ contract UnderlyingMathTest is Test {
     //  Cross-function invariant tests
     // =========================================================================
 
-    function testInvariant_CalculateAmount1_ThenTokenAmount_RoundTrip()
+    function testInvariantCalculateAmount1ThenTokenAmountRoundTrip()
         public
         pure
     {
@@ -1116,7 +1116,7 @@ contract UnderlyingMathTest is Test {
         assertApproxEqAbs(recoveredUsd, amount1Usd, 1e5);
     }
 
-    function testInvariant_EffectiveWeights_UseInDepositAllocation()
+    function testInvariantEffectiveWeightsUseInDepositAllocation()
         public
         pure
     {
@@ -1147,7 +1147,7 @@ contract UnderlyingMathTest is Test {
         assertEq(dep0 + dep1, USD_100, "deposit sum must equal total deposit");
     }
 
-    function testInvariant_ConvertToDecimalStd_PreservesValueRoundTrip()
+    function testInvariantConvertToDecimalStdPreservesValueRoundTrip()
         public
         pure
     {

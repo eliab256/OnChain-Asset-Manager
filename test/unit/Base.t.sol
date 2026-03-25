@@ -116,6 +116,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         vm.label(user2, "user2");
         vm.label(user3, "user3");
 
+        // mint tokens to deployer
         mockWeth.mint(
             deployer,
             INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals()
@@ -133,6 +134,23 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()
         );
 
+        // mint tokens to users
+        mockWeth.mint(
+            user1,
+            INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals() /100
+        );
+        mockWbtc.mint(
+            user1,
+            INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals() /100
+        );
+        mockLink.mint(
+            user1,
+            INITIAL_LINK_BALANCE * 10 ** mockLink.decimals() /100
+        );
+        mockUsdc.mint(
+            user1,
+            INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals() /100
+        );
         mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
         mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
         mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);

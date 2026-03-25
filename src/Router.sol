@@ -40,9 +40,10 @@ contract Router is IRouter, ReentrancyGuard {
     modifier validInputs(
         address _indexAddress,
         uint256 _amount,
-        uint256 _tolerance
+        uint256 _tolerance,
+        bool isBuying
     ) {
-        _validInputs(_indexAddress, _amount, _tolerance);
+        _validInputs(_indexAddress, _amount, _tolerance, isBuying);
         _;
     }
 
@@ -65,7 +66,7 @@ contract Router is IRouter, ReentrancyGuard {
         uint256 _maxTolerance
     )
         public
-        validInputs(_indexAddress, _usdcAmount, _maxTolerance)
+        validInputs(_indexAddress, _usdcAmount, _maxTolerance, true)
         nonReentrant
     {
         _buyShares(_indexAddress, _usdcAmount, _maxTolerance);
@@ -86,7 +87,7 @@ contract Router is IRouter, ReentrancyGuard {
         uint256 _maxTolerance
     )
         public
-        validInputs(_indexAddress, _sharesAmount, _maxTolerance)
+        validInputs(_indexAddress, _sharesAmount, _maxTolerance, false)
         nonReentrant
     {
         _sellShares(_indexAddress, _sharesAmount, _maxTolerance);
@@ -184,6 +185,22 @@ contract Router is IRouter, ReentrancyGuard {
         }
     }
 
+    function _validBalance(address _indexAddress, uint256 _amount, bool isBuying) internal view {
+        if(isBuying) {
+            uint256 userUsdcBalance = i_usdc.balanceOf(msg.sender);
+            if (userUsdcBalance < _amount) {
+                revert Router__InsufficientUsdcBalance(userUsdcBalance, _amount);
+            }
+        } else {
+            IIndex index = IIndex(_indexAddress);
+            uint256 userSharesBalance = index.balanceOf(msg.sender);
+            if (userSharesBalance < _amount) {
+                revert Router__InsufficientSharesBalance(userSharesBalance, _amount);
+            }
+        }
+    }
+
+
     function _validIndex(address _indexAddress) internal view {
         if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {
             revert Router__InvalidIndexAddress();
@@ -199,11 +216,13 @@ contract Router is IRouter, ReentrancyGuard {
     function _validInputs(
         address _indexAddress,
         uint256 _amount,
-        uint256 _tolerance
+        uint256 _tolerance,
+        bool isBuying
     ) internal view {
         _validIndex(_indexAddress);
         _validAmount(_amount);
         _validTolerance(_tolerance);
+        _validBalance(_indexAddress, _amount, isBuying);
     }
     /**
      * @notice Returns the address of the IndexManager contract used by the router.
