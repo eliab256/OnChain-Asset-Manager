@@ -272,29 +272,33 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         uint256 asset1ReceivedStd;
         uint256 asset0ReceivedUsdValue;
         uint256 asset1ReceivedUsdValue;
-        {
-            (uint128 weight0, uint128 weight1) = getAssetsWeights();
+        {   
+            // 3.1 get effective and target weights
+            (uint128 targetWeight0, uint128 targetWeight1) = getAssetsWeights();
             (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
                 initState.asset0UsdValue,
                 initState.totalAssetUsdValue
             );
 
+            // 3.2 Calculate usd amount to swap for each underlyin token
             (
                 uint256 usdcAmount0ToSwap,
                 uint256 usdcAmount1ToSwap
             ) = UnderlyingMath.calculateDepositAllocationInUsd(
                     initState.totalAssetUsdValue,
                     netUsdcAmountStdDecimlas,
-                    weight0,
-                    weight1,
+                    targetWeight0,
+                    targetWeight1,
                     effectiveWeight0
                 );
 
+            // 3.3 Swap USDC and receive Token0 and Token1 amount in std decimals
             (asset0ReceivedStd, asset1ReceivedStd) = _swapUsdcForAssets(
                 usdcAmount0ToSwap,
                 usdcAmount1ToSwap
             );
 
+            // 3.4 Calculate the USD value of the amounts received to perform the tolerance check later.
             asset0ReceivedUsdValue = UnderlyingMath
                 .calculateUSDValueOfTokenAmountStdDecimals(
                     asset0ReceivedStd,
@@ -343,7 +347,8 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         s_asset0Reserve += asset0ReceivedTokenDec;
         s_asset1Reserve += asset1ReceivedTokenDec;
 
-        emit Deposit(
+        // 7. Emit SharesMinted event
+        emit SharesMinted(
             _to,
             _usdcAmountIn,
             sharesToMint,
@@ -446,7 +451,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         i_usdc.safeTransfer(_from, netUsdcAmountTokenDec);
         _burn(_from, _sharesAmount);
 
-        emit Withdrawal(
+        emit SharesBurned(
             _from,
             _sharesAmount,
             asset0AmountRedeemedTokenDec,

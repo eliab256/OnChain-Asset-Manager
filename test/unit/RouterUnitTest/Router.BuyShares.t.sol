@@ -250,11 +250,7 @@ contract RouterBuySharesTest is BaseTest {
         vm.prank(user1);
         mockUsdc.approve(address(initializedIndex), usdcAmount);
 
-        // Deposit(address indexed user, uint256 usdcAmountIn, uint256 sharesMinted,
-        //         uint256 token0Added, uint256 token1Added)
-        bytes32 expectedSig = keccak256(
-            "Deposit(address,uint256,uint256,uint256,uint256)"
-        );
+        bytes32 expectedSig = SharesMinted.selector;
 
         vm.recordLogs();
         vm.prank(user1);

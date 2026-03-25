@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IIndexManager} from "../../../src/Interface/IIndexManager.sol";
 import {ISwapManager} from "../../../src/Interface/ISwapManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
@@ -120,5 +121,168 @@ contract IndexMintTest is BaseTest {
         assertGt(finalTotalUsdValueOnIndex, initialTotalUsdValueOnIndex, "Total USD value on index should increase after minting");
         assertLt(finalTotalUsdValueOnIndex, initialTotalUsdValueOnIndex + VALID_USDC_AMOUNT, "fees should not be included in the total USD value of the index");
         assertEq(totalFeesCollected, expectedFees, "Fees collected should match expected fees");
+    }
+
+    function testMintSharesEmitsEvent() public {
+        vm.prank(user1);
+        mockUsdc.approve(address(initializedIndex), VALID_USDC_AMOUNT);
+
+        bytes32 expectedSig = SharesMinted.selector;
+
+        vm.recordLogs();
+        vm.prank(address(router));
+        initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool eventFound;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].emitter == address(initializedIndex) &&
+                logs[i].topics[0] == expectedSig
+            ) {
+                eventFound = true;
+                address _to = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                 assertEq(
+                    _to,
+                    user1,
+                    "event must log user1 as minter"
+                );
+
+                (uint256 usdcAmountIn, uint256 sharesMinted, uint256 token0, uint256 token1) = abi.decode(
+                    logs[i].data,
+                    (uint256, uint256, uint256, uint256)
+                );
+                assertEq(
+                    usdcAmountIn,
+                    VALID_USDC_AMOUNT,
+                    "event must log the correct USDC amount deposited"
+                );
+                assertGt(
+                    sharesMinted,
+                    0,
+                    "event must log a non-zero amount of shares minted"
+                );
+                assertGt(
+                    token0,
+                    0,
+                    "event must log a non-zero amount of token0 added to the index"
+                );  
+                assertGt(
+                    token1,
+                    0,
+                    "event must log a non-zero amount of token1 added to the index"
+                );
+            }
+        }
+    }
+
+     // =========================================================================
+    //  minMintPreview 
+    // =========================================================================
+
+    function testMinMintPreviewRevertsIfNotInitialized() public {
+        vm.expectRevert(abi.encodeWithSelector(Index__NotInitialized.selector));
+        nonInitializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testMinMintPreviewRevertsIfPriceIsStale() public {
+        vm.warp(block.timestamp + 1 days);
+
+        vm.expectRevert(abi.encodeWithSelector(Index__PriceIsStale.selector));
+        initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testMinMintPreview_ReturnsNonZeroForValidInput() public view{
+        uint256 result = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+        assertGt(result, 0, "minimum shares must be > 0 for a positive USDC deposit");
+    }
+
+
+    function testMinMintPreviewHigherToleranceLowersMinimumShares() public view{
+        uint256 resultLowTolerance  = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+        uint256 resultHighTolerance = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE * 2);
+
+        assertGt(
+            resultLowTolerance,
+            resultHighTolerance,
+            "a higher tolerance must yield fewer minimum shares"
+        );
+    }
+
+
+    function testMinMintPreviewZeroToleranceReturnsMaximumMinimumShares() public view{
+        uint256 resultZeroTolerance = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, 0);
+        uint256 resultValidTolerance = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+
+        assertGt(
+            resultZeroTolerance,
+            resultValidTolerance,
+            "zero tolerance must yield more minimum shares than any positive tolerance"
+        );
+    }
+
+    function testMinMintPreview_DeductsFeeBeforeApplyingTolerance() public view{
+        // Normalize USDC to the 18-decimal standard used by Index internally.
+        uint256 usdcStd = uint256(VALID_USDC_AMOUNT)
+            * 10 ** (DECIMALS_STANDARD - mockUsdc.decimals());
+
+        // Gross minimum a caller would expect if no fee existed.
+        uint256 grossMinimumIfNoFee = usdcStd
+            * (uint256(MAX_PERCENTAGE) - VALID_TOLERANCE)
+            / uint256(MAX_PERCENTAGE);
+
+        uint256 result = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+
+        assertLt(
+            result,
+            grossMinimumIfNoFee,
+            "fee must be deducted before tolerance is applied, reducing the minimum below the gross value"
+        );
+    }
+
+    function testMinMintPreviewLargerDepositProportionallyMoreMinimumShares() public view{
+        uint256 resultSmall = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+        uint256 resultLarge = initializedIndex.minMintPreview(VALID_USDC_AMOUNT * 2, VALID_TOLERANCE);
+
+        assertEq(
+            resultLarge,
+            resultSmall * 2,
+            "doubling the USDC input must exactly double the minimum shares"
+        );
+    }
+
+    function testMinMintPreviewMatchesManualCalculation() public view{
+        // 1. Normalise: 100e6 USDC (6 dec) → 100e18 (18 dec standard).
+        uint256 usdcStd = uint256(VALID_USDC_AMOUNT)
+            * 10 ** (DECIMALS_STANDARD - mockUsdc.decimals());
+
+        // 2. Protocol fee (1 %): fee = usdcStd * feePercentage / MAX_PERCENTAGE.
+        uint256 feeAmount  = usdcStd * uint256(validFeePercentage) / uint256(MAX_PERCENTAGE);
+        uint256 netUsdcStd = usdcStd - feeAmount;
+
+        // 3. Tolerance buffer: minimumUsd = netUsdcStd * (MAX - tolerance) / MAX.
+        uint256 minimumUsdAmount = netUsdcStd
+            * (uint256(MAX_PERCENTAGE) - VALID_TOLERANCE)
+            / uint256(MAX_PERCENTAGE);
+
+        // 4. Convert minimum USD to minimum shares using the current index ratio.
+        (, , uint256 totalAssetUsdValue) = initializedIndex.getAssetsUsdValue();
+        uint256 totalSupply = initializedIndex.totalSupply();
+        uint256 expectedMinShares = minimumUsdAmount * totalSupply / totalAssetUsdValue;
+
+        uint256 result = initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+
+        assertEq(
+            result,
+            expectedMinShares,
+            "minMintPreview must match the step-by-step manual reconstruction"
+        );
+    }
+
+    function testMinMintPreviewZeroUsdcDepositReturnsZeroShares() public view{
+        uint256 result = initializedIndex.minMintPreview(0, VALID_TOLERANCE);
+        assertEq(result, 0, "a zero USDC deposit must produce zero minimum shares");
     }
 }

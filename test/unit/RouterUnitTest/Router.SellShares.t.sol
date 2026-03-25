@@ -198,12 +198,7 @@ contract RouterTest is BaseTest {
 
     function testSellSharesEmitsWithdrawalEvent() public {
         uint256 sharesBought = _buySharesForUser(user1, 4_000e6);
-
-        // Withdrawal(address indexed user, uint256 sharesBurned,
-        //            uint256 token0Removed, uint256 token1Removed, uint256 usdcAmountOut)
-        bytes32 expectedSig = keccak256(
-            "Withdrawal(address,uint256,uint256,uint256,uint256)"
-        );
+        bytes32 expectedSig = SharesBurned.selector;
 
         vm.recordLogs();
         vm.prank(user1);

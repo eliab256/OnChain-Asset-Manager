@@ -9,7 +9,7 @@ event IndexInitialized(
     uint256 initialShares
 );
 
-event Deposit(
+event SharesMinted(
     address indexed user,
     uint256 usdcAmountIn,
     uint256 sharesMinted,
@@ -17,7 +17,7 @@ event Deposit(
     uint256 token1Added
 );
 
-event Withdrawal(
+event SharesBurned(
     address indexed user,
     uint256 sharesBurned,
     uint256 token0Removed,
