@@ -30,7 +30,7 @@ event IndexRebalanced(
     uint256 initAsset1Reserve,
     uint256 newAsset0Reserve,
     uint256 newAsset1Reserve,
-    uint256 rebalanceTimestamp
+    uint256 indexed rebalanceTimestamp
 );
 
 event WeightsUpdateProposed(

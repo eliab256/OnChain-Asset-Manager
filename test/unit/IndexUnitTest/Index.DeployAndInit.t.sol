@@ -286,10 +286,5 @@ contract IndexTest is BaseTest {
         nonInitializedIndex.initialize(address(deployer), initAmount);
     }
 
-    // =========================================================================
-    //  minting functions
-    // =========================================================================
-
-
 
 }

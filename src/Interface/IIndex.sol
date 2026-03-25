@@ -61,7 +61,7 @@ interface IIndex is IERC20, IERC20Metadata {
     function getAssetsEffectiveWeights()
         external
         view
-        returns (uint256 effectiveWeight0, uint256 effectiveWeight1);
+        returns (uint128 effectiveWeight0, uint128 effectiveWeight1);
 
     function getAssetsAndUsdcDecimals()
         external

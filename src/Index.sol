@@ -272,7 +272,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         uint256 asset1ReceivedStd;
         uint256 asset0ReceivedUsdValue;
         uint256 asset1ReceivedUsdValue;
-        {   
+        {
             // 3.1 get effective and target weights
             (uint128 targetWeight0, uint128 targetWeight1) = getAssetsWeights();
             (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
@@ -507,7 +507,9 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @notice Proposes a new target weight for asset0.
+     * @notice Proposes a new target weight for asset0 and then derive the corresponding weight for asset1.
+     * @param _newWeightAsset0 New target weight for asset0 in weight units (100% = 1000000).
+     * @return implementationTimestamp Timestamp at which the proposed weights can be implemented.
      */
     function proposeUpdateWeights(
         uint128 _newWeightAsset0
@@ -521,11 +523,9 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             block.timestamp < s_weightUpdateExecutableAt
         ) revert Index__PendingWeightUpdate();
 
-        bool invalidWeight0 = _newWeightAsset0 >
-            s_weight0 + REBALANCE_THRESHOLD ||
-            _newWeightAsset0 + REBALANCE_THRESHOLD < s_weight0 ||
-            _newWeightAsset0 >= MAX_WEIGHT ||
-            _newWeightAsset0 == 0;
+        bool invalidWeight0 = _newWeightAsset0 >= MAX_WEIGHT ||
+            _newWeightAsset0 <= MIN_WEIGHT ||
+            _newWeightAsset0 == s_weight0;
         if (invalidWeight0) revert Index__InvalidWeight();
 
         implementationTimestamp = block.timestamp + WEIGHT_UPDATE_DELAY;
@@ -543,12 +543,13 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
 
     /**
      * @notice Executes the pending weight update and triggers a rebalance.
+     * @notice Rebalance is attempted even if the update fails to execute to avoid getting stuck with pending weights that cannot be implemented.
      */
     function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
         if (
             s_weightUpdateExecutableAt == 0 ||
             block.timestamp < s_weightUpdateExecutableAt
-        ) revert Index__PendingWeightUpdate();
+        ) revert Index__NotPendingWeightUpdate();
 
         s_weight0 = s_pendingWeight0;
         s_weight1 = s_pendingWeight1;
@@ -1208,10 +1209,10 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
     function getAssetsEffectiveWeights()
         public
         view
-        returns (uint256 effectiveWeight0, uint256 effectiveWeight1)
+        returns (uint128 effectiveWeight0, uint128 effectiveWeight1)
     {
         (uint256 a0usd, , uint256 total) = getAssetsUsdValue();
-        (effectiveWeight0, effectiveWeight1) = _getAssetsEffectiveWights(
+        ( effectiveWeight0, effectiveWeight1) = _getAssetsEffectiveWights(
             a0usd,
             total
         );

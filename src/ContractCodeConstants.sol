@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 abstract contract ContractCodeConstants {
-
     /**
      * @dev The maximum delay to rethreive a price from the price feed, in seconds.
      * @dev This is used to ensure that the price data used for calculations is recent and not stale.
@@ -26,7 +25,7 @@ abstract contract ContractCodeConstants {
     uint32 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
 
     /**
-     * @dev The delay between weight updates propose and execution. 
+     * @dev The delay between weight updates propose and execution.
      * @dev This is used to ensure users have enough time to react to a proposed weight update.
      */
     uint256 internal constant WEIGHT_UPDATE_DELAY = 2 days;
@@ -40,6 +39,12 @@ abstract contract ContractCodeConstants {
      * @dev The maximum weight for an asset, in weight units (100%).
      */
     uint128 internal constant MAX_WEIGHT = 100 * WEIGHT_PRECISION;
+
+    /**
+     * @dev The minimum weight for an asset, in weight units (1%).
+     * @dev This is used to prevent dust allocations that could cause issues with swaps and rebalances.
+     */
+    uint128 internal constant MIN_WEIGHT = 1 * WEIGHT_PRECISION;
 
     /**
      * @dev The weight deviation threshold for triggering a rebalance, in basis points

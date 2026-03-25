@@ -71,6 +71,8 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     uint128 public weight60 = (60 * WEIGHT_PRECISION); // 60%
     uint128 public weight50 = (50 * WEIGHT_PRECISION); // 50%
     uint128 public weight40 = (40 * WEIGHT_PRECISION); // 40%
+    uint128 public weight70 = (70 * WEIGHT_PRECISION); // 70%
+    uint128 public invalidWeight = (999 * WEIGHT_PRECISION) / 10; // 99,9%
     uint32 public validFeePercentage = 1 * PERCENTAGE_FEE_PRECISION; // 1%
     uint32 public invalidFeePercentage = (1 * PERCENTAGE_FEE_PRECISION) / 1000; // 0.001% - above the max fee percentage allowed of 10%
 
@@ -307,5 +309,25 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
         mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
         mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
+    }
+
+    function _updatePriceFeedsWithNewPrices(
+        int256 newWethPrice,
+        int256 newUsdcPrice,
+        int256 newWbtcPrice,
+        int256 newLinkPrice
+    ) internal {
+        if (newWethPrice > 0) {
+            mockWethPriceFeed.updateAnswer(newWethPrice);
+        }
+        if (newUsdcPrice > 0) {
+            mockUsdcPriceFeed.updateAnswer(newUsdcPrice);
+        }
+        if (newWbtcPrice > 0) {
+            mockWbtcPriceFeed.updateAnswer(newWbtcPrice);
+        }
+        if (newLinkPrice > 0) {
+            mockLinkPriceFeed.updateAnswer(newLinkPrice);
+        }
     }
 }
