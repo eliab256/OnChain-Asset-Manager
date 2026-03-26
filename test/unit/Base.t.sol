@@ -293,10 +293,10 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         );
 
         // Fund mock router with tokens for swaps
-        deal(address(mockWeth), address(mockUniRouter), INITIAL_WETH_BALANCE);
-        deal(address(mockWbtc), address(mockUniRouter), INITIAL_WBTC_BALANCE);
-        deal(address(mockLink), address(mockUniRouter), INITIAL_LINK_BALANCE);
-        deal(address(mockUsdc), address(mockUniRouter), INITIAL_USDC_BALANCE);
+        deal(address(mockWeth), address(mockUniRouter), INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals());
+        deal(address(mockWbtc), address(mockUniRouter), INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals());
+        deal(address(mockLink), address(mockUniRouter), INITIAL_LINK_BALANCE * 10 ** mockLink.decimals());
+        deal(address(mockUsdc), address(mockUniRouter), INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals());
     }
 
     /**

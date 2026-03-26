@@ -2,11 +2,15 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IIndexManager} from "../../../src/Interface/IIndexManager.sol";
 import {ISwapManager} from "../../../src/Interface/ISwapManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
 import {Index} from "../../../src/Index.sol";
+import {
+    IAccessControl
+} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {
     HelperConfig,
     AssetConfig,
@@ -24,6 +28,25 @@ import "../../../src/events/IndexEvents.sol";
 contract IndexTest is BaseTest {
     function setUp() public override {
         super.setUp();
+    }
+
+    // =========================================================================
+    //  helpers
+    // =========================================================================
+    function _buildFeesToBeWithdrawn(
+        uint256 _usdcAmount
+    ) internal returns (uint128 totalFees) {
+        vm.startPrank(user1);
+        mockUsdc.approve(address(initializedIndex), _usdcAmount);
+        router.buyExactUsdcAmountOfShares(
+            address(initializedIndex),
+            _usdcAmount,
+            1_000
+        );
+        vm.stopPrank();
+
+        (, uint128 actualTotalfees) = initializedIndex.getFeesInfo();
+        totalFees = actualTotalfees;
     }
 
     // =========================================================================
@@ -286,5 +309,86 @@ contract IndexTest is BaseTest {
         nonInitializedIndex.initialize(address(deployer), initAmount);
     }
 
+    // =========================================================================
+    //  collect fees
+    // =========================================================================
 
+    function testCollectFeesRevertIfNotCalledByIndexManager() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user1,
+                nonInitializedIndex.INDEX_MANAGER_ROLE()
+            )
+        );
+        vm.prank(user1);
+        nonInitializedIndex.collectFees(user1);
+    }
+
+    function testCollectFeesWorksAndUpdateStateCorrectly() public {
+        uint256 usdcAmount = 1000 * 10 ** mockUsdc.decimals();
+        uint128 feesToBeWithdrawn = _buildFeesToBeWithdrawn(usdcAmount);
+
+        uint256 user1UsdcBalanceBefore = mockUsdc.balanceOf(user1);
+
+        vm.prank(address(indexManager));
+        uint256 feesCollected = nonInitializedIndex.collectFees(user1);
+
+        uint256 user1UsdcBalanceAfter = mockUsdc.balanceOf(user1);
+
+        assertEq(
+            feesCollected,
+            feesToBeWithdrawn,
+            "Fees collected should match the fees to be withdrawn"
+        );
+        assertEq(
+            user1UsdcBalanceAfter - user1UsdcBalanceBefore,
+            feesToBeWithdrawn,
+            "User1 USDC balance should increase by the amount of fees collected"
+        );
+
+        (
+            uint128 actualFeePercentage,
+            uint128 actualTotalfees
+        ) = nonInitializedIndex.getFeesInfo();
+        assertEq(
+            actualFeePercentage,
+            validFeePercentage,
+            "Fee percentage should remain unchanged after fee collection"
+        );
+        assertEq(
+            actualTotalfees,
+            0,
+            "Total fees should be reset to 0 after fee collection"
+        );
+    }
+
+    function testCollectFeesEmitEvent() public {
+        uint256 usdcAmount = 1000 * 10 ** mockUsdc.decimals();
+        uint128 feesToBeWithdrawn = _buildFeesToBeWithdrawn(usdcAmount);
+
+        vm.recordLogs();
+        vm.prank(address(indexManager));
+        nonInitializedIndex.collectFees(user1);
+
+        
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 expectedSig = FeesCollected.selector;
+        bool found = false;
+        uint256 collectFeesEvent;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSig) {
+                found = true;
+                collectFeesEvent = i;
+            }
+        }
+
+        address eventCollector = address(uint160(uint256(logs[collectFeesEvent].topics[1])));
+        uint256 feesCollected = abi.decode(logs[collectFeesEvent].data, (uint256));
+
+        assertTrue(found, "FeesCollected event should be emitted");
+        assertEq(eventCollector, user1, "Fee collector in event should be user1");
+        assertEq(feesCollected, feesToBeWithdrawn, "Fees collected in event should match fees to be withdrawn");
+    }
 }

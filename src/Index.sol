@@ -661,7 +661,13 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             updatedReserv0 = (s_asset0Reserve + token0TokenDec.toUint128());
         }
 
-        // 5. Slippage check (works on USD values, unaffected by decimal format).
+        // 5. Persist reserves (token decimals).
+        uint128 prevReserv0 = s_asset0Reserve;
+        uint128 prevReserv1 = s_asset1Reserve;
+        s_asset0Reserve = updatedReserv0;
+        s_asset1Reserve = updatedReserv1;
+
+        // 6. Slippage check (works on USD values, unaffected by decimal format).
         (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
         if (
             totalAssetUsdValueAfter <
@@ -670,12 +676,6 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 MAX_PERCENTAGE
             )
         ) revert Index__RebalanceSlippageTooHigh();
-
-        // 6. Persist reserves (token decimals).
-        uint128 prevReserv0 = s_asset0Reserve;
-        uint128 prevReserv1 = s_asset1Reserve;
-        s_asset0Reserve = updatedReserv0;
-        s_asset1Reserve = updatedReserv1;
 
         emit IndexRebalanced(
             prevReserv0,
@@ -1212,7 +1212,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         returns (uint128 effectiveWeight0, uint128 effectiveWeight1)
     {
         (uint256 a0usd, , uint256 total) = getAssetsUsdValue();
-        ( effectiveWeight0, effectiveWeight1) = _getAssetsEffectiveWights(
+        (effectiveWeight0, effectiveWeight1) = _getAssetsEffectiveWights(
             a0usd,
             total
         );

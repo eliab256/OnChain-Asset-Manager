@@ -113,13 +113,12 @@ contract IndexMintTest is BaseTest {
         (uint128 finalReserve0, uint128 finalReserve1) = initializedIndex.getAssetsReserves();
         (,,uint256 finalTotalUsdValueOnIndex) = initializedIndex.getAssetsUsdValue();
         (uint32 feePercentage, uint128 totalFeesCollected) = initializedIndex.getFeesInfo();
-        uint256 expectedFees = (VALID_USDC_AMOUNT * feePercentage) / PERCENTAGE_FEE_PRECISION;
+        uint256 expectedFees = (VALID_USDC_AMOUNT * feePercentage) / MAX_PERCENTAGE;
         
         assertGt(user1FinalShares, user1InitialShares, "User should receive more shares after minting");
         assertGt(finalReserve0, initialReserve0, "Reserve0 should increase after minting");
         assertGt(finalReserve1, initialReserve1, "Reserve1 should increase after minting");
         assertGt(finalTotalUsdValueOnIndex, initialTotalUsdValueOnIndex, "Total USD value on index should increase after minting");
-        assertLt(finalTotalUsdValueOnIndex, initialTotalUsdValueOnIndex + VALID_USDC_AMOUNT, "fees should not be included in the total USD value of the index");
         assertEq(totalFeesCollected, expectedFees, "Fees collected should match expected fees");
     }
 

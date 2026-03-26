@@ -257,6 +257,12 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         _refreshPriceFeeds();
         _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
 
+        mockUniRouter.setExchangeRate(
+            initializedToken1, // WBTC (asset venduto)
+            initializedToken0, // WETH (asset comprato)
+            mockUniRouter.computeRate(1e8, 30e18)
+        );
+
         (uint128 initialReserve0, uint128 initialReserve1) = initializedIndex
             .getAssetsReserves();
 
@@ -334,4 +340,122 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
     //============================================================================
     // RebalanceIndex
     //============================================================================
+
+    function testRebalanceIndexRevertsIfNotManager() public {
+        vm.prank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user1,
+                keccak256("INDEX_MANAGER_ROLE")
+            )
+        );
+        initializedIndex.rebalanceIndex();
+    }
+
+    function testRebalanceIndexRevertsIfNotNeeded() public {
+        vm.prank(address(indexManager));
+        // weights didn't change
+        vm.expectRevert(Index__RebalanceNotNeeded.selector);
+        initializedIndex.rebalanceIndex();
+    }
+
+    function testRebalanceIndexRevertsIfSlippageIsTooHigh() public {
+
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+
+      
+        mockUniRouter.setExchangeRate(
+            initializedToken1, // WBTC (the overweight asset being sold)
+            initializedToken0, // WETH (the target asset to buy)
+            1
+        );
+
+        vm.prank(address(indexManager));
+        vm.expectRevert(Index__RebalanceSlippageTooHigh.selector);
+        initializedIndex.rebalanceIndex();
+    }
+
+    function testRebalanceIndexSucceedsUpdatesStateAndEmitsEvent() public {
+        // Arrange: WBTC price doubles → WBTC overweight → swap WBTC → WETH.
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+
+        mockUniRouter.setExchangeRate(
+            initializedToken1, // WBTC → sell
+            initializedToken0, // WETH → buy
+            mockUniRouter.computeRate(1e8, 30e18)
+        );
+
+        (uint128 reserveBefore0, uint128 reserveBefore1) = initializedIndex
+            .getAssetsReserves();
+
+        // Act
+        bytes32 expectedSig = IndexRebalanced.selector;
+        vm.recordLogs();
+        vm.prank(address(indexManager));
+        initializedIndex.rebalanceIndex();
+
+        // Assert — state: WBTC (asset1) sold → reserve1 decreased;
+        //                  WETH (asset0) received → reserve0 increased.
+        (uint128 reserveAfter0, uint128 reserveAfter1) = initializedIndex
+            .getAssetsReserves();
+
+        assertGt(
+            reserveAfter0,
+            reserveBefore0,
+            "reserve0 (WETH) must increase after rebalance"
+        );
+        assertLt(
+            reserveAfter1,
+            reserveBefore1,
+            "reserve1 (WBTC) must decrease after rebalance"
+        );
+
+        // Assert — event: IndexRebalanced must be emitted with correct
+        //                  prev/new reserves and current timestamp.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].emitter == address(initializedIndex) &&
+                logs[i].topics[0] == expectedSig
+            ) {
+                found = true;
+                uint256 logTs = uint256(logs[i].topics[1]);
+                (
+                    uint256 logPrevR0,
+                    uint256 logPrevR1,
+                    uint256 logNewR0,
+                    uint256 logNewR1  
+                ) = abi.decode(
+                        logs[i].data,
+                        (uint256, uint256, uint256, uint256)
+                    );
+
+                assertEq(
+                    logPrevR0,
+                    reserveBefore0,
+                    "logged prevReserve0 mismatch"
+                );
+                assertEq(
+                    logPrevR1,
+                    reserveBefore1,
+                    "logged prevReserve1 mismatch"
+                );
+                assertEq(
+                    logNewR0,
+                    reserveAfter0,
+                    "logged newReserve0 mismatch"
+                );
+                assertEq(
+                    logNewR1,
+                    reserveAfter1,
+                    "logged newReserve1 mismatch"
+                );
+                assertEq(logTs, block.timestamp, "logged timestamp mismatch");
+                break;
+            }
+        }
+        assertTrue(found, "IndexRebalanced event not emitted");
+    }
 }
