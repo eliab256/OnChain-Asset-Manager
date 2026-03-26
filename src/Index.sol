@@ -570,7 +570,9 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
     function collectFees(
         address _collector
     ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
-        feesCollected = s_totalFees;
+        uint128 cacheTotalFees = s_totalFees;
+        if(cacheTotalFees == 0) revert Index__NoFeesToCollect();
+        feesCollected = cacheTotalFees;
         s_totalFees = 0;
         i_usdc.safeTransfer(_collector, feesCollected);
         emit FeesCollected(_collector, feesCollected);

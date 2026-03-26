@@ -313,7 +313,7 @@ contract IndexTest is BaseTest {
     //  collect fees
     // =========================================================================
 
-    function testCollectFeesRevertIfNotCalledByIndexManager() public {
+    function testCollectFeesRevertsIfNotCalledByIndexManager() public {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IAccessControl.AccessControlUnauthorizedAccount.selector,
@@ -322,6 +322,12 @@ contract IndexTest is BaseTest {
             )
         );
         vm.prank(user1);
+        nonInitializedIndex.collectFees(user1);
+    }
+
+    function testCollectFeesRevertsIfFeesAreZero() public {
+        vm.expectRevert(Index__NoFeesToCollect.selector);
+        vm.prank(address(indexManager));
         nonInitializedIndex.collectFees(user1);
     }
 
