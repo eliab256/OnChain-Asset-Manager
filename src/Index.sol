@@ -314,21 +314,14 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         }
 
         // 4. Tolerance check.
-        uint256 sharesToMint;
-        {
-            (
-                uint256 sharesToMintTemp,
-                bool toleranceExceeded
-            ) = _calculateShareToMintAndValidateTolerance(
-                    netUsdcAmountStdDecimlas,
-                    _maxTolerance,
-                    initState.totalAssetUsdValue,
-                    asset0ReceivedUsdValue,
-                    asset1ReceivedUsdValue
-                );
-            if (toleranceExceeded) revert Index__ToleranceExceeded();
-            sharesToMint = sharesToMintTemp;
-        }
+        uint256 sharesToMint = _calculateShareToMintAndValidateTolerance(
+            netUsdcAmountStdDecimlas,
+            _maxTolerance,
+            initState.totalAssetUsdValue,
+            asset0ReceivedUsdValue,
+            asset1ReceivedUsdValue
+        );
+        if (sharesToMint == 0) revert Index__ToleranceExceeded();
 
         // 5. Mint.
         _mint(_to, sharesToMint);
@@ -571,7 +564,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         address _collector
     ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
         uint128 cacheTotalFees = s_totalFees;
-        if(cacheTotalFees == 0) revert Index__NoFeesToCollect();
+        if (cacheTotalFees == 0) revert Index__NoFeesToCollect();
         feesCollected = cacheTotalFees;
         s_totalFees = 0;
         i_usdc.safeTransfer(_collector, feesCollected);
@@ -708,7 +701,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         uint256 _totalAssetUsdValueBefore,
         uint256 asset0ReceivedUsdValue,
         uint256 asset1ReceivedUsdValue
-    ) internal view returns (uint256 sharesToMint, bool toleranceExceeded) {
+    ) internal view returns (uint256 sharesToMint) {
         uint256 expectedShares = _mintPreview(
             _usdcAmountIn,
             _totalAssetUsdValueBefore
@@ -721,8 +714,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             _totalAssetUsdValueBefore
         );
 
-        toleranceExceeded = sharesToMint < minimumSharesToMint;
-        if (toleranceExceeded) sharesToMint = 0;
+        if (sharesToMint < minimumSharesToMint) sharesToMint = 0;
     }
 
     function _redeemPreview(

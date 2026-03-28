@@ -1,0 +1,365 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>LCOV - lcov.info - test/mocks/test/mocks/UniversalRouterMock.sol</title>
+  <link rel="stylesheet" type="text/css" href="../../../../gcov.css">
+</head>
+
+<body>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="title">LCOV - code coverage report</td></tr>
+            <tr><td class="ruler"><img src="../../../../glass.png" width=3 height=3 alt=""></td></tr>
+
+            <tr>
+              <td width="100%">
+                <table cellpadding=1 border=0 width="100%">
+          <tr>
+            <td width="10%" class="headerItem">Current view:</td>
+            <td width="10%" class="headerValue"><a href="../../../../index.html">top level</a> - <a href="index.html">test/mocks/test/mocks</a> - UniversalRouterMock.sol<span style="font-size: 80%;"> (source / <a href="UniversalRouterMock.sol.func-c.html">functions</a>)</span></td>
+            <td width="5%"></td>
+            <td width="5%"></td>
+            <td width="5%" class="headerCovTableHead">Coverage</td>
+            <td width="5%" class="headerCovTableHead" title="Covered + Uncovered code">Total</td>
+            <td width="5%" class="headerCovTableHead" title="Exercised code only">Hit</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test:</td>
+            <td class="headerValue">lcov.info</td>
+            <td></td>
+            <td class="headerItem">Lines:</td>
+            <td class="headerCovTableEntryLo">51.0&nbsp;%</td>
+            <td class="headerCovTableEntry">51</td>
+            <td class="headerCovTableEntry">26</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test Date:</td>
+            <td class="headerValue">2026-03-26 22:09:58</td>
+            <td></td>
+            <td class="headerItem">Functions:</td>
+            <td class="headerCovTableEntryLo">50.0&nbsp;%</td>
+            <td class="headerCovTableEntry">10</td>
+            <td class="headerCovTableEntry">5</td>
+          </tr>
+                  <tr><td><img src="../../../../glass.png" width=3 height=3 alt=""></td></tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr><td class="ruler"><img src="../../../../glass.png" width=3 height=3 alt=""></td></tr>
+          </table>
+
+          <table cellpadding=0 cellspacing=0 border=0>
+            <tr>
+              <td><br></td>
+            </tr>
+            <tr>
+              <td>
+<pre class="sourceHeading">            Line data    Source code</pre>
+<pre class="source">
+<span id="L1"><span class="lineNum">       1</span>              : // SPDX-License-Identifier: MIT</span>
+<span id="L2"><span class="lineNum">       2</span>              : pragma solidity ^0.8.0;</span>
+<span id="L3"><span class="lineNum">       3</span>              : </span>
+<span id="L4"><span class="lineNum">       4</span>              : import {IERC20} from &quot;@openzeppelin/contracts/token/ERC20/IERC20.sol&quot;;</span>
+<span id="L5"><span class="lineNum">       5</span>              : import {</span>
+<span id="L6"><span class="lineNum">       6</span>              :     SafeERC20</span>
+<span id="L7"><span class="lineNum">       7</span>              : } from &quot;@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol&quot;;</span>
+<span id="L8"><span class="lineNum">       8</span>              : </span>
+<span id="L9"><span class="lineNum">       9</span>              : /**</span>
+<span id="L10"><span class="lineNum">      10</span>              :  * @title MockUniversalRouter</span>
+<span id="L11"><span class="lineNum">      11</span>              :  * @notice Simulates Uniswap's UniversalRouter for unit tests.</span>
+<span id="L12"><span class="lineNum">      12</span>              :  *</span>
+<span id="L13"><span class="lineNum">      13</span>              :  * @dev Supports both V3 (command 0x00) and V4 (command 0x10) swap formats,</span>
+<span id="L14"><span class="lineNum">      14</span>              :  *      mirroring the exact encoding produced by SwapManager.sol.</span>
+<span id="L15"><span class="lineNum">      15</span>              :  *</span>
+<span id="L16"><span class="lineNum">      16</span>              :  * ── Exchange rate model ────────────────────────────────────────────────────</span>
+<span id="L17"><span class="lineNum">      17</span>              :  *</span>
+<span id="L18"><span class="lineNum">      18</span>              :  *   amountOut = (amountIn * rate) / RATE_PRECISION   (RATE_PRECISION = 1e18)</span>
+<span id="L19"><span class="lineNum">      19</span>              :  *</span>
+<span id="L20"><span class="lineNum">      20</span>              :  *   Example: USDC (6 dec) → WETH (18 dec) at $2 000 / ETH</span>
+<span id="L21"><span class="lineNum">      21</span>              :  *</span>
+<span id="L22"><span class="lineNum">      22</span>              :  *     1 USDC  = 1e6  raw units in</span>
+<span id="L23"><span class="lineNum">      23</span>              :  *     0.0005 WETH = 5e14 raw units out</span>
+<span id="L24"><span class="lineNum">      24</span>              :  *</span>
+<span id="L25"><span class="lineNum">      25</span>              :  *     rate = (5e14 * 1e18) / 1e6  =  5e26</span>
+<span id="L26"><span class="lineNum">      26</span>              :  *</span>
+<span id="L27"><span class="lineNum">      27</span>              :  *   Helper (pure):  computeRate(amountIn, amountOut)  does this for you.</span>
+<span id="L28"><span class="lineNum">      28</span>              :  *</span>
+<span id="L29"><span class="lineNum">      29</span>              :  * ── Funding ────────────────────────────────────────────────────────────────</span>
+<span id="L30"><span class="lineNum">      30</span>              :  *</span>
+<span id="L31"><span class="lineNum">      31</span>              :  *   The mock must hold the output tokens before any swap is executed.</span>
+<span id="L32"><span class="lineNum">      32</span>              :  *   Call  fundToken(token, amount)  from your test (after minting/transferring</span>
+<span id="L33"><span class="lineNum">      33</span>              :  *   tokens to this contract) to pre-load liquidity.</span>
+<span id="L34"><span class="lineNum">      34</span>              :  *</span>
+<span id="L35"><span class="lineNum">      35</span>              :  * ── Approval requirement ───────────────────────────────────────────────────</span>
+<span id="L36"><span class="lineNum">      36</span>              :  *</span>
+<span id="L37"><span class="lineNum">      37</span>              :  *   The mock uses safeTransferFrom to pull input tokens, so the caller</span>
+<span id="L38"><span class="lineNum">      38</span>              :  *   (the Index contract) MUST have approved this mock for tokenIn before</span>
+<span id="L39"><span class="lineNum">      39</span>              :  *   calling execute(). Index.sol does this correctly for:</span>
+<span id="L40"><span class="lineNum">      40</span>              :  *     - USDC → Asset swaps  (_swapUsdcForAssets, forceApprove before execute)</span>
+<span id="L41"><span class="lineNum">      41</span>              :  *     - Asset → Asset swaps (_swapAssetForAsset, forceApprove before execute)</span>
+<span id="L42"><span class="lineNum">      42</span>              :  *   NOTE: _swapAssetsForUsdc in Index.sol currently lacks a forceApprove —</span>
+<span id="L43"><span class="lineNum">      43</span>              :  *   that is a known issue in the source; tests for that flow should add an</span>
+<span id="L44"><span class="lineNum">      44</span>              :  *   explicit approval via vm.prank + IERC20.approve in the test setup.</span>
+<span id="L45"><span class="lineNum">      45</span>              :  */</span>
+<span id="L46"><span class="lineNum">      46</span>              : contract UniversalRouterMock {</span>
+<span id="L47"><span class="lineNum">      47</span>              :     using SafeERC20 for IERC20;</span>
+<span id="L48"><span class="lineNum">      48</span>              : </span>
+<span id="L49"><span class="lineNum">      49</span>              :     error UniversalRouterMock__RateNotSet(address tokenIn, address tokenOut);</span>
+<span id="L50"><span class="lineNum">      50</span>              :     error UniversalRouterMock__InsufficientOutputBalance(</span>
+<span id="L51"><span class="lineNum">      51</span>              :         address token,</span>
+<span id="L52"><span class="lineNum">      52</span>              :         uint256 needed,</span>
+<span id="L53"><span class="lineNum">      53</span>              :         uint256 available</span>
+<span id="L54"><span class="lineNum">      54</span>              :     );</span>
+<span id="L55"><span class="lineNum">      55</span>              :     error UniversalRouterMock__UnsupportedCommand(uint8 command);</span>
+<span id="L56"><span class="lineNum">      56</span>              :     error UniversalRouterMock__InvalidPath();</span>
+<span id="L57"><span class="lineNum">      57</span>              : </span>
+<span id="L58"><span class="lineNum">      58</span>              :     event SwapExecuted(</span>
+<span id="L59"><span class="lineNum">      59</span>              :         address indexed tokenIn,</span>
+<span id="L60"><span class="lineNum">      60</span>              :         address indexed tokenOut,</span>
+<span id="L61"><span class="lineNum">      61</span>              :         uint256 amountIn,</span>
+<span id="L62"><span class="lineNum">      62</span>              :         uint256 amountOut,</span>
+<span id="L63"><span class="lineNum">      63</span>              :         address recipient</span>
+<span id="L64"><span class="lineNum">      64</span>              :     );</span>
+<span id="L65"><span class="lineNum">      65</span>              : </span>
+<span id="L66"><span class="lineNum">      66</span>              :     event RateSet(</span>
+<span id="L67"><span class="lineNum">      67</span>              :         address indexed tokenIn,</span>
+<span id="L68"><span class="lineNum">      68</span>              :         address indexed tokenOut,</span>
+<span id="L69"><span class="lineNum">      69</span>              :         uint256 rate</span>
+<span id="L70"><span class="lineNum">      70</span>              :     );</span>
+<span id="L71"><span class="lineNum">      71</span>              : </span>
+<span id="L72"><span class="lineNum">      72</span>              :     uint8 public constant V3_SWAP_EXACT_IN = 0x00;</span>
+<span id="L73"><span class="lineNum">      73</span>              :     uint8 public constant V4_SWAP = 0x10;</span>
+<span id="L74"><span class="lineNum">      74</span>              :     uint256 public constant RATE_PRECISION = 1e18;</span>
+<span id="L75"><span class="lineNum">      75</span>              : </span>
+<span id="L76"><span class="lineNum">      76</span>              :     /// @notice exchangeRates[tokenIn][tokenOut] = rate (scaled by RATE_PRECISION).</span>
+<span id="L77"><span class="lineNum">      77</span>              :     mapping(address =&gt; mapping(address =&gt; uint256)) public exchangeRates;</span>
+<span id="L78"><span class="lineNum">      78</span>              : </span>
+<span id="L79"><span class="lineNum">      79</span>              :     // ─── Configuration ────────────────────────────────────────────────────────</span>
+<span id="L80"><span class="lineNum">      80</span>              : </span>
+<span id="L81"><span class="lineNum">      81</span>              :     /**</span>
+<span id="L82"><span class="lineNum">      82</span>              :      * @notice Sets the exchange rate for a token pair.</span>
+<span id="L83"><span class="lineNum">      83</span>              :      * @param tokenIn  Address of the input token.</span>
+<span id="L84"><span class="lineNum">      84</span>              :      * @param tokenOut Address of the output token.</span>
+<span id="L85"><span class="lineNum">      85</span>              :      * @param rate     amountOut = (amountIn * rate) / RATE_PRECISION.</span>
+<span id="L86"><span class="lineNum">      86</span>              :      *                 Use computeRate() to derive this value from human amounts.</span>
+<span id="L87"><span class="lineNum">      87</span>              :      */</span>
+<span id="L88"><span class="lineNum">      88</span> <span class="tlaGNC tlaBgGNC">        2805 :     function setExchangeRate(</span></span>
+<span id="L89"><span class="lineNum">      89</span>              :         address tokenIn,</span>
+<span id="L90"><span class="lineNum">      90</span>              :         address tokenOut,</span>
+<span id="L91"><span class="lineNum">      91</span>              :         uint256 rate</span>
+<span id="L92"><span class="lineNum">      92</span>              :     ) external {</span>
+<span id="L93"><span class="lineNum">      93</span> <span class="tlaGNC">        2805 :         exchangeRates[tokenIn][tokenOut] = rate;</span></span>
+<span id="L94"><span class="lineNum">      94</span> <span class="tlaGNC">        2805 :         emit RateSet(tokenIn, tokenOut, rate);</span></span>
+<span id="L95"><span class="lineNum">      95</span>              :     }</span>
+<span id="L96"><span class="lineNum">      96</span>              : </span>
+<span id="L97"><span class="lineNum">      97</span>              :     /**</span>
+<span id="L98"><span class="lineNum">      98</span>              :      * @notice Sets rates for both directions of a pair in one call.</span>
+<span id="L99"><span class="lineNum">      99</span>              :      * @param tokenA    First token.</span>
+<span id="L100"><span class="lineNum">     100</span>              :      * @param tokenB    Second token.</span>
+<span id="L101"><span class="lineNum">     101</span>              :      * @param rateAToB  Rate for tokenA → tokenB.</span>
+<span id="L102"><span class="lineNum">     102</span>              :      * @param rateBToA  Rate for tokenB → tokenA.</span>
+<span id="L103"><span class="lineNum">     103</span>              :      */</span>
+<span id="L104"><span class="lineNum">     104</span> <span class="tlaUNC tlaBgUNC">           0 :     function setExchangeRateBidirectional(</span></span>
+<span id="L105"><span class="lineNum">     105</span>              :         address tokenA,</span>
+<span id="L106"><span class="lineNum">     106</span>              :         address tokenB,</span>
+<span id="L107"><span class="lineNum">     107</span>              :         uint256 rateAToB,</span>
+<span id="L108"><span class="lineNum">     108</span>              :         uint256 rateBToA</span>
+<span id="L109"><span class="lineNum">     109</span>              :     ) external {</span>
+<span id="L110"><span class="lineNum">     110</span> <span class="tlaUNC">           0 :         exchangeRates[tokenA][tokenB] = rateAToB;</span></span>
+<span id="L111"><span class="lineNum">     111</span> <span class="tlaUNC">           0 :         exchangeRates[tokenB][tokenA] = rateBToA;</span></span>
+<span id="L112"><span class="lineNum">     112</span> <span class="tlaUNC">           0 :         emit RateSet(tokenA, tokenB, rateAToB);</span></span>
+<span id="L113"><span class="lineNum">     113</span> <span class="tlaUNC">           0 :         emit RateSet(tokenB, tokenA, rateBToA);</span></span>
+<span id="L114"><span class="lineNum">     114</span>              :     }</span>
+<span id="L115"><span class="lineNum">     115</span>              : </span>
+<span id="L116"><span class="lineNum">     116</span>              :     /**</span>
+<span id="L117"><span class="lineNum">     117</span>              :      * @notice Transfers tokens into this contract so it can pay out swaps.</span>
+<span id="L118"><span class="lineNum">     118</span>              :      * @dev    Call this from your test after minting tokens to address(this),</span>
+<span id="L119"><span class="lineNum">     119</span>              :      *         or simply mint directly to address(this).</span>
+<span id="L120"><span class="lineNum">     120</span>              :      */</span>
+<span id="L121"><span class="lineNum">     121</span> <span class="tlaUNC">           0 :     function fundToken(address token, uint256 amount) external {</span></span>
+<span id="L122"><span class="lineNum">     122</span> <span class="tlaUNC">           0 :         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);</span></span>
+<span id="L123"><span class="lineNum">     123</span>              :     }</span>
+<span id="L124"><span class="lineNum">     124</span>              : </span>
+<span id="L125"><span class="lineNum">     125</span>              :     /**</span>
+<span id="L126"><span class="lineNum">     126</span>              :      * @notice Mirrors IUniversalRouter.execute(commands, inputs, deadline).</span>
+<span id="L127"><span class="lineNum">     127</span>              :      * @dev    Iterates over each command byte and dispatches to the correct handler.</span>
+<span id="L128"><span class="lineNum">     128</span>              :      *         The `deadline` parameter is accepted but not enforced (use vm.warp in tests).</span>
+<span id="L129"><span class="lineNum">     129</span>              :      */</span>
+<span id="L130"><span class="lineNum">     130</span> <span class="tlaGNC tlaBgGNC">          37 :     function execute(</span></span>
+<span id="L131"><span class="lineNum">     131</span>              :         bytes calldata commands,</span>
+<span id="L132"><span class="lineNum">     132</span>              :         bytes[] calldata inputs,</span>
+<span id="L133"><span class="lineNum">     133</span>              :         uint256 /* deadline */</span>
+<span id="L134"><span class="lineNum">     134</span>              :     ) external {</span>
+<span id="L135"><span class="lineNum">     135</span> <span class="tlaGNC">          37 :         uint256 numCommands = commands.length;</span></span>
+<span id="L136"><span class="lineNum">     136</span> <span class="tlaGNC">          37 :         for (uint256 i = 0; i &lt; numCommands; i++) {</span></span>
+<span id="L137"><span class="lineNum">     137</span> <span class="tlaGNC">          71 :             uint8 command = uint8(commands[i]);</span></span>
+<span id="L138"><span class="lineNum">     138</span> <span class="tlaGNC">          71 :             if (command == V3_SWAP_EXACT_IN) {</span></span>
+<span id="L139"><span class="lineNum">     139</span> <span class="tlaUNC tlaBgUNC">           0 :                 _handleV3Swap(inputs[i]);</span></span>
+<span id="L140"><span class="lineNum">     140</span> <span class="tlaGNC tlaBgGNC">          71 :             } else if (command == V4_SWAP) {</span></span>
+<span id="L141"><span class="lineNum">     141</span> <span class="tlaGNC">          71 :                 _handleV4Swap(inputs[i]);</span></span>
+<span id="L142"><span class="lineNum">     142</span>              :             } else {</span>
+<span id="L143"><span class="lineNum">     143</span> <span class="tlaUNC tlaBgUNC">           0 :                 revert UniversalRouterMock__UnsupportedCommand(command);</span></span>
+<span id="L144"><span class="lineNum">     144</span>              :             }</span>
+<span id="L145"><span class="lineNum">     145</span>              :         }</span>
+<span id="L146"><span class="lineNum">     146</span>              :     }</span>
+<span id="L147"><span class="lineNum">     147</span>              : </span>
+<span id="L148"><span class="lineNum">     148</span>              :     // ─── V3 handler ───────────────────────────────────────────────────────────</span>
+<span id="L149"><span class="lineNum">     149</span>              : </span>
+<span id="L150"><span class="lineNum">     150</span>              :     /**</span>
+<span id="L151"><span class="lineNum">     151</span>              :      * @dev Decodes a V3_SWAP_EXACT_IN input and executes the simulated swap.</span>
+<span id="L152"><span class="lineNum">     152</span>              :      *</span>
+<span id="L153"><span class="lineNum">     153</span>              :      *      Input encoding (matches SwapManager._buildV3Params):</span>
+<span id="L154"><span class="lineNum">     154</span>              :      *        abi.encode(address recipient, uint256 amountIn, uint256 amountOutMin,</span>
+<span id="L155"><span class="lineNum">     155</span>              :      *                   bytes path, bool payerIsUser)</span>
+<span id="L156"><span class="lineNum">     156</span>              :      *</span>
+<span id="L157"><span class="lineNum">     157</span>              :      *      Path encoding: abi.encodePacked(tokenIn[20], fee[3], tokenOut[20] [, fee[3], tokenMid[20], ...])</span>
+<span id="L158"><span class="lineNum">     158</span>              :      */</span>
+<span id="L159"><span class="lineNum">     159</span> <span class="tlaUNC">           0 :     function _handleV3Swap(bytes calldata input) internal {</span></span>
+<span id="L160"><span class="lineNum">     160</span> <span class="tlaUNC">           0 :         (</span></span>
+<span id="L161"><span class="lineNum">     161</span>              :             address recipient,</span>
+<span id="L162"><span class="lineNum">     162</span>              :             uint256 amountIn,</span>
+<span id="L163"><span class="lineNum">     163</span>              :             , // amountOutMin — ignored in mock</span>
+<span id="L164"><span class="lineNum">     164</span>              :             bytes memory path,</span>
+<span id="L165"><span class="lineNum">     165</span>              : </span>
+<span id="L166"><span class="lineNum">     166</span>              :         ) = // payerIsUser — ignored in mock (we always pull from msg.sender)</span>
+<span id="L167"><span class="lineNum">     167</span> <span class="tlaUNC">           0 :             abi.decode(input, (address, uint256, uint256, bytes, bool));</span></span>
+<span id="L168"><span class="lineNum">     168</span>              : </span>
+<span id="L169"><span class="lineNum">     169</span> <span class="tlaUNC">           0 :         if (path.length &lt; 43) revert UniversalRouterMock__InvalidPath();</span></span>
+<span id="L170"><span class="lineNum">     170</span>              : </span>
+<span id="L171"><span class="lineNum">     171</span> <span class="tlaUNC">           0 :         address tokenIn = _addressAt(path, 0);</span></span>
+<span id="L172"><span class="lineNum">     172</span> <span class="tlaUNC">           0 :         address tokenOut = _addressAt(path, path.length - 20);</span></span>
+<span id="L173"><span class="lineNum">     173</span>              : </span>
+<span id="L174"><span class="lineNum">     174</span> <span class="tlaUNC">           0 :         _executeSwap(tokenIn, tokenOut, amountIn, recipient);</span></span>
+<span id="L175"><span class="lineNum">     175</span>              :     }</span>
+<span id="L176"><span class="lineNum">     176</span>              : </span>
+<span id="L177"><span class="lineNum">     177</span>              :     // ─── V4 handler ───────────────────────────────────────────────────────────</span>
+<span id="L178"><span class="lineNum">     178</span>              : </span>
+<span id="L179"><span class="lineNum">     179</span>              :     /**</span>
+<span id="L180"><span class="lineNum">     180</span>              :      * @dev Decodes a V4_SWAP input and executes the simulated swap.</span>
+<span id="L181"><span class="lineNum">     181</span>              :      *</span>
+<span id="L182"><span class="lineNum">     182</span>              :      *      Input encoding (matches SwapManager._buildV4Params):</span>
+<span id="L183"><span class="lineNum">     183</span>              :      *        abi.encode(bytes actions, bytes[] actionParams)</span>
+<span id="L184"><span class="lineNum">     184</span>              :      *</span>
+<span id="L185"><span class="lineNum">     185</span>              :      *      actionParams[0] = abi.encode(ExactInputSingleParams) — not read</span>
+<span id="L186"><span class="lineNum">     186</span>              :      *      actionParams[1] = abi.encode(Currency tokenIn,  uint256 amountIn)   // SETTLE_ALL</span>
+<span id="L187"><span class="lineNum">     187</span>              :      *      actionParams[2] = abi.encode(Currency tokenOut, uint256 minOut)     // TAKE_ALL</span>
+<span id="L188"><span class="lineNum">     188</span>              :      *</span>
+<span id="L189"><span class="lineNum">     189</span>              :      *      Currency is address-wrapped, so it decodes cleanly as address.</span>
+<span id="L190"><span class="lineNum">     190</span>              :      *      For V4 the output goes back to msg.sender (the Index contract),</span>
+<span id="L191"><span class="lineNum">     191</span>              :      *      mirroring the TAKE_ALL action behaviour.</span>
+<span id="L192"><span class="lineNum">     192</span>              :      */</span>
+<span id="L193"><span class="lineNum">     193</span> <span class="tlaGNC tlaBgGNC">          71 :     function _handleV4Swap(bytes calldata input) internal {</span></span>
+<span id="L194"><span class="lineNum">     194</span> <span class="tlaGNC">          71 :         (, bytes[] memory actionParams) = abi.decode(input, (bytes, bytes[]));</span></span>
+<span id="L195"><span class="lineNum">     195</span>              : </span>
+<span id="L196"><span class="lineNum">     196</span> <span class="tlaGNC">          71 :         (address tokenIn, uint256 amountIn) = abi.decode(</span></span>
+<span id="L197"><span class="lineNum">     197</span>              :             actionParams[1],</span>
+<span id="L198"><span class="lineNum">     198</span>              :             (address, uint256)</span>
+<span id="L199"><span class="lineNum">     199</span>              :         );</span>
+<span id="L200"><span class="lineNum">     200</span> <span class="tlaGNC">          71 :         (address tokenOut, ) = abi.decode(actionParams[2], (address, uint256));</span></span>
+<span id="L201"><span class="lineNum">     201</span>              : </span>
+<span id="L202"><span class="lineNum">     202</span>              :         // V4 TAKE_ALL sends output to the caller (the Index contract).</span>
+<span id="L203"><span class="lineNum">     203</span> <span class="tlaGNC">          71 :         _executeSwap(tokenIn, tokenOut, amountIn, msg.sender);</span></span>
+<span id="L204"><span class="lineNum">     204</span>              :     }</span>
+<span id="L205"><span class="lineNum">     205</span>              : </span>
+<span id="L206"><span class="lineNum">     206</span>              :     // ─── Internal swap logic ──────────────────────────────────────────────────</span>
+<span id="L207"><span class="lineNum">     207</span>              : </span>
+<span id="L208"><span class="lineNum">     208</span> <span class="tlaGNC">          71 :     function _executeSwap(</span></span>
+<span id="L209"><span class="lineNum">     209</span>              :         address tokenIn,</span>
+<span id="L210"><span class="lineNum">     210</span>              :         address tokenOut,</span>
+<span id="L211"><span class="lineNum">     211</span>              :         uint256 amountIn,</span>
+<span id="L212"><span class="lineNum">     212</span>              :         address recipient</span>
+<span id="L213"><span class="lineNum">     213</span>              :     ) internal {</span>
+<span id="L214"><span class="lineNum">     214</span> <span class="tlaGNC">          71 :         uint256 rate = exchangeRates[tokenIn][tokenOut];</span></span>
+<span id="L215"><span class="lineNum">     215</span> <span class="tlaGNC">          71 :         if (rate == 0)</span></span>
+<span id="L216"><span class="lineNum">     216</span> <span class="tlaUNC tlaBgUNC">           0 :             revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);</span></span>
+<span id="L217"><span class="lineNum">     217</span>              : </span>
+<span id="L218"><span class="lineNum">     218</span> <span class="tlaGNC tlaBgGNC">          71 :         uint256 amountOut = (amountIn * rate) / RATE_PRECISION;</span></span>
+<span id="L219"><span class="lineNum">     219</span>              : </span>
+<span id="L220"><span class="lineNum">     220</span>              :         // Verify the mock has enough output tokens.</span>
+<span id="L221"><span class="lineNum">     221</span> <span class="tlaGNC">          71 :         uint256 available = IERC20(tokenOut).balanceOf(address(this));</span></span>
+<span id="L222"><span class="lineNum">     222</span> <span class="tlaGNC">          71 :         if (available &lt; amountOut) {</span></span>
+<span id="L223"><span class="lineNum">     223</span> <span class="tlaUNC tlaBgUNC">           0 :             revert UniversalRouterMock__InsufficientOutputBalance(</span></span>
+<span id="L224"><span class="lineNum">     224</span>              :                 tokenOut,</span>
+<span id="L225"><span class="lineNum">     225</span>              :                 amountOut,</span>
+<span id="L226"><span class="lineNum">     226</span>              :                 available</span>
+<span id="L227"><span class="lineNum">     227</span>              :             );</span>
+<span id="L228"><span class="lineNum">     228</span>              :         }</span>
+<span id="L229"><span class="lineNum">     229</span>              : </span>
+<span id="L230"><span class="lineNum">     230</span>              :         // Pull input tokens from the caller.</span>
+<span id="L231"><span class="lineNum">     231</span> <span class="tlaGNC tlaBgGNC">          71 :         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);</span></span>
+<span id="L232"><span class="lineNum">     232</span>              : </span>
+<span id="L233"><span class="lineNum">     233</span>              :         // Send output tokens to the recipient.</span>
+<span id="L234"><span class="lineNum">     234</span> <span class="tlaGNC">          71 :         IERC20(tokenOut).safeTransfer(recipient, amountOut);</span></span>
+<span id="L235"><span class="lineNum">     235</span>              : </span>
+<span id="L236"><span class="lineNum">     236</span> <span class="tlaGNC">          71 :         emit SwapExecuted(tokenIn, tokenOut, amountIn, amountOut, recipient);</span></span>
+<span id="L237"><span class="lineNum">     237</span>              :     }</span>
+<span id="L238"><span class="lineNum">     238</span>              : </span>
+<span id="L239"><span class="lineNum">     239</span>              :     // ─── Path helpers ─────────────────────────────────────────────────────────</span>
+<span id="L240"><span class="lineNum">     240</span>              : </span>
+<span id="L241"><span class="lineNum">     241</span>              :     /// @dev Reads a 20-byte address from `data` starting at byte `offset`.</span>
+<span id="L242"><span class="lineNum">     242</span> <span class="tlaUNC tlaBgUNC">           0 :     function _addressAt(</span></span>
+<span id="L243"><span class="lineNum">     243</span>              :         bytes memory data,</span>
+<span id="L244"><span class="lineNum">     244</span>              :         uint256 offset</span>
+<span id="L245"><span class="lineNum">     245</span>              :     ) internal pure returns (address result) {</span>
+<span id="L246"><span class="lineNum">     246</span>              :         // Load 32 bytes at offset and right-align the address (shift left 96 bits = 12 bytes).</span>
+<span id="L247"><span class="lineNum">     247</span>              :         assembly {</span>
+<span id="L248"><span class="lineNum">     248</span> <span class="tlaUNC">           0 :             result := shr(96, mload(add(add(data, 0x20), offset)))</span></span>
+<span id="L249"><span class="lineNum">     249</span>              :         }</span>
+<span id="L250"><span class="lineNum">     250</span>              :     }</span>
+<span id="L251"><span class="lineNum">     251</span>              : </span>
+<span id="L252"><span class="lineNum">     252</span>              :     // ─── Pure helpers for test setup ─────────────────────────────────────────</span>
+<span id="L253"><span class="lineNum">     253</span>              : </span>
+<span id="L254"><span class="lineNum">     254</span>              :     /**</span>
+<span id="L255"><span class="lineNum">     255</span>              :      * @notice Derives the rate value from concrete raw token amounts.</span>
+<span id="L256"><span class="lineNum">     256</span>              :      * @dev    Use this in test setUp to avoid manual 1e18-scaled arithmetic.</span>
+<span id="L257"><span class="lineNum">     257</span>              :      *</span>
+<span id="L258"><span class="lineNum">     258</span>              :      *         Example — USDC (6 dec) → WETH (18 dec) @ $2 000:</span>
+<span id="L259"><span class="lineNum">     259</span>              :      *           computeRate(1e6, 5e14)  →  5e26</span>
+<span id="L260"><span class="lineNum">     260</span>              :      *</span>
+<span id="L261"><span class="lineNum">     261</span>              :      * @param amountIn  Raw input amount (in tokenIn's decimals).</span>
+<span id="L262"><span class="lineNum">     262</span>              :      * @param amountOut Raw output amount (in tokenOut's decimals).</span>
+<span id="L263"><span class="lineNum">     263</span>              :      * @return rate     Value to pass to setExchangeRate().</span>
+<span id="L264"><span class="lineNum">     264</span>              :      */</span>
+<span id="L265"><span class="lineNum">     265</span> <span class="tlaGNC tlaBgGNC">        2804 :     function computeRate(</span></span>
+<span id="L266"><span class="lineNum">     266</span>              :         uint256 amountIn,</span>
+<span id="L267"><span class="lineNum">     267</span>              :         uint256 amountOut</span>
+<span id="L268"><span class="lineNum">     268</span>              :     ) external pure returns (uint256 rate) {</span>
+<span id="L269"><span class="lineNum">     269</span> <span class="tlaGNC">        2804 :         rate = (amountOut * RATE_PRECISION) / amountIn;</span></span>
+<span id="L270"><span class="lineNum">     270</span>              :     }</span>
+<span id="L271"><span class="lineNum">     271</span>              : </span>
+<span id="L272"><span class="lineNum">     272</span>              :     /**</span>
+<span id="L273"><span class="lineNum">     273</span>              :      * @notice Previews the amountOut the mock would return for a given amountIn.</span>
+<span id="L274"><span class="lineNum">     274</span>              :      * @param tokenIn  Input token address.</span>
+<span id="L275"><span class="lineNum">     275</span>              :      * @param tokenOut Output token address.</span>
+<span id="L276"><span class="lineNum">     276</span>              :      * @param amountIn Raw input amount.</span>
+<span id="L277"><span class="lineNum">     277</span>              :      * @return amountOut Expected raw output amount.</span>
+<span id="L278"><span class="lineNum">     278</span>              :      */</span>
+<span id="L279"><span class="lineNum">     279</span> <span class="tlaUNC tlaBgUNC">           0 :     function previewSwap(</span></span>
+<span id="L280"><span class="lineNum">     280</span>              :         address tokenIn,</span>
+<span id="L281"><span class="lineNum">     281</span>              :         address tokenOut,</span>
+<span id="L282"><span class="lineNum">     282</span>              :         uint256 amountIn</span>
+<span id="L283"><span class="lineNum">     283</span>              :     ) external view returns (uint256 amountOut) {</span>
+<span id="L284"><span class="lineNum">     284</span> <span class="tlaUNC">           0 :         uint256 rate = exchangeRates[tokenIn][tokenOut];</span></span>
+<span id="L285"><span class="lineNum">     285</span> <span class="tlaUNC">           0 :         if (rate == 0)</span></span>
+<span id="L286"><span class="lineNum">     286</span> <span class="tlaUNC">           0 :             revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);</span></span>
+<span id="L287"><span class="lineNum">     287</span> <span class="tlaUNC">           0 :         amountOut = (amountIn * rate) / RATE_PRECISION;</span></span>
+<span id="L288"><span class="lineNum">     288</span>              :     }</span>
+<span id="L289"><span class="lineNum">     289</span>              : }</span>
+        </pre>
+              </td>
+            </tr>
+          </table>
+          <br>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="ruler"><img src="../../../../glass.png" width=3 height=3 alt=""></td></tr>
+            <tr><td class="versionInfo">Generated by: <a href="https://github.com//linux-test-project/lcov" target="_parent">LCOV version 2.0-1</a></td></tr>
+          </table>
+          <br>
+
+</body>
+</html>

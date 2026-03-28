@@ -42,6 +42,7 @@ coverage:
 
 # ─── Targets ───────────────────────────────────────────────────────────────────
 .PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract coverage
+.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract coverage coverage-report
 
 build:
 	forge build
@@ -92,3 +93,9 @@ create-index:
 			"($(ASSET0_ADDRESS),$(WEIGHT0),$(ASSET0_PRICEFEED))" \
 			"($(ASSET1_ADDRESS),$(WEIGHT1),$(ASSET1_PRICEFEED))" \
 			$(FEE_PERCENTAGE)
+
+#// @audit-info fare post linkedin prendendo il phony
+# note: need makeFile externsion and lcov installed to run this target
+coverage-report:
+	forge coverage --report lcov --no-match-coverage "test"
+	genhtml lcov.info --output-dir coverage && xdg-open coverage/index.html

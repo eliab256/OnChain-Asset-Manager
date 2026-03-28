@@ -59,60 +59,6 @@ contract IndexManagerTest is BaseTest {
         );
     }
 
-    /**
-     * @dev Creates AND initialises the default WETH/LINK index.
-     *
-     *      Index.initialize transfers assets FROM IndexManager, so we must:
-     *        1. deal() → give IndexManager a balance of both assets.
-     *        2. vm.prank(indexManager) + approve → allow the Index contract to
-     *           pull those tokens from IndexManager via safeTransferFrom.
-     *
-     *      Amount rationale (50/50, WETH at 2000, LINK at 7):
-     *        initAmount0 = 1e18 WETH  → USD value = 2 000e18
-     *        initAmount1 ≈ 285.7e18 LINK → USD value ≈ 2 000e18
-     */
-    function _createAndInitializeDefaultIndex(
-        address _assetA,
-        address _assetB,
-        address _priceFeedA,
-        address _priceFeedB
-    ) internal returns (address indexAddress, address token0, address token1) {
-        (indexAddress, token0, token1) = _createDefaultIndex(
-            _assetA,
-            _assetB,
-            _priceFeedA,
-            _priceFeedB
-        );
-
-        uint256 initAmount = 1e18; // 1 unit of token0 in 18-decimal standard
-
-        // Fund IndexManager with plenty of both assets.
-        deal(token0, address(indexManager), initAmount * 10);
-        deal(token1, address(indexManager), 10_000e18); // ~285 LINK needed
-
-        // Grant Index an allowance to pull from IndexManager.
-        vm.prank(address(indexManager));
-        IERC20(token0).approve(indexAddress, type(uint256).max);
-        vm.prank(address(indexManager));
-        IERC20(token1).approve(indexAddress, type(uint256).max);
-
-        (
-            SwapRoute memory r0,
-            SwapRoute memory r1,
-            SwapRoute memory r01
-        ) = helperConfig.getDefaultSwapRoutes(token0, token1);
-
-        vm.prank(deployer);
-        indexManager.initializeIndex(
-            msg.sender,
-            indexAddress,
-            initAmount,
-            r0,
-            r1,
-            r01
-        );
-    }
-
     // =========================================================================
     //  createIndex
     // =========================================================================

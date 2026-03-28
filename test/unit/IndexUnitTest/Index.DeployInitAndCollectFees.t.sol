@@ -338,7 +338,7 @@ contract IndexTest is BaseTest {
         uint256 user1UsdcBalanceBefore = mockUsdc.balanceOf(user1);
 
         vm.prank(address(indexManager));
-        uint256 feesCollected = nonInitializedIndex.collectFees(user1);
+        uint256 feesCollected = initializedIndex.collectFees(user1);
 
         uint256 user1UsdcBalanceAfter = mockUsdc.balanceOf(user1);
 
@@ -356,7 +356,7 @@ contract IndexTest is BaseTest {
         (
             uint128 actualFeePercentage,
             uint128 actualTotalfees
-        ) = nonInitializedIndex.getFeesInfo();
+        ) = initializedIndex.getFeesInfo();
         assertEq(
             actualFeePercentage,
             validFeePercentage,
@@ -375,7 +375,7 @@ contract IndexTest is BaseTest {
 
         vm.recordLogs();
         vm.prank(address(indexManager));
-        nonInitializedIndex.collectFees(user1);
+        initializedIndex.collectFees(user1);
 
         
         Vm.Log[] memory logs = vm.getRecordedLogs();
