@@ -21,6 +21,9 @@ import {console2} from "forge-std/console2.sol";
 import {
     IERC20Errors
 } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {
+    IAccessControl
+} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/events/IndexEvents.sol";
@@ -42,7 +45,11 @@ contract IndexMintTest is BaseTest {
     }
 
     function testMintRevertsIfNotRouter() public {
-        vm.expectRevert();
+        vm.expectRevert(   abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user1,
+                keccak256("ROUTER_ROLE")
+            ));
         vm.prank(user1);
         initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
