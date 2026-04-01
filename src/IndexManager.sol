@@ -339,9 +339,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         address _indexAddress,
         uint128 _newWeightAsset0 // With 4 decimals, e.g. 50000 = 5%
     ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
-        if (_newWeightAsset0 > MAX_PERCENTAGE) {
-            revert IndexManager__InvalidPercentage();
-        }
         // The weight of asset1 is implicitly calculated as 100% - weight of asset0.
         IIndex index = IIndex(_indexAddress);
         (uint128 oldWeightAsset0, uint128 oldWeightAsset1) = index

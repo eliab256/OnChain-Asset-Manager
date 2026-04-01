@@ -1,0 +1,304 @@
+//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import {BaseTest} from "../Base.t.sol";
+import {IndexManager} from "../../../src/IndexManager.sol";
+import {IIndex} from "../../../src/Interface/IIndex.sol";
+import {Index} from "../../../src/Index.sol";
+import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
+import {Vm} from "forge-std/Vm.sol";
+import {console2} from "forge-std/console2.sol";
+import {
+    IAccessControl
+} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {
+    DeployAndInitNewIndex,
+    RunParams
+} from "../../../script/DeployAndInitNewIndex.s.sol";
+
+import "../../../src/errors/IndexManagerErrors.sol";
+import "../../../src/events/IndexManagerEvents.sol";
+import "../../../src/errors/IndexErrors.sol";
+
+contract IndexManagerWeightsTest is BaseTest {
+    IIndex public newIndexLinkWeth;
+    IIndex public newIndexUsdcWeth;
+
+    function setUp() public override {
+        super.setUp();
+
+        RunParams memory firstIndexParams = RunParams({
+            assetA: AssetAvailable.WETH,
+            assetB: AssetAvailable.LINK,
+            weightA: 60 * WEIGHT_PRECISION,
+            weightB: 40 * WEIGHT_PRECISION,
+            feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
+            initialAssetADeposit: 0, // computed by the script via retrieveAmountFromAmount
+            initialAssetBDeposit: 1000 * 10 ** 18 // 1000 units of assetB
+        });
+
+        DeployAndInitNewIndex deployScript = new DeployAndInitNewIndex();
+        newIndexLinkWeth = deployScript.run(
+            helperConfig,
+            address(indexManager),
+            firstIndexParams
+        );
+        // asset0 = newIndex.getAsset0();
+        // asset1 = newIndex.getAsset1();
+
+        RunParams memory secondIndexParams = RunParams({
+            assetA: AssetAvailable.WETH,
+            assetB: AssetAvailable.USDC,
+            weightA: 60 * WEIGHT_PRECISION,
+            weightB: 40 * WEIGHT_PRECISION,
+            feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
+            initialAssetADeposit: 0,
+            initialAssetBDeposit: 1_000_000 * 10 ** 6 // 1,000,000 USDC
+        });
+
+        newIndexUsdcWeth = deployScript.run(
+            helperConfig,
+            address(indexManager),
+            secondIndexParams
+        );
+    }
+
+    // =========================================================================
+    //  proposeNewWeights
+    // =========================================================================
+
+    function testProposeNewWeightsEmitsNewIndexWeightsProposedEvent() public {
+        uint128 expectedNewWeight1 = MAX_WEIGHT - weight30;
+        (uint128 lastWeight0, uint128 lastWeight1) = initializedIndex
+            .getAssetsWeights();
+
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+
+        (uint128 previousWeight0, uint128 previousWeight1) = initializedIndex
+            .getAssetsWeights();
+        (
+            uint128 pendingWeight0,
+            uint128 pendingWeight1,
+            uint256 weightUpdateExecutableAt
+        ) = initializedIndex.getAssetsPendingWeights();
+
+        //verify state update
+        assertEq(pendingWeight0, weight30);
+        assertEq(pendingWeight1, expectedNewWeight1);
+        assertEq(previousWeight0, lastWeight0);
+        assertEq(previousWeight1, lastWeight1);
+        assertEq(
+            weightUpdateExecutableAt,
+            block.timestamp + WEIGHT_UPDATE_DELAY
+        );
+
+        {
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+
+            bytes32 expectedSig = NewIndexWeightsProposed.selector;
+            bool eventFound = false;
+            address indexFromEvent;
+            address assetManagerFromEvent;
+
+            bytes memory dataEncodedFromEvent;
+            // uint128 previousWeight0FromEvent;
+            // uint128 previousWeight1FromEvent;
+            // uint128 pendingWeight0FromEvent;
+            // uint128 pendingWeight1FromEvent;
+            // uint256 implementationTimestampFromEvent;
+            for (uint256 i = 0; i < logs.length; i++) {
+                if (logs[i].topics[0] == expectedSig) {
+                    eventFound = true;
+                    indexFromEvent = address(
+                        uint160(uint256(logs[i].topics[1]))
+                    );
+
+                    assetManagerFromEvent = address(
+                        uint160(uint256(logs[i].topics[2]))
+                    );
+                    dataEncodedFromEvent = logs[i].data;
+                    break;
+                }
+            }
+
+            bytes memory dataEncodeFromStorage = abi.encode(
+                previousWeight0,
+                previousWeight1,
+                pendingWeight0,
+                pendingWeight1,
+                weightUpdateExecutableAt
+            );
+
+            //verify event emission
+            assertTrue(eventFound, "NewIndexWeightsProposed event not emitted");
+            assertEq(
+                indexFromEvent,
+                address(initializedIndex),
+                "Incorrect index address in event"
+            );
+            assertEq(
+                assetManagerFromEvent,
+                deployer,
+                "Incorrect asset manager address in event"
+            );
+
+            assertEq(
+                dataEncodedFromEvent,
+                dataEncodeFromStorage,
+                "Incorrect data in event"
+            );
+        }
+    }
+
+    function testProposeNewWeightsRevertIfIndexNotInitialized() public {
+        vm.prank(deployer);
+        vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+        indexManager.proposeNewWeights(address(nonInitializedIndex), weight40);
+    }
+
+    function test_proposeNewWeights_RevertIf_CallerNotAssetManager() public {
+        vm.prank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user1,
+                keccak256("ASSET_MANAGER_ROLE")
+            )
+        );
+        indexManager.proposeNewWeights(address(initializedIndex), weight40);
+    }
+
+    // // =========================================================================
+    // //  executeWeightUpdate
+    // // =========================================================================
+
+    // function test_executeWeightUpdate_RevertIf_IndexNotInitialized() public {
+    //     (address indexAddress, , ) = _createDefaultIndex();
+
+    //     vm.prank(deployer);
+    //     vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+    //     indexManager.executeWeightUpdate(indexAddress);
+    // }
+
+    // function test_executeWeightUpdate_EmitsWeightUpdateFailed_WhenNoPendingUpdate()
+    //     public
+    // {
+    //     // No proposal → Index.executeWeightUpdate reverts.
+    //     // IndexManager catches it and emits WeightUpdateFailed — no revert.
+    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+
+    //     vm.prank(deployer);
+    //     vm.expectEmit(true, false, false, false);
+    //     emit WeightUpdateFailed(indexAddress, "");
+    //     indexManager.executeWeightUpdate(indexAddress);
+    // }
+
+    // function test_executeWeightUpdate_EmitsWeightUpdateFailed_WhenExecutedTooEarly()
+    //     public
+    // {
+    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+
+    //     vm.prank(deployer);
+    //     indexManager.proposeNewWeights(indexAddress, VALID_NEW_WEIGHT);
+
+    //     // Attempt execution before WEIGHT_UPDATE_DELAY (2 days) has elapsed.
+    //     vm.prank(deployer);
+    //     vm.expectEmit(true, false, false, false);
+    //     emit WeightUpdateFailed(indexAddress, "");
+    //     indexManager.executeWeightUpdate(indexAddress);
+    // }
+
+    // function test_executeWeightUpdate_DoesNotRevert_AfterDelay() public {
+    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+
+    //     vm.prank(deployer);
+    //     indexManager.proposeNewWeights(indexAddress, VALID_NEW_WEIGHT);
+
+    //     // Advance past the 2-day delay and refresh price feeds to avoid staleness.
+    //     vm.warp(block.timestamp + 2 days + 1);
+    //     _refreshPriceFeeds();
+
+    //     // The rebalance swap fails (no Uniswap router on Anvil), but IndexManager
+    //     // catches the error via try/catch — no revert.
+    //     vm.prank(deployer);
+    //     indexManager.executeWeightUpdate(indexAddress);
+    // }
+
+    // function test_executeWeightUpdate_RevertIf_CallerNotAssetManager() public {
+    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+
+    //     vm.prank(user1);
+    //     vm.expectRevert();
+    //     indexManager.executeWeightUpdate(indexAddress);
+    // }
+
+    // // =========================================================================
+    // //  executeWeightUpdateForMultipleIndexes
+    // // =========================================================================
+
+    // function test_executeWeightUpdateForMultipleIndexes_RevertIf_AnyNotInitialized()
+    //     public
+    // {
+    //     (address indexAddress, , ) = _createDefaultIndex();
+    //     address[] memory indexes = new address[](1);
+    //     indexes[0] = indexAddress;
+
+    //     vm.prank(deployer);
+    //     vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+    //     indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+    // }
+
+    // function test_executeWeightUpdateForMultipleIndexes_DoesNotRevert_WithNoPending()
+    //     public
+    // {
+    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+    //     address[] memory indexes = new address[](1);
+    //     indexes[0] = indexAddress;
+
+    //     // No pending update → WeightUpdateFailed is emitted, no revert.
+    //     vm.prank(deployer);
+    //     indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+    // }
+
+    // function test_executeWeightUpdateForMultipleIndexes_RevertIf_CallerNotAssetManager()
+    //     public
+    // {
+    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+    //     address[] memory indexes = new address[](1);
+    //     indexes[0] = indexAddress;
+
+    //     vm.prank(user1);
+    //     vm.expectRevert();
+    //     indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+    // }
+
+    // // =========================================================================
+    // //  executeWeightUpdateForAllIndexes
+    // // =========================================================================
+
+    // function test_executeWeightUpdateForAllIndexes_WithNoIndexes_DoesNotRevert()
+    //     public
+    // {
+    //     vm.prank(deployer);
+    //     indexManager.executeWeightUpdateForAllIndexes();
+    // }
+
+    // function test_executeWeightUpdateForAllIndexes_WithInitializedIndex_DoesNotRevert()
+    //     public
+    // {
+    //     _createAndInitializeDefaultIndex();
+
+    //     vm.prank(deployer);
+    //     indexManager.executeWeightUpdateForAllIndexes();
+    // }
+
+    // function test_executeWeightUpdateForAllIndexes_RevertIf_CallerNotAssetManager()
+    //     public
+    // {
+    //     vm.prank(user1);
+    //     vm.expectRevert();
+    //     indexManager.executeWeightUpdateForAllIndexes();
+    // }
+}

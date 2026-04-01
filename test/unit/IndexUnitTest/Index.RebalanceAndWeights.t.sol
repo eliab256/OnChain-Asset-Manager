@@ -30,6 +30,19 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         initializedIndex.proposeUpdateWeights(weight70);
     }
 
+        function test_proposeNewWeights_RevertIf_PreviousPendingUpdateNotExecuted()
+        public
+    {
+
+        vm.prank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(weight50);
+
+        // A second proposal while the first is still pending must revert.
+        vm.prank(address(indexManager));
+        vm.expectRevert(Index__PendingWeightUpdate.selector);
+        initializedIndex.proposeUpdateWeights(weight30);
+    }
+
     function testProposeUpdateWeightsRevertsIfWeightSameAsCurrent() public {
         (uint128 actualWeight0, ) = initializedIndex.getAssetsWeights();
         vm.prank(address(indexManager));
@@ -47,6 +60,19 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         vm.prank(address(indexManager));
         vm.expectRevert(Index__InvalidWeight.selector);
         initializedIndex.proposeUpdateWeights(MIN_WEIGHT);
+    }
+
+     function testProposeNewWeightsAcceptsLowerBoundaryWeight() public {
+        (uint128 currentWeight0, ) = initializedIndex.getAssetsWeights();
+        vm.prank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(currentWeight0 - REBALANCE_THRESHOLD - 1);
+    }
+
+    function testProposeNewWeightsAcceptsUpperBoundaryWeight() public {
+       
+        (uint128 currentWeight0, ) = initializedIndex.getAssetsWeights();
+        vm.prank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(currentWeight0 + REBALANCE_THRESHOLD + 1);
     }
 
     function testProposeUpdateWeightRevertsIfThereIsAlreadyAProposal() public {
