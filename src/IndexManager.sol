@@ -64,6 +64,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         _;
     }
 
+    modifier isSwapManagerSet() {
+        _isSwapManagerSet();
+        _;
+    }
+
     constructor(
         address _usdcAddress,
         address _usdcPriceFeed,
@@ -198,7 +203,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         SwapRoute memory _routeAsset0Usdc,
         SwapRoute memory _routeAsset1Usdc,
         SwapRoute memory _routeAsset0Asset1
-    ) public onlyRole(ASSET_MANAGER_ROLE) {
+    ) public onlyRole(ASSET_MANAGER_ROLE) isSwapManagerSet {
         if (_underlyingAmount0 == 0) {
             revert IndexManager__InvalidIndexAssetsAmount();
         }
@@ -259,7 +264,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
 
     function rebalanceSingleIndex(
         address _indexAddress
-    ) public isIndexInitialized(_indexAddress) onlyRole(REBALANCER_ROLE) {
+    )
+        public
+        isIndexInitialized(_indexAddress)
+        onlyRole(REBALANCER_ROLE)
+        isSwapManagerSet
+    {
         (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
             _indexAddress
         );
@@ -278,7 +288,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      */
     function rebalanceMultipleIndexes(
         address[] calldata _indexAddresses
-    ) public onlyRole(REBALANCER_ROLE) areIndexesInitialized(_indexAddresses) {
+    )
+        public
+        onlyRole(REBALANCER_ROLE)
+        areIndexesInitialized(_indexAddresses)
+        isSwapManagerSet
+    {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
             (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
@@ -296,7 +311,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @notice Rebalances all initialized indexes.
      * @dev Less Gas efficient than rebalanceMultipleIndexes, because check if is initialized for each index.
      */
-    function rebalanceAllIndexes() public onlyRole(REBALANCER_ROLE) {
+    function rebalanceAllIndexes()
+        public
+        onlyRole(REBALANCER_ROLE)
+        isSwapManagerSet
+    {
         uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
             address indexAddress = s_initializedIndexes[i];
@@ -350,7 +369,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      */
     function executeSingleWeightUpdate(
         address _indexAddress
-    ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
+    )
+        public
+        isIndexInitialized(_indexAddress)
+        onlyRole(ASSET_MANAGER_ROLE)
+        isSwapManagerSet
+    {
         (bool success, bytes memory reasonBytes) = _executeSingleWeightUpdate(
             _indexAddress
         );
@@ -372,6 +396,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         public
         onlyRole(ASSET_MANAGER_ROLE)
         areIndexesInitialized(_indexAddresses)
+        isSwapManagerSet
     {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
@@ -386,6 +411,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     function executeWeightUpdateForAllIndexes()
         public
         onlyRole(ASSET_MANAGER_ROLE)
+        isSwapManagerSet
     {
         uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
@@ -527,6 +553,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         }
     }
 
+    function _isSwapManagerSet() internal view {
+        if (s_swapManager == address(0)) {
+            revert IndexManager__SwapManagerAddressNotSet();
+        }
+    }
+
     /**
      * @dev Deploys a new index contract with the specified assets, fee percentage, and USDC address.
      * @param _asset0 The first asset of the index.
@@ -624,9 +656,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         } catch Error(string memory _reason) {
             success = false;
             reasonBytes = bytes(_reason);
-        } catch {
+        } catch (bytes memory _lowLevelData) {
             success = false;
-            reasonBytes = _getErrorData();
+            reasonBytes = _lowLevelData.length > 0
+                ? _lowLevelData
+                : bytes("Unknown error");
         }
         return (success, reasonBytes);
     }
@@ -747,14 +781,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @dev Returns all initialized index addresses.
-     * @return address[] An array of initialized index addresses.
-     */
-    function getInitializedIndexes() public view returns (address[] memory) {
-        return s_initializedIndexes;
-    }
-
-    /**
      * @dev Returns the index address for a given pair of underlying assets, or address(0) if no index exists for that pair
      * The function sorts the asset addresses to ensure consistent ordering, so the caller can provide them in any order.
      * It then looks up the index address in the getIndex mapping using the sorted asset addresses as keys.
@@ -795,8 +821,16 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @dev Returns all index addresses managed by the index manager
      * @return address[] An array of all index addresses
      */
-    function getAllIndexes() public view returns (address[] memory) {
+    function getDeployedIndexes() public view returns (address[] memory) {
         return s_deployedIndexes;
+    }
+
+    /**
+     * @dev Returns all initialized index addresses.
+     * @return address[] An array of initialized index addresses.
+     */
+    function getInitializedIndexes() public view returns (address[] memory) {
+        return s_initializedIndexes;
     }
 
     /**

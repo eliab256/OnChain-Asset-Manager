@@ -69,7 +69,7 @@ test-index:
 	forge test --match-path test/unit/Index.t.sol
 
 test-indexmanager:
-	forge test --match-path test/unit/IndexManager.t.sol
+	forge test --match-path '$(INDEX_MANAGER_UNIT_TEST_PATH)'
 
 test-router:
 	forge test --match-path test/unit/Router.t.sol
@@ -79,6 +79,11 @@ test-swap-manager:
 
 test-single:
 	forge test --match-test $(NAME) -vvvv
+
+# Test only IndexManager.t.sol
+.PHONY: test-manager
+test-manager:
+	@forge test --match-contract IndexManagerTest
 
 
 create-index:

@@ -218,32 +218,32 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         mockUniRouter.setExchangeRate(
             address(mockUsdc),
             address(mockWeth),
-            mockUniRouter.computeRate(uint256(USDC_INITIAL_PRICE), 1e18)
+            mockUniRouter.computeRate(uint256(WETH_INITIAL_PRICE) / 1e2, 1e18) // WETH_INITIAL_PRICE has 8 dec, USDC has 6 dec → divide by 1e2
         );
         mockUniRouter.setExchangeRate(
             address(mockUsdc),
             address(mockWbtc),
-            mockUniRouter.computeRate(uint256(WBTC_INITIAL_PRICE), 1e8)
+            mockUniRouter.computeRate(uint256(WBTC_INITIAL_PRICE) / 1e2, 1e8) // WBTC_INITIAL_PRICE has 8 dec, USDC has 6 dec → divide by 1e2
         );
         mockUniRouter.setExchangeRate(
             address(mockUsdc),
             address(mockLink),
-            mockUniRouter.computeRate(uint256(LINK_INITIAL_PRICE), 1e18)
+            mockUniRouter.computeRate(uint256(LINK_INITIAL_PRICE) / 1e2, 1e18) // LINK_INITIAL_PRICE has 8 dec, USDC has 6 dec → divide by 1e2
         );
         mockUniRouter.setExchangeRate(
             address(mockWeth),
             address(mockUsdc),
-            mockUniRouter.computeRate(1e18, uint256(USDC_INITIAL_PRICE))
+            mockUniRouter.computeRate(1e18, uint256(WETH_INITIAL_PRICE) / 1e2) // 1 WETH → 2000 USDC (6 dec)
         );
         mockUniRouter.setExchangeRate(
             address(mockWbtc),
             address(mockUsdc),
-            mockUniRouter.computeRate(1e8, uint256(WBTC_INITIAL_PRICE))
+            mockUniRouter.computeRate(1e8, uint256(WBTC_INITIAL_PRICE) / 1e2) // 1 WBTC → 30000 USDC (6 dec)
         );
         mockUniRouter.setExchangeRate(
             address(mockLink),
             address(mockUsdc),
-            mockUniRouter.computeRate(1e18, uint256(LINK_INITIAL_PRICE))
+            mockUniRouter.computeRate(1e18, uint256(LINK_INITIAL_PRICE) / 1e2) // 1 LINK → 7 USDC (6 dec)
         );
         mockUniRouter.setExchangeRate(
             address(mockWeth),
@@ -260,16 +260,16 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             address(mockLink),
             mockUniRouter.computeRate(
                 1e18,
-                ((uint256(USDC_INITIAL_PRICE) * 1e18) /
-                    uint256(LINK_INITIAL_PRICE))
+                ((uint256(WETH_INITIAL_PRICE) * 1e18) /
+                    uint256(LINK_INITIAL_PRICE)) // 1 WETH → (2000/7) LINK
             )
         );
         mockUniRouter.setExchangeRate(
             address(mockLink),
             address(mockWeth),
             mockUniRouter.computeRate(
-                ((uint256(USDC_INITIAL_PRICE) * 1e18) /
-                    uint256(LINK_INITIAL_PRICE)),
+                ((uint256(WETH_INITIAL_PRICE) * 1e18) /
+                    uint256(LINK_INITIAL_PRICE)), // (2000/7) LINK → 1 WETH
                 1e18
             )
         );
@@ -293,10 +293,26 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         );
 
         // Fund mock router with tokens for swaps
-        deal(address(mockWeth), address(mockUniRouter), INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals());
-        deal(address(mockWbtc), address(mockUniRouter), INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals());
-        deal(address(mockLink), address(mockUniRouter), INITIAL_LINK_BALANCE * 10 ** mockLink.decimals());
-        deal(address(mockUsdc), address(mockUniRouter), INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals());
+        deal(
+            address(mockWeth),
+            address(mockUniRouter),
+            INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals()
+        );
+        deal(
+            address(mockWbtc),
+            address(mockUniRouter),
+            INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals()
+        );
+        deal(
+            address(mockLink),
+            address(mockUniRouter),
+            INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()
+        );
+        deal(
+            address(mockUsdc),
+            address(mockUniRouter),
+            INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()
+        );
     }
 
     /**

@@ -69,7 +69,7 @@ interface IIndexManager {
         address indexAddress
     ) external view returns (bool);
 
-    function getAllIndexes() external view returns (address[] memory);
+    function getDeployedIndexes() external view returns (address[] memory);
 
     function getInitializedIndexes() external view returns (address[] memory);
 

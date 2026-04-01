@@ -67,23 +67,15 @@ contract DeployAndInitNewIndex is Script {
             SwapRoute memory routeAsset0Asset1
         ) = helperConfig.getDefaultSwapRoutes(token0, token1);
 
-        uint256 initialAsset0Deposit;
-        uint256 initialAsset1Deposit;
-        if (token0 == indexAssetA.asset) {
-            initialAsset0Deposit = _params.initialAssetADeposit;
-            initialAsset1Deposit = indexManager.retrieveAmountFromAmount(
-                initialAsset0Deposit,
-                newIndex,
-                true
+        (
+            uint256 initialAsset0Deposit,
+            uint256 initialAsset1Deposit
+        ) = _computeInitialDeposits(
+                _params,
+                token0,
+                indexAssetA.asset,
+                newIndex
             );
-        } else {
-            initialAsset0Deposit = _params.initialAssetBDeposit;
-            initialAsset1Deposit = indexManager.retrieveAmountFromAmount(
-                initialAsset0Deposit,
-                newIndex,
-                true
-            );
-        }
 
         IERC20(token0).forceApprove(address(newIndex), initialAsset0Deposit);
         IERC20(token1).forceApprove(address(newIndex), initialAsset1Deposit);
@@ -102,5 +94,42 @@ contract DeployAndInitNewIndex is Script {
         );
         console.log("New Index Address:", address(newIndex));
         return (Index(newIndex));
+    }
+
+    /**
+     * @dev Resolves which raw deposit amount to use as token0 seed,
+     *      then computes the proportional token1 amount.
+     *      Extracted to avoid stack-too-deep in run().
+     */
+    function _computeInitialDeposits(
+        RunParams memory _params,
+        address _token0,
+        address _assetA,
+        address _newIndex
+    ) internal view returns (uint256 asset0Deposit, uint256 asset1Deposit) {
+        if (_token0 == _assetA) {
+            // assetA is token0: prefer its deposit, fall back to deriving from assetB
+            asset0Deposit = _params.initialAssetADeposit > 0
+                ? _params.initialAssetADeposit
+                : indexManager.retrieveAmountFromAmount(
+                    _params.initialAssetBDeposit,
+                    _newIndex,
+                    false
+                );
+        } else {
+            // assetB is token0: prefer its deposit, fall back to deriving from assetA
+            asset0Deposit = _params.initialAssetBDeposit > 0
+                ? _params.initialAssetBDeposit
+                : indexManager.retrieveAmountFromAmount(
+                    _params.initialAssetADeposit,
+                    _newIndex,
+                    false
+                );
+        }
+        asset1Deposit = indexManager.retrieveAmountFromAmount(
+            asset0Deposit,
+            _newIndex,
+            true
+        );
     }
 }

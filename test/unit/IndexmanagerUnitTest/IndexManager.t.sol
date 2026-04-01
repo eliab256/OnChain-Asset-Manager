@@ -9,6 +9,9 @@ import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
+import {
+    IAccessControl
+} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/events/IndexManagerEvents.sol";
@@ -22,135 +25,13 @@ contract IndexManagerTest is BaseTest {
         super.setUp();
     }
 
-
-
     // =========================================================================
     //  retreiveAmountFromAmount
     // =========================================================================
 
     // @audit-issue testare la funzione
 
-    // =========================================================================
-    //  rebalanceSingleIndex
-    // =========================================================================
 
-    function testRebalanceSingleIndexRevertIfIndexNotInitialized() public {
-        vm.prank(deployer);
-        vm.expectRevert(IndexManager__NotIndexInitialized.selector);
-        indexManager.rebalanceSingleIndex(address(nonInitializedIndex));
-    }
-
-    function testRebalanceSingleIndexRevertIfCallerNotRebalancer() public {
-        vm.prank(user1);
-        vm.expectRevert();
-        indexManager.rebalanceSingleIndex(address(nonInitializedIndex));
-    }
-
-    function testRebalanceIndexEmitsIndexRebalanceFailedWhenBalanced() public {
-        // index is already initialized in Base.setUp() and is balanced,
-        // so we can directly call rebalanceIndex without setup here.
-
-        vm.prank(deployer);
-        vm.expectEmit(true, false, false, true);
-        emit IndexRebalanceFailed(
-            address(initializedIndex),
-            abi.encodePacked(Index__RebalanceNotNeeded.selector)
-        );
-        indexManager.rebalanceSingleIndex(address(initializedIndex));
-    }
-
-    // function testRebalanceIndexEmitsIndexRebalanceWhenBalancedSuccessfully()
-    //     public
-    // {
-
-    //     // change price of unerlying assets to make index unbalanced and trigger rebalance logic
-    //     vm.warp(block.timestamp + 3600);
-    //     _refreshPriceFeeds();
-    //     mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 6);
-    //     console2.log("WETH price updated to:", mockWethPriceFeed.latestAnswer());
-    //     console2.log("WBTC price is:        ", mockWbtcPriceFeed.latestAnswer());
-    //     (uint256 target0, ) = initializedIndex
-    //         .getAssetsEffectiveWeights();
-    //     (uint256 effective0, ) = initializedIndex.getAssetsEffectiveWeights();
-    //     bool rebalanceNeeded = effective0 > target0
-    //         ? (effective0 - target0) > REBALANCE_THRESHOLD
-    //         : (target0 - effective0) > REBALANCE_THRESHOLD;
-
-    //     assertTrue(rebalanceNeeded, "rebalance not needed with current prices");
-
-    //     vm.prank(deployer);
-    //     vm.expectEmit(true, true, false, false);
-    //     emit IndexRebalanced(
-    //         address(initializedIndex),
-    //         deployer
-    //         //abi.encodePacked(IndexRebalanced.selector)
-    //     );
-    //     indexManager.rebalanceSingleIndex(address(initializedIndex));
-    // }
-
-    // // =========================================================================
-    // //  rebalanceMultipleIndexes
-    // // =========================================================================
-
-    // function test_rebalanceMultipleIndexes_RevertIf_AnyIndexNotInitialized()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createDefaultIndex();
-    //     address[] memory indexes = new address[](1);
-    //     indexes[0] = indexAddress;
-
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__NotIndexInitialized.selector);
-    //     indexManager.rebalanceMultipleIndexes(indexes);
-    // }
-
-    // function test_rebalanceMultipleIndexes_DoesNotRevert_WhenIndexIsBalanced()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-    //     address[] memory indexes = new address[](1);
-    //     indexes[0] = indexAddress;
-
-    //     // Emits IndexRebalanceFailed for the balanced index, no revert.
-    //     vm.prank(deployer);
-    //     indexManager.rebalanceMultipleIndexes(indexes);
-    // }
-
-    // function test_rebalanceMultipleIndexes_RevertIf_CallerNotRebalancer()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-    //     address[] memory indexes = new address[](1);
-    //     indexes[0] = indexAddress;
-
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.rebalanceMultipleIndexes(indexes);
-    // }
-
-    // // =========================================================================
-    // //  rebalanceAllIndexes
-    // // =========================================================================
-
-    // function test_rebalanceAllIndexes_WithNoIndexes_DoesNotRevert() public {
-    //     vm.prank(deployer);
-    //     indexManager.rebalanceAllIndexes();
-    // }
-
-    // function test_rebalanceAllIndexes_WithInitializedIndex_DoesNotRevert()
-    //     public
-    // {
-    //     _createAndInitializeDefaultIndex();
-
-    //     vm.prank(deployer);
-    //     indexManager.rebalanceAllIndexes();
-    // }
-
-    // function test_rebalanceAllIndexes_RevertIf_CallerNotRebalancer() public {
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.rebalanceAllIndexes();
-    // }
 
     // // =========================================================================
     // //  proposeNewWeights

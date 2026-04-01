@@ -68,7 +68,7 @@ contract IndexManagerTest is BaseTest {
         assertFalse(
             indexManager.checkIsIndexInitialized(address(nonInitializedIndex))
         );
-        address[] memory allIndexes = indexManager.getAllIndexes();
+        address[] memory allIndexes = indexManager.getDeployedIndexes();
         assertEq(allIndexes[1], address(nonInitializedIndex));
         assertEq(
             indexManager.getIndexByAssetsAddresses(
@@ -334,12 +334,12 @@ contract IndexManagerTest is BaseTest {
     //  initializeIndex
     // =========================================================================
 
-    function testInitializeIndexMarksIndexAsInitialized() public {
+    function testInitializeIndexMarksIndexAsInitialized() public view{
         assertTrue(indexManager.isIndexAddress(address(initializedIndex)));
         assertTrue(
             indexManager.checkIsIndexInitialized(address(initializedIndex))
         );
-        address[] memory allIndexes = indexManager.getAllIndexes();
+        address[] memory allIndexes = indexManager.getDeployedIndexes();
         assertEq(allIndexes[0], address(initializedIndex));
         assertEq(
             indexManager.getIndexByAssetsAddresses(
