@@ -153,6 +153,23 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             user1,
             (INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()) / 100
         );
+
+        mockWeth.mint(
+            user2,
+            (INITIAL_WETH_BALANCE * 10 ** mockWeth.decimals()) / 100
+        );
+        mockWbtc.mint(
+            user2,
+            (INITIAL_WBTC_BALANCE * 10 ** mockWbtc.decimals()) / 100
+        );
+        mockLink.mint(
+            user2,
+            (INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()) / 100
+        );
+        mockUsdc.mint(
+            user2,
+            (INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()) / 100
+        );
         mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);
         mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
         mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
