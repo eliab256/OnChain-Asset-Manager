@@ -346,4 +346,103 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             mockLinkPriceFeed.updateAnswer(newLinkPrice);
         }
     }
+
+    /**
+     * @dev Refreshes all mock router exchange rates based on the current prices
+     *      from the mock price feeds. Call this after _updatePriceFeedsWithNewPrices
+     *      or after any manual price feed update to keep the router in sync.
+     */
+    function _refreshExchangeRates() internal {
+        uint256 wethPrice = uint256(mockWethPriceFeed.latestAnswer()); // 8 decimals
+        uint256 wbtcPrice = uint256(mockWbtcPriceFeed.latestAnswer()); // 8 decimals
+        uint256 linkPrice = uint256(mockLinkPriceFeed.latestAnswer()); // 8 decimals
+
+        // ── USDC ↔ token pairs ──
+        // Chainlink prices have 8 dec, USDC has 6 dec → divide by 1e2
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockWeth),
+            mockUniRouter.computeRate(wethPrice / 1e2, 1e18)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockWbtc),
+            mockUniRouter.computeRate(wbtcPrice / 1e2, 1e8)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockLink),
+            mockUniRouter.computeRate(linkPrice / 1e2, 1e18)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e18, wethPrice / 1e2)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e8, wbtcPrice / 1e2)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e18, linkPrice / 1e2)
+        );
+
+        // ── WETH ↔ WBTC ──
+        // wbtcPrice / wethPrice = how many WETH per 1 WBTC
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockWbtc),
+            mockUniRouter.computeRate(
+                (wbtcPrice * 1e18) / wethPrice, // WETH amount (18 dec) per 1 WBTC
+                1e8 // 1 WBTC (8 dec)
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockWeth),
+            mockUniRouter.computeRate(
+                1e8, // 1 WBTC (8 dec)
+                (wbtcPrice * 1e18) / wethPrice // WETH amount (18 dec) per 1 WBTC
+            )
+        );
+
+        // ── WETH ↔ LINK ──
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockLink),
+            mockUniRouter.computeRate(
+                1e18, // 1 WETH (18 dec)
+                (wethPrice * 1e18) / linkPrice // LINK amount (18 dec) per 1 WETH
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockWeth),
+            mockUniRouter.computeRate(
+                (wethPrice * 1e18) / linkPrice, // LINK amount (18 dec) per 1 WETH
+                1e18 // 1 WETH (18 dec)
+            )
+        );
+
+        // ── WBTC ↔ LINK ──
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockLink),
+            mockUniRouter.computeRate(
+                1e8, // 1 WBTC (8 dec)
+                (wbtcPrice * 1e18) / linkPrice // LINK amount (18 dec) per 1 WBTC
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockWbtc),
+            mockUniRouter.computeRate(
+                (wbtcPrice * 1e18) / linkPrice, // LINK amount (18 dec) per 1 WBTC
+                1e8 // 1 WBTC (8 dec)
+            )
+        );
+    }
 }

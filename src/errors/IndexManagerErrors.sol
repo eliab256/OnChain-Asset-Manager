@@ -10,7 +10,7 @@ error IndexManager__IndexAlreadyExists(address index);
 error IndexManager__IsNotIndex();
 error IndexManager__IndexAlreadyInitialized();
 error IndexManager__InvalidPriceFeedAddress();
-error IndexManager__NotIndexInitialized();
+error IndexManager__NotIndexInitialized(address index);
 error IndexManager__InvalidPercentage();
 error IndexManager__RouterAddressNotSet();
 error IndexManager__SwapManagerAddressNotSet();

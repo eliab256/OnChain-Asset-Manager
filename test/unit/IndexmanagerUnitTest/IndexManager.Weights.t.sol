@@ -19,6 +19,7 @@ import {
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/events/IndexManagerEvents.sol";
 import "../../../src/errors/IndexErrors.sol";
+import "../../../src/events/IndexEvents.sol";
 
 contract IndexManagerWeightsTest is BaseTest {
     IIndex public newIndexLinkWeth;
@@ -154,7 +155,12 @@ contract IndexManagerWeightsTest is BaseTest {
 
     function testProposeNewWeightsRevertIfIndexNotInitialized() public {
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__NotIndexInitialized.selector,
+                address(nonInitializedIndex)
+            )
+        );
         indexManager.proposeNewWeights(address(nonInitializedIndex), weight40);
     }
 
@@ -174,131 +180,308 @@ contract IndexManagerWeightsTest is BaseTest {
     // //  executeWeightUpdate
     // // =========================================================================
 
-    // function test_executeWeightUpdate_RevertIf_IndexNotInitialized() public {
-    //     (address indexAddress, , ) = _createDefaultIndex();
+    function testExecuteWeightUpdateRevertIfIndexNotInitialized() public {
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__NotIndexInitialized.selector,
+                address(nonInitializedIndex)
+            )
+        );
+        indexManager.executeSingleWeightUpdate(address(nonInitializedIndex));
+    }
 
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__NotIndexInitialized.selector);
-    //     indexManager.executeWeightUpdate(indexAddress);
-    // }
+    function testExecuteWeightUpdateEmitsWeightUpdateFailedWhenNoPendingUpdate()
+        public
+    {
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
-    // function test_executeWeightUpdate_EmitsWeightUpdateFailed_WhenNoPendingUpdate()
-    //     public
-    // {
-    //     // No proposal → Index.executeWeightUpdate reverts.
-    //     // IndexManager catches it and emits WeightUpdateFailed — no revert.
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 expectedSig = WeightUpdateFailed.selector;
+        bool eventFound = false;
+        address indexFromEvent;
+        bytes memory reasonDataFromEvent;
 
-    //     vm.prank(deployer);
-    //     vm.expectEmit(true, false, false, false);
-    //     emit WeightUpdateFailed(indexAddress, "");
-    //     indexManager.executeWeightUpdate(indexAddress);
-    // }
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSig) {
+                eventFound = true;
+                indexFromEvent = address(uint160(uint256(logs[i].topics[1])));
+                reasonDataFromEvent = logs[i].data;
+                break;
+            }
+        }
+        assertTrue(eventFound, "WeightUpdateFailed event not emitted");
+        assertEq(
+            indexFromEvent,
+            address(initializedIndex),
+            "Incorrect index address in event"
+        );
+        bytes memory reasonBytes = abi.decode(reasonDataFromEvent, (bytes));
+        assertEq(
+            bytes4(reasonBytes),
+            Index__NotPendingWeightUpdate.selector,
+            "Incorrect reason in event"
+        );
+    }
 
-    // function test_executeWeightUpdate_EmitsWeightUpdateFailed_WhenExecutedTooEarly()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+    function testExecuteWeightUpdateSuccessAlsoIfRebalanceFails() public {
+        vm.prank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
 
-    //     vm.prank(deployer);
-    //     indexManager.proposeNewWeights(indexAddress, VALID_NEW_WEIGHT);
+        // Drain the mock router so the internal rebalance swap will fail
+        deal(address(mockWeth), address(mockUniRouter), 0);
+        deal(address(mockWbtc), address(mockUniRouter), 0);
 
-    //     // Attempt execution before WEIGHT_UPDATE_DELAY (2 days) has elapsed.
-    //     vm.prank(deployer);
-    //     vm.expectEmit(true, false, false, false);
-    //     emit WeightUpdateFailed(indexAddress, "");
-    //     indexManager.executeWeightUpdate(indexAddress);
-    // }
+        // Attempt execution after WEIGHT_UPDATE_DELAY (2 days) has elapsed.
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+        _refreshPriceFeeds();
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
-    // function test_executeWeightUpdate_DoesNotRevert_AfterDelay() public {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        // IndexManager emits WeightUpdateExecuted (the weight update succeeded).
+        // Index internally emits WeightUpdateRebalanceFailed (rebalance failed).
+        // IndexManager does NOT emit WeightUpdateFailed because Index.executeWeightUpdate() did not revert.
+        bytes32 expectedSuccessSig = WeightUpdateExecuted.selector;
+        bytes32 expectedRebalanceFailedSig = WeightUpdateRebalanceFailed
+            .selector;
+        bool successEventFound = false;
+        bool rebalanceFailedEventFound = false;
 
-    //     vm.prank(deployer);
-    //     indexManager.proposeNewWeights(indexAddress, VALID_NEW_WEIGHT);
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSuccessSig) {
+                successEventFound = true;
+            } else if (logs[i].topics[0] == expectedRebalanceFailedSig) {
+                rebalanceFailedEventFound = true;
+            }
+        }
+        assertTrue(
+            successEventFound,
+            "WeightUpdateExecuted event should be emitted even if rebalance fails"
+        );
+        assertTrue(
+            rebalanceFailedEventFound,
+            "WeightUpdateRebalanceFailed event should be emitted from Index when rebalance fails"
+        );
 
-    //     // Advance past the 2-day delay and refresh price feeds to avoid staleness.
-    //     vm.warp(block.timestamp + 2 days + 1);
-    //     _refreshPriceFeeds();
+        // Verify weights were actually updated despite rebalance failure
+        (uint128 newWeight0, uint128 newWeight1) = initializedIndex
+            .getAssetsWeights();
+        assertEq(newWeight0, weight30, "Weight0 should be updated to weight30");
+        assertEq(
+            newWeight1,
+            MAX_WEIGHT - weight30,
+            "Weight1 should be updated to MAX_WEIGHT - weight30"
+        );
+    }
 
-    //     // The rebalance swap fails (no Uniswap router on Anvil), but IndexManager
-    //     // catches the error via try/catch — no revert.
-    //     vm.prank(deployer);
-    //     indexManager.executeWeightUpdate(indexAddress);
-    // }
+    function testExecuteWeightUpdateEmitsWeightUpdateFailedWhenExecutedTooEarly()
+        public
+    {
+        vm.prank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight50);
 
-    // function test_executeWeightUpdate_RevertIf_CallerNotAssetManager() public {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
+        // Attempt execution before WEIGHT_UPDATE_DELAY (2 days) has elapsed.
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.executeWeightUpdate(indexAddress);
-    // }
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 expectedSig = WeightUpdateFailed.selector;
+        bool eventFound = false;
+        address indexFromEvent;
+        bytes memory reasonDataFromEvent;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSig) {
+                eventFound = true;
+                indexFromEvent = address(uint160(uint256(logs[i].topics[1])));
+                reasonDataFromEvent = logs[i].data;
+                break;
+            }
+        }
+        assertTrue(eventFound, "WeightUpdateFailed event not emitted");
+        assertEq(
+            indexFromEvent,
+            address(initializedIndex),
+            "Incorrect index address in event"
+        );
+        bytes memory reasonBytes = abi.decode(reasonDataFromEvent, (bytes));
+        assertEq(
+            bytes4(reasonBytes),
+            Index__NotPendingWeightUpdate.selector,
+            "Incorrect reason in event"
+        );
+    }
 
     // // =========================================================================
     // //  executeWeightUpdateForMultipleIndexes
     // // =========================================================================
 
-    // function test_executeWeightUpdateForMultipleIndexes_RevertIf_AnyNotInitialized()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createDefaultIndex();
-    //     address[] memory indexes = new address[](1);
-    //     indexes[0] = indexAddress;
+    function testExecuteWeightUpdateForMultipleIndexesRevertIfAnyNotInitialized()
+        public
+    {
+        address[] memory indexes = new address[](2);
+        indexes[0] = address(nonInitializedIndex);
+        indexes[1] = address(initializedIndex);
 
-    //     vm.prank(deployer);
-    //     vm.expectRevert(IndexManager__NotIndexInitialized.selector);
-    //     indexManager.executeWeightUpdateForMultipleIndexes(indexes);
-    // }
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__NotIndexInitialized.selector,
+                address(nonInitializedIndex)
+            )
+        );
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+    }
 
-    // function test_executeWeightUpdateForMultipleIndexes_DoesNotRevert_WithNoPending()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-    //     address[] memory indexes = new address[](1);
-    //     indexes[0] = indexAddress;
+    function test_executeWeightUpdateForMultipleIndexesDoesNotRevertWithNoPending()
+        public
+    {
+        // Propose new weights for the two initialized indexes, so 2 executions will success but the 3rd will not
+        vm.startPrank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+        indexManager.proposeNewWeights(address(newIndexLinkWeth), weight30);
+        vm.stopPrank();
 
-    //     // No pending update → WeightUpdateFailed is emitted, no revert.
-    //     vm.prank(deployer);
-    //     indexManager.executeWeightUpdateForMultipleIndexes(indexes);
-    // }
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+        _refreshPriceFeeds();
+        address[] memory indexes = new address[](3);
+        indexes[0] = address(initializedIndex);
+        indexes[1] = address(newIndexLinkWeth);
+        indexes[2] = address(newIndexUsdcWeth); // this will fail execution because it has no pending weight update
 
-    // function test_executeWeightUpdateForMultipleIndexes_RevertIf_CallerNotAssetManager()
-    //     public
-    // {
-    //     (address indexAddress, , ) = _createAndInitializeDefaultIndex();
-    //     address[] memory indexes = new address[](1);
-    //     indexes[0] = indexAddress;
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
 
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.executeWeightUpdateForMultipleIndexes(indexes);
-    // }
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 expectedSuccessSig = WeightUpdateExecuted.selector;
+        bytes32 expectedFailedSig = WeightUpdateFailed.selector;
+        uint256 successCount = 0;
+        uint256 failedCount = 0;
+        address[] memory indexesFromSuccessEvents = new address[](2);
+        address[] memory indexesFromFailedEvents = new address[](1);
 
-    // // =========================================================================
-    // //  executeWeightUpdateForAllIndexes
-    // // =========================================================================
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSuccessSig) {
+                address indexFromEvent = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                indexesFromSuccessEvents[successCount] = indexFromEvent;
+                successCount++;
+            } else if (logs[i].topics[0] == expectedFailedSig) {
+                address indexFromEvent = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                indexesFromFailedEvents[failedCount] = indexFromEvent;
+                failedCount++;
+            }
+        }
 
-    // function test_executeWeightUpdateForAllIndexes_WithNoIndexes_DoesNotRevert()
-    //     public
-    // {
-    //     vm.prank(deployer);
-    //     indexManager.executeWeightUpdateForAllIndexes();
-    // }
+        assertEq(successCount, 2, "There should be 2 successful executions");
+        assertEq(failedCount, 1, "There should be 1 failed execution");
+        assertEq(
+            indexesFromSuccessEvents[0],
+            address(initializedIndex),
+            "First success event should be for initializedIndex"
+        );
+        assertEq(
+            indexesFromSuccessEvents[1],
+            address(newIndexLinkWeth),
+            "Second success event should be for newIndexLinkWeth"
+        );
+        assertEq(
+            indexesFromFailedEvents[0],
+            address(newIndexUsdcWeth),
+            "Failed event should be for newIndexUsdcWeth"
+        );
+    }
 
-    // function test_executeWeightUpdateForAllIndexes_WithInitializedIndex_DoesNotRevert()
-    //     public
-    // {
-    //     _createAndInitializeDefaultIndex();
+    // =========================================================================
+    //  executeWeightUpdateForAllIndexes
+    // =========================================================================
 
-    //     vm.prank(deployer);
-    //     indexManager.executeWeightUpdateForAllIndexes();
-    // }
+    function testExecuteWeightUpdateForAllIndexesWithInitializedIndexesEmitEvents()
+        public
+    {
+        vm.startPrank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+        indexManager.proposeNewWeights(address(newIndexLinkWeth), weight30);
+        vm.stopPrank();
 
-    // function test_executeWeightUpdateForAllIndexes_RevertIf_CallerNotAssetManager()
-    //     public
-    // {
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.executeWeightUpdateForAllIndexes();
-    // }
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+        _refreshPriceFeeds();
+
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.executeWeightUpdateForAllIndexes();
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 expectedSuccessSig = WeightUpdateExecuted.selector;
+        bytes32 expectedFailedSig = WeightUpdateFailed.selector;
+        uint256 successCount = 0;
+        uint256 failedCount = 0;
+        address[] memory indexesFromSuccessEvents = new address[](2);
+        address[] memory indexesFromFailedEvents = new address[](1);
+        bytes memory reasonDataFromFailedEvent;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSuccessSig) {
+                address indexFromEvent = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                indexesFromSuccessEvents[successCount] = indexFromEvent;
+                successCount++;
+            } else if (logs[i].topics[0] == expectedFailedSig) {
+                address indexFromEvent = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                indexesFromFailedEvents[failedCount] = indexFromEvent;
+                failedCount++;
+                reasonDataFromFailedEvent = logs[i].data;
+            }
+        }
+
+        uint256 totalIndexes = indexManager.getInitializedIndexes().length;
+        assertEq(
+            successCount + failedCount,
+            totalIndexes,
+            "Total events should equal total initialized indexes"
+        );
+        assertEq(
+            successCount,
+            2,
+            "There should be 2 successful executions for indexes with pending updates"
+        );
+        assertEq(
+            failedCount,
+            totalIndexes - 2,
+            "The rest of the events should be failed executions for indexes without pending updates"
+        );
+        bytes memory reasonBytes = abi.decode(reasonDataFromFailedEvent, (bytes));
+        assertEq(
+            bytes4(reasonBytes),
+            Index__NotPendingWeightUpdate.selector,
+            "Incorrect reason in event"
+        );
+
+        // control non initialized index is not included in the function
+        for(uint256 i = 0; i < failedCount; i++) {
+            assertTrue(
+                indexesFromFailedEvents[i] != address(nonInitializedIndex),
+                "Non initialized index should not be included in failed events"
+            );
+        }
+
+        for(uint256 i = 0; i < successCount; i++) {
+            assertTrue(
+                indexesFromSuccessEvents[i] != address(nonInitializedIndex),
+                "Non initialized index should not be included in success events"
+            );
+        }
+    }
 }

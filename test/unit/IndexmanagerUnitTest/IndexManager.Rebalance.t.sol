@@ -69,7 +69,7 @@ contract IndexManagerRebalanceTest is BaseTest {
 
     function testRebalanceSingleIndexRevertIfIndexNotInitialized() public {
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+        vm.expectRevert(abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex)));
         indexManager.rebalanceSingleIndex(address(nonInitializedIndex));
     }
 
@@ -143,33 +143,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         _refreshPriceFeeds();
         int256 newWethPrice = WETH_INITIAL_PRICE * 6; // $12000
         mockWethPriceFeed.updateAnswer(newWethPrice);
-
-        // Update mock router rates to reflect the new WETH price.
-        // Without this, the slippage check fails because the router swaps at the
-        // old rate (15 WETH = 1 WBTC) while the post-swap USD check uses $12000/WETH.
-        // New WETH/WBTC rate: WBTC_PRICE / WETH_NEW_PRICE = 30000/12000 = 2.5 WETH per WBTC
-        uint256 wethPerWbtc = (uint256(WBTC_INITIAL_PRICE) * 1e18) /
-            uint256(newWethPrice); // 2.5e18
-        mockUniRouter.setExchangeRate(
-            address(mockWeth),
-            address(mockWbtc),
-            mockUniRouter.computeRate(wethPerWbtc, 1e8)
-        );
-        mockUniRouter.setExchangeRate(
-            address(mockWbtc),
-            address(mockWeth),
-            mockUniRouter.computeRate(1e8, wethPerWbtc)
-        );
-        mockUniRouter.setExchangeRate(
-            address(mockWeth),
-            address(mockUsdc),
-            mockUniRouter.computeRate(1e18, uint256(newWethPrice) / 1e2)
-        );
-        mockUniRouter.setExchangeRate(
-            address(mockUsdc),
-            address(mockWeth),
-            mockUniRouter.computeRate(uint256(newWethPrice) / 1e2, 1e18)
-        );
+        _refreshExchangeRates();
 
         vm.prank(deployer);
         vm.recordLogs();
@@ -217,7 +191,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         indexes[1] = address(nonInitializedIndex);
 
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__NotIndexInitialized.selector);
+        vm.expectRevert(abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex)));
         indexManager.rebalanceMultipleIndexes(indexes);
     }
 

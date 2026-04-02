@@ -397,7 +397,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
-            _executeSingleWeightUpdate(_indexAddresses[i]);
+            (bool success, bytes memory reasonBytes) = _executeSingleWeightUpdate(_indexAddresses[i]);
+            if (!success) {
+                emit WeightUpdateFailed(_indexAddresses[i], reasonBytes);
+            } else {
+                emit WeightUpdateExecuted(_indexAddresses[i]);
+            }
         }
     }
 
@@ -527,25 +532,25 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
 
     /**
      * @dev Checks if an index is initialized and reverts if it is not
-     * @param indexAddress Address of the index to check
+     * @param _indexAddress Address of the index to check
      */
-    function _isIndexInitialized(address indexAddress) internal view {
-        if (!s_isInitialized[indexAddress]) {
-            revert IndexManager__NotIndexInitialized();
+    function _isIndexInitialized(address _indexAddress) internal view {
+        if (!s_isInitialized[_indexAddress]) {
+            revert IndexManager__NotIndexInitialized(_indexAddress);
         }
     }
 
     /**
      * @dev Checks if multiple indexes are initialized and reverts if any of them are not
-     * @param indexAddresses Addresses of the indexes to check
+     * @param _indexAddresses Addresses of the indexes to check
      */
     function _areIndexesInitialized(
-        address[] calldata indexAddresses
+        address[] calldata _indexAddresses
     ) internal view {
-        uint256 length = indexAddresses.length;
+        uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
-            if (!s_isInitialized[indexAddresses[i]]) {
-                revert IndexManager__NotIndexInitialized();
+            if (!s_isInitialized[_indexAddresses[i]]) {
+                revert IndexManager__NotIndexInitialized(_indexAddresses[i]);
             }
         }
     }
