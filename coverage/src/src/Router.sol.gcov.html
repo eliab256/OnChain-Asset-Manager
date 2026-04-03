@@ -31,18 +31,18 @@
             <td class="headerValue">lcov.info</td>
             <td></td>
             <td class="headerItem">Lines:</td>
-            <td class="headerCovTableEntryMed">88.9&nbsp;%</td>
+            <td class="headerCovTableEntryHi">96.3&nbsp;%</td>
             <td class="headerCovTableEntry">54</td>
-            <td class="headerCovTableEntry">48</td>
+            <td class="headerCovTableEntry">52</td>
           </tr>
           <tr>
             <td class="headerItem">Test Date:</td>
-            <td class="headerValue">2026-03-26 22:18:31</td>
+            <td class="headerValue">2026-04-03 11:58:09</td>
             <td></td>
             <td class="headerItem">Functions:</td>
-            <td class="headerCovTableEntryMed">88.9&nbsp;%</td>
+            <td class="headerCovTableEntryHi">94.4&nbsp;%</td>
             <td class="headerCovTableEntry">18</td>
-            <td class="headerCovTableEntry">16</td>
+            <td class="headerCovTableEntry">17</td>
           </tr>
                   <tr><td><img src="../../glass.png" width=3 height=3 alt=""></td></tr>
                 </table>
@@ -81,37 +81,37 @@
 <span id="L19"><span class="lineNum">      19</span>              : </span>
 <span id="L20"><span class="lineNum">      20</span>              :     using SafeERC20 for IERC20;</span>
 <span id="L21"><span class="lineNum">      21</span>              : </span>
-<span id="L22"><span class="lineNum">      22</span> <span class="tlaUNC tlaBgUNC">           0 :     modifier validIndex(address _indexAddress) {</span></span>
-<span id="L23"><span class="lineNum">      23</span> <span class="tlaUNC">           0 :         _validIndex(_indexAddress);</span></span>
+<span id="L22"><span class="lineNum">      22</span> <span class="tlaGNC tlaBgGNC">           7 :     modifier validIndex(address _indexAddress) {</span></span>
+<span id="L23"><span class="lineNum">      23</span> <span class="tlaGNC">           7 :         _validIndex(_indexAddress);</span></span>
 <span id="L24"><span class="lineNum">      24</span>              :         _;</span>
 <span id="L25"><span class="lineNum">      25</span>              :     }</span>
 <span id="L26"><span class="lineNum">      26</span>              : </span>
-<span id="L27"><span class="lineNum">      27</span> <span class="tlaUNC">           0 :     modifier validAmount(uint256 _amount) {</span></span>
+<span id="L27"><span class="lineNum">      27</span> <span class="tlaUNC tlaBgUNC">           0 :     modifier validAmount(uint256 _amount) {</span></span>
 <span id="L28"><span class="lineNum">      28</span> <span class="tlaUNC">           0 :         _validAmount(_amount);</span></span>
 <span id="L29"><span class="lineNum">      29</span>              :         _;</span>
 <span id="L30"><span class="lineNum">      30</span>              :     }</span>
 <span id="L31"><span class="lineNum">      31</span>              : </span>
-<span id="L32"><span class="lineNum">      32</span> <span class="tlaGNC tlaBgGNC">           8 :     modifier validTolerance(uint256 _tolerance) {</span></span>
-<span id="L33"><span class="lineNum">      33</span> <span class="tlaGNC">           8 :         _validTolerance(_tolerance);</span></span>
+<span id="L32"><span class="lineNum">      32</span> <span class="tlaGNC tlaBgGNC">           9 :     modifier validTolerance(uint256 _tolerance) {</span></span>
+<span id="L33"><span class="lineNum">      33</span> <span class="tlaGNC">           9 :         _validTolerance(_tolerance);</span></span>
 <span id="L34"><span class="lineNum">      34</span>              :         _;</span>
 <span id="L35"><span class="lineNum">      35</span>              :     }</span>
 <span id="L36"><span class="lineNum">      36</span>              : </span>
 <span id="L37"><span class="lineNum">      37</span>              :     /**</span>
 <span id="L38"><span class="lineNum">      38</span>              :      * @dev Combined all the modifiers above into a single modifier to avoid having to repeat them for each function.</span>
 <span id="L39"><span class="lineNum">      39</span>              :      */</span>
-<span id="L40"><span class="lineNum">      40</span> <span class="tlaGNC">          14 :     modifier validInputs(</span></span>
+<span id="L40"><span class="lineNum">      40</span> <span class="tlaGNC">          15 :     modifier validInputs(</span></span>
 <span id="L41"><span class="lineNum">      41</span>              :         address _indexAddress,</span>
 <span id="L42"><span class="lineNum">      42</span>              :         uint256 _amount,</span>
 <span id="L43"><span class="lineNum">      43</span>              :         uint256 _tolerance,</span>
 <span id="L44"><span class="lineNum">      44</span>              :         bool isBuying</span>
 <span id="L45"><span class="lineNum">      45</span>              :     ) {</span>
-<span id="L46"><span class="lineNum">      46</span> <span class="tlaGNC">          14 :         _validInputs(_indexAddress, _amount, _tolerance, isBuying);</span></span>
+<span id="L46"><span class="lineNum">      46</span> <span class="tlaGNC">          15 :         _validInputs(_indexAddress, _amount, _tolerance, isBuying);</span></span>
 <span id="L47"><span class="lineNum">      47</span>              :         _;</span>
 <span id="L48"><span class="lineNum">      48</span>              :     }</span>
 <span id="L49"><span class="lineNum">      49</span>              : </span>
-<span id="L50"><span class="lineNum">      50</span> <span class="tlaGNC">         216 :     constructor(address _indexManager) {</span></span>
-<span id="L51"><span class="lineNum">      51</span> <span class="tlaGNC">         216 :         i_IndexManager = IIndexManager(_indexManager);</span></span>
-<span id="L52"><span class="lineNum">      52</span> <span class="tlaGNC">         216 :         i_usdc = IERC20(IIndexManager(_indexManager).getUsdc());</span></span>
+<span id="L50"><span class="lineNum">      50</span> <span class="tlaGNC">         262 :     constructor(address _indexManager) {</span></span>
+<span id="L51"><span class="lineNum">      51</span> <span class="tlaGNC">         262 :         i_IndexManager = IIndexManager(_indexManager);</span></span>
+<span id="L52"><span class="lineNum">      52</span> <span class="tlaGNC">         262 :         i_usdc = IERC20(IIndexManager(_indexManager).getUsdc());</span></span>
 <span id="L53"><span class="lineNum">      53</span>              :     }</span>
 <span id="L54"><span class="lineNum">      54</span>              : </span>
 <span id="L55"><span class="lineNum">      55</span>              :     /**</span>
@@ -122,7 +122,7 @@
 <span id="L60"><span class="lineNum">      60</span>              :      * @param _usdcAmount The amount of USDC to spend.</span>
 <span id="L61"><span class="lineNum">      61</span>              :      * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).</span>
 <span id="L62"><span class="lineNum">      62</span>              :      */</span>
-<span id="L63"><span class="lineNum">      63</span> <span class="tlaGNC">          27 :     function buyExactUsdcAmountOfShares(</span></span>
+<span id="L63"><span class="lineNum">      63</span> <span class="tlaGNC">          43 :     function buyExactUsdcAmountOfShares(</span></span>
 <span id="L64"><span class="lineNum">      64</span>              :         address _indexAddress,</span>
 <span id="L65"><span class="lineNum">      65</span>              :         uint256 _usdcAmount,</span>
 <span id="L66"><span class="lineNum">      66</span>              :         uint256 _maxTolerance</span>
@@ -131,7 +131,7 @@
 <span id="L69"><span class="lineNum">      69</span>              :         validInputs(_indexAddress, _usdcAmount, _maxTolerance, true)</span>
 <span id="L70"><span class="lineNum">      70</span>              :         nonReentrant</span>
 <span id="L71"><span class="lineNum">      71</span>              :     {</span>
-<span id="L72"><span class="lineNum">      72</span> <span class="tlaGNC">          22 :         _buyShares(_indexAddress, _usdcAmount, _maxTolerance);</span></span>
+<span id="L72"><span class="lineNum">      72</span> <span class="tlaGNC">          37 :         _buyShares(_indexAddress, _usdcAmount, _maxTolerance);</span></span>
 <span id="L73"><span class="lineNum">      73</span>              :     }</span>
 <span id="L74"><span class="lineNum">      74</span>              : </span>
 <span id="L75"><span class="lineNum">      75</span>              :     /**</span>
@@ -143,7 +143,7 @@
 <span id="L81"><span class="lineNum">      81</span>              :      * @param _sharesAmount The amount of shares to sell.</span>
 <span id="L82"><span class="lineNum">      82</span>              :      * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).</span>
 <span id="L83"><span class="lineNum">      83</span>              :      */</span>
-<span id="L84"><span class="lineNum">      84</span> <span class="tlaGNC">          14 :     function sellExactAmountOfSharesForUsdc(</span></span>
+<span id="L84"><span class="lineNum">      84</span> <span class="tlaGNC">          15 :     function sellExactAmountOfSharesForUsdc(</span></span>
 <span id="L85"><span class="lineNum">      85</span>              :         address _indexAddress,</span>
 <span id="L86"><span class="lineNum">      86</span>              :         uint256 _sharesAmount,</span>
 <span id="L87"><span class="lineNum">      87</span>              :         uint256 _maxTolerance</span>
@@ -165,13 +165,13 @@
 <span id="L103"><span class="lineNum">     103</span>              :      * @param _usdcAmount The amount of USDC to spend.</span>
 <span id="L104"><span class="lineNum">     104</span>              :      * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).</span>
 <span id="L105"><span class="lineNum">     105</span>              :      */</span>
-<span id="L106"><span class="lineNum">     106</span> <span class="tlaGNC">          22 :     function _buyShares(</span></span>
+<span id="L106"><span class="lineNum">     106</span> <span class="tlaGNC">          37 :     function _buyShares(</span></span>
 <span id="L107"><span class="lineNum">     107</span>              :         address _indexAddress,</span>
 <span id="L108"><span class="lineNum">     108</span>              :         uint256 _usdcAmount,</span>
 <span id="L109"><span class="lineNum">     109</span>              :         uint256 _maxTolerance</span>
 <span id="L110"><span class="lineNum">     110</span>              :     ) internal {</span>
-<span id="L111"><span class="lineNum">     111</span> <span class="tlaGNC">          22 :         IIndex index = IIndex(_indexAddress);</span></span>
-<span id="L112"><span class="lineNum">     112</span> <span class="tlaGNC">          22 :         index.mintShares(msg.sender, _usdcAmount, _maxTolerance);</span></span>
+<span id="L111"><span class="lineNum">     111</span> <span class="tlaGNC">          37 :         IIndex index = IIndex(_indexAddress);</span></span>
+<span id="L112"><span class="lineNum">     112</span> <span class="tlaGNC">          37 :         index.mintShares(msg.sender, _usdcAmount, _maxTolerance);</span></span>
 <span id="L113"><span class="lineNum">     113</span>              :     }</span>
 <span id="L114"><span class="lineNum">     114</span>              : </span>
 <span id="L115"><span class="lineNum">     115</span>              :     /**</span>
@@ -205,7 +205,7 @@
 <span id="L143"><span class="lineNum">     143</span>              :      * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).</span>
 <span id="L144"><span class="lineNum">     144</span>              :      * @return minUsdcAmount The minimum amount of USDC to receive after fees and tolerance (in token decimals, 6 for USDC).</span>
 <span id="L145"><span class="lineNum">     145</span>              :      */</span>
-<span id="L146"><span class="lineNum">     146</span> <span class="tlaGNC">           8 :     function getMinRedeemPreview(</span></span>
+<span id="L146"><span class="lineNum">     146</span> <span class="tlaGNC">           9 :     function getMinRedeemPreview(</span></span>
 <span id="L147"><span class="lineNum">     147</span>              :         address _indexAddress,</span>
 <span id="L148"><span class="lineNum">     148</span>              :         uint256 _sharesAmount,</span>
 <span id="L149"><span class="lineNum">     149</span>              :         uint256 _maxTolerance</span>
@@ -213,95 +213,111 @@
 <span id="L151"><span class="lineNum">     151</span>              :         external</span>
 <span id="L152"><span class="lineNum">     152</span>              :         view</span>
 <span id="L153"><span class="lineNum">     153</span>              :         validTolerance(_maxTolerance)</span>
-<span id="L154"><span class="lineNum">     154</span>              :         returns (uint256 minUsdcAmount)</span>
-<span id="L155"><span class="lineNum">     155</span>              :     {</span>
-<span id="L156"><span class="lineNum">     156</span> <span class="tlaGNC">           6 :         IIndex index = IIndex(_indexAddress);</span></span>
-<span id="L157"><span class="lineNum">     157</span> <span class="tlaGNC">           6 :         minUsdcAmount = index.minRedeemPreview(_sharesAmount, _maxTolerance);</span></span>
-<span id="L158"><span class="lineNum">     158</span>              :     }</span>
-<span id="L159"><span class="lineNum">     159</span>              : </span>
-<span id="L160"><span class="lineNum">     160</span>              :     /**</span>
-<span id="L161"><span class="lineNum">     161</span>              :      * @notice Calculate the minimum amount of shares to receive for a given amount of USDC, based on the current index state and fees.</span>
-<span id="L162"><span class="lineNum">     162</span>              :      * @return minSharesAmount The minimum amount of shares to receive after fees and tolerance (in token decimals, 18 for shares).</span>
-<span id="L163"><span class="lineNum">     163</span>              :      * @notice Tolerace is used on net USDC amount, protocol fees are applied on input USDC</span>
-<span id="L164"><span class="lineNum">     164</span>              :      *                                100USDC  -     1%fee    = 99USDC net amount</span>
-<span id="L165"><span class="lineNum">     165</span>              :      * minSharesAmount calculation: usdcAmount - protocolfees = usdcAfterFees</span>
-<span id="L166"><span class="lineNum">     166</span>              :      *     99USDC    * (100% - 5%)        = 94.05USDC after tolerance</span>
-<span id="L167"><span class="lineNum">     167</span>              :      * usdcAfterFees * (1 - maxTolerance) = usdcAfterFeesAndTolerance</span>
-<span id="L168"><span class="lineNum">     168</span>              :      * sharesAmount = (usdcAfterFeesAndTolerance * totalShares) / totalAsset</span>
-<span id="L169"><span class="lineNum">     169</span>              :      * @param _indexAddress The address of the index.</span>
-<span id="L170"><span class="lineNum">     170</span>              :      * @param _usdcAmount The amount of USDC to spend.</span>
-<span id="L171"><span class="lineNum">     171</span>              :      * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).</span>
-<span id="L172"><span class="lineNum">     172</span>              :      */</span>
-<span id="L173"><span class="lineNum">     173</span> <span class="tlaGNC">           8 :     function getMinMintPreview(</span></span>
-<span id="L174"><span class="lineNum">     174</span>              :         address _indexAddress,</span>
-<span id="L175"><span class="lineNum">     175</span>              :         uint256 _usdcAmount,</span>
-<span id="L176"><span class="lineNum">     176</span>              :         uint256 _maxTolerance</span>
-<span id="L177"><span class="lineNum">     177</span>              :     ) external view validTolerance(_maxTolerance) returns (uint256 minSharesAmount) {</span>
-<span id="L178"><span class="lineNum">     178</span> <span class="tlaGNC">           6 :         IIndex index = IIndex(_indexAddress);</span></span>
-<span id="L179"><span class="lineNum">     179</span> <span class="tlaGNC">           6 :         minSharesAmount = index.minMintPreview(_usdcAmount, _maxTolerance);</span></span>
-<span id="L180"><span class="lineNum">     180</span>              :     }</span>
-<span id="L181"><span class="lineNum">     181</span>              : </span>
-<span id="L182"><span class="lineNum">     182</span> <span class="tlaGNC">          39 :     function _validAmount(uint256 _amount) internal pure {</span></span>
-<span id="L183"><span class="lineNum">     183</span> <span class="tlaGNC">          39 :         if (_amount == 0) {</span></span>
-<span id="L184"><span class="lineNum">     184</span> <span class="tlaGNC">           2 :             revert Router__InvalidAmounts();</span></span>
-<span id="L185"><span class="lineNum">     185</span>              :         }</span>
-<span id="L186"><span class="lineNum">     186</span>              :     }</span>
-<span id="L187"><span class="lineNum">     187</span>              : </span>
-<span id="L188"><span class="lineNum">     188</span> <span class="tlaGNC">          32 :     function _validBalance(address _indexAddress, uint256 _amount, bool isBuying) internal view {</span></span>
-<span id="L189"><span class="lineNum">     189</span> <span class="tlaGNC">          22 :         if(isBuying) {</span></span>
-<span id="L190"><span class="lineNum">     190</span> <span class="tlaGNC">          22 :             uint256 userUsdcBalance = i_usdc.balanceOf(msg.sender);</span></span>
-<span id="L191"><span class="lineNum">     191</span> <span class="tlaGNC">          22 :             if (userUsdcBalance &lt; _amount) {</span></span>
-<span id="L192"><span class="lineNum">     192</span> <span class="tlaUNC tlaBgUNC">           0 :                 revert Router__InsufficientUsdcBalance(userUsdcBalance, _amount);</span></span>
-<span id="L193"><span class="lineNum">     193</span>              :             }</span>
-<span id="L194"><span class="lineNum">     194</span>              :         } else {</span>
-<span id="L195"><span class="lineNum">     195</span> <span class="tlaGNC tlaBgGNC">          10 :             IIndex index = IIndex(_indexAddress);</span></span>
-<span id="L196"><span class="lineNum">     196</span> <span class="tlaGNC">          10 :             uint256 userSharesBalance = index.balanceOf(msg.sender);</span></span>
-<span id="L197"><span class="lineNum">     197</span> <span class="tlaGNC">          10 :             if (userSharesBalance &lt; _amount) {</span></span>
-<span id="L198"><span class="lineNum">     198</span> <span class="tlaUNC tlaBgUNC">           0 :                 revert Router__InsufficientSharesBalance(userSharesBalance, _amount);</span></span>
-<span id="L199"><span class="lineNum">     199</span>              :             }</span>
-<span id="L200"><span class="lineNum">     200</span>              :         }</span>
-<span id="L201"><span class="lineNum">     201</span>              :     }</span>
-<span id="L202"><span class="lineNum">     202</span>              : </span>
-<span id="L203"><span class="lineNum">     203</span>              : </span>
-<span id="L204"><span class="lineNum">     204</span> <span class="tlaGNC tlaBgGNC">          41 :     function _validIndex(address _indexAddress) internal view {</span></span>
-<span id="L205"><span class="lineNum">     205</span> <span class="tlaGNC">          41 :         if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {</span></span>
-<span id="L206"><span class="lineNum">     206</span> <span class="tlaGNC">           2 :             revert Router__InvalidIndexAddress();</span></span>
-<span id="L207"><span class="lineNum">     207</span>              :         }</span>
-<span id="L208"><span class="lineNum">     208</span>              :     }</span>
-<span id="L209"><span class="lineNum">     209</span>              : </span>
-<span id="L210"><span class="lineNum">     210</span> <span class="tlaGNC">          53 :     function _validTolerance(uint256 _tolerance) internal pure {</span></span>
-<span id="L211"><span class="lineNum">     211</span> <span class="tlaGNC">          53 :         if (_tolerance &gt;= 10_000 || _tolerance == 0) {</span></span>
-<span id="L212"><span class="lineNum">     212</span> <span class="tlaGNC">           9 :             revert Router__InvalidTolerance();</span></span>
-<span id="L213"><span class="lineNum">     213</span>              :         }</span>
-<span id="L214"><span class="lineNum">     214</span>              :     }</span>
-<span id="L215"><span class="lineNum">     215</span>              : </span>
-<span id="L216"><span class="lineNum">     216</span> <span class="tlaGNC">          41 :     function _validInputs(</span></span>
-<span id="L217"><span class="lineNum">     217</span>              :         address _indexAddress,</span>
-<span id="L218"><span class="lineNum">     218</span>              :         uint256 _amount,</span>
-<span id="L219"><span class="lineNum">     219</span>              :         uint256 _tolerance,</span>
-<span id="L220"><span class="lineNum">     220</span>              :         bool isBuying</span>
-<span id="L221"><span class="lineNum">     221</span>              :     ) internal view {</span>
-<span id="L222"><span class="lineNum">     222</span> <span class="tlaGNC">          41 :         _validIndex(_indexAddress);</span></span>
-<span id="L223"><span class="lineNum">     223</span> <span class="tlaGNC">          39 :         _validAmount(_amount);</span></span>
-<span id="L224"><span class="lineNum">     224</span> <span class="tlaGNC">          37 :         _validTolerance(_tolerance);</span></span>
-<span id="L225"><span class="lineNum">     225</span> <span class="tlaGNC">          32 :         _validBalance(_indexAddress, _amount, isBuying);</span></span>
-<span id="L226"><span class="lineNum">     226</span>              :     }</span>
-<span id="L227"><span class="lineNum">     227</span>              :     /**</span>
-<span id="L228"><span class="lineNum">     228</span>              :      * @notice Returns the address of the IndexManager contract used by the router.</span>
-<span id="L229"><span class="lineNum">     229</span>              :      * @return The address of the IndexManager contract.</span>
-<span id="L230"><span class="lineNum">     230</span>              :      */</span>
-<span id="L231"><span class="lineNum">     231</span> <span class="tlaGNC">           3 :     function getIndexManager() external view returns (address) {</span></span>
-<span id="L232"><span class="lineNum">     232</span> <span class="tlaGNC">           3 :         return address(i_IndexManager);</span></span>
-<span id="L233"><span class="lineNum">     233</span>              :     }</span>
-<span id="L234"><span class="lineNum">     234</span>              : </span>
-<span id="L235"><span class="lineNum">     235</span>              :     /**</span>
-<span id="L236"><span class="lineNum">     236</span>              :      * @notice Returns the address of the USDC token used by the router.</span>
-<span id="L237"><span class="lineNum">     237</span>              :      * @return The address of the USDC token.</span>
-<span id="L238"><span class="lineNum">     238</span>              :      */</span>
-<span id="L239"><span class="lineNum">     239</span> <span class="tlaGNC">           1 :     function getUsdc() external view returns (address) {</span></span>
-<span id="L240"><span class="lineNum">     240</span> <span class="tlaGNC">           1 :         return address(i_usdc);</span></span>
-<span id="L241"><span class="lineNum">     241</span>              :     }</span>
-<span id="L242"><span class="lineNum">     242</span>              : }</span>
+<span id="L154"><span class="lineNum">     154</span>              :         validIndex(_indexAddress)</span>
+<span id="L155"><span class="lineNum">     155</span>              :         returns (uint256 minUsdcAmount)</span>
+<span id="L156"><span class="lineNum">     156</span>              :     {</span>
+<span id="L157"><span class="lineNum">     157</span> <span class="tlaGNC">           6 :         IIndex index = IIndex(_indexAddress);</span></span>
+<span id="L158"><span class="lineNum">     158</span> <span class="tlaGNC">           6 :         minUsdcAmount = index.minRedeemPreview(_sharesAmount, _maxTolerance);</span></span>
+<span id="L159"><span class="lineNum">     159</span>              :     }</span>
+<span id="L160"><span class="lineNum">     160</span>              : </span>
+<span id="L161"><span class="lineNum">     161</span>              :     /**</span>
+<span id="L162"><span class="lineNum">     162</span>              :      * @notice Calculate the minimum amount of shares to receive for a given amount of USDC, based on the current index state and fees.</span>
+<span id="L163"><span class="lineNum">     163</span>              :      * @return minSharesAmount The minimum amount of shares to receive after fees and tolerance (in token decimals, 18 for shares).</span>
+<span id="L164"><span class="lineNum">     164</span>              :      * @notice Tolerace is used on net USDC amount, protocol fees are applied on input USDC</span>
+<span id="L165"><span class="lineNum">     165</span>              :      *                                100USDC  -     1%fee    = 99USDC net amount</span>
+<span id="L166"><span class="lineNum">     166</span>              :      * minSharesAmount calculation: usdcAmount - protocolfees = usdcAfterFees</span>
+<span id="L167"><span class="lineNum">     167</span>              :      *     99USDC    * (100% - 5%)        = 94.05USDC after tolerance</span>
+<span id="L168"><span class="lineNum">     168</span>              :      * usdcAfterFees * (1 - maxTolerance) = usdcAfterFeesAndTolerance</span>
+<span id="L169"><span class="lineNum">     169</span>              :      * sharesAmount = (usdcAfterFeesAndTolerance * totalShares) / totalAsset</span>
+<span id="L170"><span class="lineNum">     170</span>              :      * @param _indexAddress The address of the index.</span>
+<span id="L171"><span class="lineNum">     171</span>              :      * @param _usdcAmount The amount of USDC to spend.</span>
+<span id="L172"><span class="lineNum">     172</span>              :      * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).</span>
+<span id="L173"><span class="lineNum">     173</span>              :      */</span>
+<span id="L174"><span class="lineNum">     174</span> <span class="tlaGNC">           9 :     function getMinMintPreview(</span></span>
+<span id="L175"><span class="lineNum">     175</span>              :         address _indexAddress,</span>
+<span id="L176"><span class="lineNum">     176</span>              :         uint256 _usdcAmount,</span>
+<span id="L177"><span class="lineNum">     177</span>              :         uint256 _maxTolerance</span>
+<span id="L178"><span class="lineNum">     178</span>              :     )</span>
+<span id="L179"><span class="lineNum">     179</span>              :         external</span>
+<span id="L180"><span class="lineNum">     180</span>              :         view</span>
+<span id="L181"><span class="lineNum">     181</span>              :         validTolerance(_maxTolerance)</span>
+<span id="L182"><span class="lineNum">     182</span>              :         validIndex(_indexAddress)</span>
+<span id="L183"><span class="lineNum">     183</span>              :         returns (uint256 minSharesAmount)</span>
+<span id="L184"><span class="lineNum">     184</span>              :     {</span>
+<span id="L185"><span class="lineNum">     185</span> <span class="tlaGNC">           6 :         IIndex index = IIndex(_indexAddress);</span></span>
+<span id="L186"><span class="lineNum">     186</span> <span class="tlaGNC">           6 :         minSharesAmount = index.minMintPreview(_usdcAmount, _maxTolerance);</span></span>
+<span id="L187"><span class="lineNum">     187</span>              :     }</span>
+<span id="L188"><span class="lineNum">     188</span>              : </span>
+<span id="L189"><span class="lineNum">     189</span> <span class="tlaGNC">          56 :     function _validAmount(uint256 _amount) internal pure {</span></span>
+<span id="L190"><span class="lineNum">     190</span> <span class="tlaGNC">          56 :         if (_amount == 0) {</span></span>
+<span id="L191"><span class="lineNum">     191</span> <span class="tlaGNC">           2 :             revert Router__InvalidAmounts();</span></span>
+<span id="L192"><span class="lineNum">     192</span>              :         }</span>
+<span id="L193"><span class="lineNum">     193</span>              :     }</span>
+<span id="L194"><span class="lineNum">     194</span>              : </span>
+<span id="L195"><span class="lineNum">     195</span> <span class="tlaGNC">          49 :     function _validBalance(</span></span>
+<span id="L196"><span class="lineNum">     196</span>              :         address _indexAddress,</span>
+<span id="L197"><span class="lineNum">     197</span>              :         uint256 _amount,</span>
+<span id="L198"><span class="lineNum">     198</span>              :         bool isBuying</span>
+<span id="L199"><span class="lineNum">     199</span>              :     ) internal view {</span>
+<span id="L200"><span class="lineNum">     200</span> <span class="tlaGNC">          38 :         if (isBuying) {</span></span>
+<span id="L201"><span class="lineNum">     201</span> <span class="tlaGNC">          38 :             uint256 userUsdcBalance = i_usdc.balanceOf(msg.sender);</span></span>
+<span id="L202"><span class="lineNum">     202</span> <span class="tlaGNC">          38 :             if (userUsdcBalance &lt; _amount) {</span></span>
+<span id="L203"><span class="lineNum">     203</span> <span class="tlaGNC">           1 :                 revert Router__InsufficientUsdcBalance(</span></span>
+<span id="L204"><span class="lineNum">     204</span>              :                     userUsdcBalance,</span>
+<span id="L205"><span class="lineNum">     205</span>              :                     _amount</span>
+<span id="L206"><span class="lineNum">     206</span>              :                 );</span>
+<span id="L207"><span class="lineNum">     207</span>              :             }</span>
+<span id="L208"><span class="lineNum">     208</span>              :         } else {</span>
+<span id="L209"><span class="lineNum">     209</span> <span class="tlaGNC">          11 :             IIndex index = IIndex(_indexAddress);</span></span>
+<span id="L210"><span class="lineNum">     210</span> <span class="tlaGNC">          11 :             uint256 userSharesBalance = index.balanceOf(msg.sender);</span></span>
+<span id="L211"><span class="lineNum">     211</span> <span class="tlaGNC">          11 :             if (userSharesBalance &lt; _amount) {</span></span>
+<span id="L212"><span class="lineNum">     212</span> <span class="tlaGNC">           1 :                 revert Router__InsufficientSharesBalance(</span></span>
+<span id="L213"><span class="lineNum">     213</span>              :                     userSharesBalance,</span>
+<span id="L214"><span class="lineNum">     214</span>              :                     _amount</span>
+<span id="L215"><span class="lineNum">     215</span>              :                 );</span>
+<span id="L216"><span class="lineNum">     216</span>              :             }</span>
+<span id="L217"><span class="lineNum">     217</span>              :         }</span>
+<span id="L218"><span class="lineNum">     218</span>              :     }</span>
+<span id="L219"><span class="lineNum">     219</span>              : </span>
+<span id="L220"><span class="lineNum">     220</span> <span class="tlaGNC">          72 :     function _validIndex(address _indexAddress) internal view {</span></span>
+<span id="L221"><span class="lineNum">     221</span> <span class="tlaGNC">          72 :         if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {</span></span>
+<span id="L222"><span class="lineNum">     222</span> <span class="tlaGNC">           4 :             revert Router__InvalidIndexAddress();</span></span>
+<span id="L223"><span class="lineNum">     223</span>              :         }</span>
+<span id="L224"><span class="lineNum">     224</span>              :     }</span>
+<span id="L225"><span class="lineNum">     225</span>              : </span>
+<span id="L226"><span class="lineNum">     226</span> <span class="tlaGNC">          72 :     function _validTolerance(uint256 _tolerance) internal pure {</span></span>
+<span id="L227"><span class="lineNum">     227</span> <span class="tlaGNC">          72 :         if (_tolerance &gt;= 10_000 || _tolerance == 0) {</span></span>
+<span id="L228"><span class="lineNum">     228</span> <span class="tlaGNC">           9 :             revert Router__InvalidTolerance();</span></span>
+<span id="L229"><span class="lineNum">     229</span>              :         }</span>
+<span id="L230"><span class="lineNum">     230</span>              :     }</span>
+<span id="L231"><span class="lineNum">     231</span>              : </span>
+<span id="L232"><span class="lineNum">     232</span> <span class="tlaGNC">          58 :     function _validInputs(</span></span>
+<span id="L233"><span class="lineNum">     233</span>              :         address _indexAddress,</span>
+<span id="L234"><span class="lineNum">     234</span>              :         uint256 _amount,</span>
+<span id="L235"><span class="lineNum">     235</span>              :         uint256 _tolerance,</span>
+<span id="L236"><span class="lineNum">     236</span>              :         bool isBuying</span>
+<span id="L237"><span class="lineNum">     237</span>              :     ) internal view {</span>
+<span id="L238"><span class="lineNum">     238</span> <span class="tlaGNC">          58 :         _validIndex(_indexAddress);</span></span>
+<span id="L239"><span class="lineNum">     239</span> <span class="tlaGNC">          56 :         _validAmount(_amount);</span></span>
+<span id="L240"><span class="lineNum">     240</span> <span class="tlaGNC">          54 :         _validTolerance(_tolerance);</span></span>
+<span id="L241"><span class="lineNum">     241</span> <span class="tlaGNC">          49 :         _validBalance(_indexAddress, _amount, isBuying);</span></span>
+<span id="L242"><span class="lineNum">     242</span>              :     }</span>
+<span id="L243"><span class="lineNum">     243</span>              :     /**</span>
+<span id="L244"><span class="lineNum">     244</span>              :      * @notice Returns the address of the IndexManager contract used by the router.</span>
+<span id="L245"><span class="lineNum">     245</span>              :      * @return The address of the IndexManager contract.</span>
+<span id="L246"><span class="lineNum">     246</span>              :      */</span>
+<span id="L247"><span class="lineNum">     247</span> <span class="tlaGNC">           3 :     function getIndexManager() external view returns (address) {</span></span>
+<span id="L248"><span class="lineNum">     248</span> <span class="tlaGNC">           3 :         return address(i_IndexManager);</span></span>
+<span id="L249"><span class="lineNum">     249</span>              :     }</span>
+<span id="L250"><span class="lineNum">     250</span>              : </span>
+<span id="L251"><span class="lineNum">     251</span>              :     /**</span>
+<span id="L252"><span class="lineNum">     252</span>              :      * @notice Returns the address of the USDC token used by the router.</span>
+<span id="L253"><span class="lineNum">     253</span>              :      * @return The address of the USDC token.</span>
+<span id="L254"><span class="lineNum">     254</span>              :      */</span>
+<span id="L255"><span class="lineNum">     255</span> <span class="tlaGNC">           1 :     function getUsdc() external view returns (address) {</span></span>
+<span id="L256"><span class="lineNum">     256</span> <span class="tlaGNC">           1 :         return address(i_usdc);</span></span>
+<span id="L257"><span class="lineNum">     257</span>              :     }</span>
+<span id="L258"><span class="lineNum">     258</span>              : }</span>
         </pre>
               </td>
             </tr>

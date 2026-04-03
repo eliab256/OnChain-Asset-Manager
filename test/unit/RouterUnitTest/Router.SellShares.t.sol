@@ -132,6 +132,20 @@ contract RouterTest is BaseTest {
         );
     }
 
+    function testSellSharesRevertsIfUserHasInsufficientShares() public {
+        uint256 sharesToRedeem = 100e18;
+        uint256 userSharesBalance = initializedIndex.balanceOf(user1);
+        assertEq(userSharesBalance, 0, "user1 must start with 0 shares");
+
+        vm.prank(user1);
+        vm.expectRevert(abi.encodeWithSelector(Router__InsufficientSharesBalance.selector, userSharesBalance, sharesToRedeem));
+        router.sellExactAmountOfSharesForUsdc(
+            address(initializedIndex),
+            sharesToRedeem,
+            VALID_TOLERANCE
+        );
+    }
+
     function testSellSharesBurnsSharesAndTransfersUsdcToCaller() public {
         uint256 usdcAmount = 4_000e6;
         uint256 sharesBought = _buySharesForUser(user1, usdcAmount);

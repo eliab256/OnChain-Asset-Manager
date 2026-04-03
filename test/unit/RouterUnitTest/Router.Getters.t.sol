@@ -106,6 +106,10 @@ contract RouterGettersTest is BaseTest {
     //  getMinMintPreview
     // =========================================================================
 
+    function testGetMinMintPreviewRevertsIfisNotIndexAddress() public {
+        vm.expectRevert(Router__InvalidIndexAddress.selector);
+        router.getMinMintPreview(address(mockWbtc), 1_000e6, VALID_TOLERANCE);
+    }
     function testGetMinMintPreviewReturnsNonZeroForValidInputs() public view {
         uint256 usdcAmount = 1_000e6;
         uint256 minShares = router.getMinMintPreview(
@@ -161,6 +165,10 @@ contract RouterGettersTest is BaseTest {
     //  getMinRedeemPreview
     // =========================================================================
 
+    function testGetMinRedeemPreviewRevertsIfIsNotIndexAddress() public {
+        vm.expectRevert(Router__InvalidIndexAddress.selector);
+        router.getMinRedeemPreview(address(mockWbtc), 1_000e6, VALID_TOLERANCE);
+    }
     function testGetMinRedeemPreviewReturnsNonZeroForValidInputs() public view {
         // Use a portion of the initializer's shares.
         uint256 sharesAmount = initializedIndex.totalSupply() / 10;

@@ -24,11 +24,6 @@ contract Router is IRouter, ReentrancyGuard {
         _;
     }
 
-    modifier validAmount(uint256 _amount) {
-        _validAmount(_amount);
-        _;
-    }
-
     modifier validTolerance(uint256 _tolerance) {
         _validTolerance(_tolerance);
         _;
@@ -151,6 +146,7 @@ contract Router is IRouter, ReentrancyGuard {
         external
         view
         validTolerance(_maxTolerance)
+        validIndex(_indexAddress)
         returns (uint256 minUsdcAmount)
     {
         IIndex index = IIndex(_indexAddress);
@@ -174,7 +170,13 @@ contract Router is IRouter, ReentrancyGuard {
         address _indexAddress,
         uint256 _usdcAmount,
         uint256 _maxTolerance
-    ) external view validTolerance(_maxTolerance) returns (uint256 minSharesAmount) {
+    )
+        external
+        view
+        validTolerance(_maxTolerance)
+        validIndex(_indexAddress)
+        returns (uint256 minSharesAmount)
+    {
         IIndex index = IIndex(_indexAddress);
         minSharesAmount = index.minMintPreview(_usdcAmount, _maxTolerance);
     }
@@ -185,21 +187,30 @@ contract Router is IRouter, ReentrancyGuard {
         }
     }
 
-    function _validBalance(address _indexAddress, uint256 _amount, bool isBuying) internal view {
-        if(isBuying) {
+    function _validBalance(
+        address _indexAddress,
+        uint256 _amount,
+        bool isBuying
+    ) internal view {
+        if (isBuying) {
             uint256 userUsdcBalance = i_usdc.balanceOf(msg.sender);
             if (userUsdcBalance < _amount) {
-                revert Router__InsufficientUsdcBalance(userUsdcBalance, _amount);
+                revert Router__InsufficientUsdcBalance(
+                    userUsdcBalance,
+                    _amount
+                );
             }
         } else {
             IIndex index = IIndex(_indexAddress);
             uint256 userSharesBalance = index.balanceOf(msg.sender);
             if (userSharesBalance < _amount) {
-                revert Router__InsufficientSharesBalance(userSharesBalance, _amount);
+                revert Router__InsufficientSharesBalance(
+                    userSharesBalance,
+                    _amount
+                );
             }
         }
     }
-
 
     function _validIndex(address _indexAddress) internal view {
         if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {

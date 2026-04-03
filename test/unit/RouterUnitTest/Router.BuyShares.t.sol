@@ -13,9 +13,7 @@ import {console2} from "forge-std/console2.sol";
 import "../../../src/errors/RouterErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 
-
 contract RouterBuySharesTest is BaseTest {
-
     function setUp() public override {
         super.setUp();
         _setupMockRouterForWethWbtcIndex();
@@ -91,8 +89,32 @@ contract RouterBuySharesTest is BaseTest {
     }
 
     // =========================================================================
-    //  buyExactUsdcAmountOfShares 
+    //  buyExactUsdcAmountOfShares
     // =========================================================================
+
+    function testbuySharesRevertIfUSerHasNotEnoughUSDC() public {
+        uint256 usdcAmount = 1_000e6;
+
+        uint256 userBalance = mockUsdc.balanceOf(user3);
+        assertEq(userBalance, 0, "user3 should start with zero USDC");
+
+        vm.prank(user3); // user3 has no USDC
+        mockUsdc.approve(address(initializedIndex), usdcAmount);
+
+        vm.prank(user3);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Router__InsufficientUsdcBalance.selector,
+                userBalance,
+                usdcAmount
+            )
+        );
+        router.buyExactUsdcAmountOfShares(
+            address(initializedIndex),
+            usdcAmount,
+            VALID_TOLERANCE
+        );
+    }
 
     function testBuySharesRevertsIfIndexNotInitialized() public {
         uint256 usdcAmount = 1_000e6;
@@ -271,7 +293,11 @@ contract RouterBuySharesTest is BaseTest {
                 address userFromEvent = address(
                     uint160(uint256(logs[i].topics[1]))
                 );
-                assertEq(userFromEvent, user1, "event must log user1 as depositor");
+                assertEq(
+                    userFromEvent,
+                    user1,
+                    "event must log user1 as depositor"
+                );
 
                 (uint256 logUsdcIn, uint256 logShares, , ) = abi.decode(
                     logs[i].data,
@@ -298,8 +324,16 @@ contract RouterBuySharesTest is BaseTest {
         _buySharesForUser(user1, 2_000e6);
         _buySharesForUser(user2, 4_000e6);
 
-        assertGt(initializedIndex.balanceOf(user1), 0, "user1 must have shares");
-        assertGt(initializedIndex.balanceOf(user2), 0, "user2 must have shares");
+        assertGt(
+            initializedIndex.balanceOf(user1),
+            0,
+            "user1 must have shares"
+        );
+        assertGt(
+            initializedIndex.balanceOf(user2),
+            0,
+            "user2 must have shares"
+        );
         // user2 deposited 2× more USDC  should receive more shares.
         assertGt(
             initializedIndex.balanceOf(user2),
@@ -307,5 +341,4 @@ contract RouterBuySharesTest is BaseTest {
             "user2 should have more shares than user1"
         );
     }
-
 }
