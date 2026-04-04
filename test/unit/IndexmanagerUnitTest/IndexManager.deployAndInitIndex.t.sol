@@ -278,7 +278,19 @@ contract IndexManagerTest is BaseTest {
         indexManager.createIndex(validFeePercentage, wethAsset, linkAsset40);
     }
 
-    function testCreateIndexRevertIfAsset1PriceFeedIsNotAPriceFeed() public {
+    function testCreateIndexRevertIfAsset1PriceFeedIsAddress0() public {
+        IndexAsset memory linkAsset = IndexAsset({
+            asset: address(mockLink),
+            weightPercentage: weight40,
+            priceFeed: address(0) // invalid
+        });
+
+        vm.prank(deployer);
+        vm.expectRevert(IndexManager__InvalidPriceFeedAddress.selector);
+        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
+    }
+
+        function testCreateIndexRevertIfAsset1PriceFeedIsNotAPriceFeed() public {
         IndexAsset memory linkAsset = IndexAsset({
             asset: address(mockLink),
             weightPercentage: weight40,
@@ -302,9 +314,46 @@ contract IndexManagerTest is BaseTest {
         indexManager.createIndex(validFeePercentage, wethAsset, linkAsset40);
     }
 
+    function testCreateIndexRevertIfAsset0IsAddress0() public {
+        IndexAsset memory wethAsset = IndexAsset({
+            asset: address(0), // invalid
+            weightPercentage: weight60,
+            priceFeed: address(mockWethPriceFeed)
+        });
+
+        vm.prank(deployer);
+        vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
+        indexManager.createIndex(validFeePercentage, wethAsset, linkAsset40);
+    }
+
     function testCreateIndexRevertIfAsset1IsNotErc20() public {
         IndexAsset memory linkAsset = IndexAsset({
             asset: address(mockWethPriceFeed), // invalid
+            weightPercentage: weight40,
+            priceFeed: address(mockLinkPriceFeed)
+        });
+
+        vm.prank(deployer);
+        vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
+        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
+    }
+
+    function testCreateIndexRevertIfAsset1IsUsdc() public {
+        IndexAsset memory linkAsset = IndexAsset({
+            asset: address(mockUsdc), // invalid
+            weightPercentage: weight40,
+            priceFeed: address(mockLinkPriceFeed)
+        });
+
+        vm.prank(deployer);
+        vm.expectRevert(IndexManager__UsdcCannotBeIndexAsset.selector);
+        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
+    }
+
+
+    function testCreateIndexRevertIfAsset1IsAddress0() public {
+        IndexAsset memory linkAsset = IndexAsset({
+            asset: address(0), // invalid
             weightPercentage: weight40,
             priceFeed: address(mockLinkPriceFeed)
         });

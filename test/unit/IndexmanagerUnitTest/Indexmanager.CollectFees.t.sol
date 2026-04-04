@@ -329,31 +329,110 @@ contract IndexManagerTest is BaseTest {
             "Wrong reason in event"
         );
     }
-    // // =========================================================================
-    // //  collectFeesFromAllIndexes
-    // // =========================================================================
 
-    // function test_collectFeesFromAllIndexes_WithNoIndexes_DoesNotRevert()
-    //     public
-    // {
-    //     vm.prank(deployer);
-    //     indexManager.collectFeesFromAllIndexes();
-    // }
+    // =========================================================================
+    //  collectFeesFromAllIndexes
+    // =========================================================================
 
-    // function test_collectFeesFromAllIndexes_WithInitializedIndex_DoesNotRevert()
-    //     public
-    // {
-    //     _createAndInitializeDefaultIndex();
+    function testCollectFeesFromAllIndexesEmitEventForEveryIndex() public {
+        _generateFees(address(initializedIndex));
+        _generateFees(address(newIndexWbtcComp));
+        uint256 indexAmount = indexManager.getInitializedIndexes().length;
 
-    //     vm.prank(deployer);
-    //     indexManager.collectFeesFromAllIndexes();
-    // }
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.collectFeesFromAllIndexes();
 
-    // function test_collectFeesFromAllIndexes_RevertIf_CallerNotFeeCollector()
-    //     public
-    // {
-    //     vm.prank(user1);
-    //     vm.expectRevert();
-    //     indexManager.collectFeesFromAllIndexes();
-    // }
+        bytes32 expectedSuccessSig = FeesCollected.selector;
+        bytes32 expectedFailSig = FeesCollectionFailed.selector;
+        uint256 feesCollectedCount;
+        uint256 feesCollectionFailedCount;
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSuccessSig) {
+                feesCollectedCount++;
+            } else if (logs[i].topics[0] == expectedFailSig) {
+                feesCollectionFailedCount++;
+            }
+        }
+
+        // Both indexes are balanced, so both emit IndexRebalanceFailed with reason Index__RebalanceNotNeeded but the transaction does not revert
+        assertEq(
+            feesCollectedCount + feesCollectionFailedCount,
+            indexAmount,
+            "FeesCollected or FeesCollectionFailed event should be emitted for each index"
+        );
+    }
+
+    function testCollectFeesFromAllIndexesEmitEventsForFailureAndSuccess()
+        public
+    {
+        _generateFees(address(initializedIndex));
+        _generateFees(address(newIndexWbtcComp));
+        uint256 indexAmount = indexManager.getInitializedIndexes().length;
+
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.collectFeesFromAllIndexes();
+
+        bytes32 expectedSuccessSig = FeesCollected.selector;
+        bytes32 expectedFailSig = FeesCollectionFailed.selector;
+        uint256 feesCollectedCount;
+        uint256 feesCollectionFailedCount;
+        uint256 totalFeesEventCount;
+        address[] memory indexesFromEvent = new address[](indexAmount);
+        address[] memory collectorFromEvent = new address[](indexAmount);
+        uint256[] memory amountFromEvent = new uint256[](indexAmount);
+        bytes memory reasonFromEvent;
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == expectedSuccessSig) {
+                indexesFromEvent[totalFeesEventCount] = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                collectorFromEvent[totalFeesEventCount] = address(
+                    uint160(uint256(logs[i].topics[2]))
+                );
+                amountFromEvent[feesCollectedCount] = abi.decode(
+                    logs[i].data,
+                    (uint256)
+                );
+                feesCollectedCount++;
+                totalFeesEventCount++;
+            } else if (logs[i].topics[0] == expectedFailSig) {
+                indexesFromEvent[totalFeesEventCount] = address(
+                    uint160(uint256(logs[i].topics[1]))
+                );
+                collectorFromEvent[totalFeesEventCount] = address(
+                    uint160(uint256(logs[i].topics[2]))
+                );
+                reasonFromEvent = abi.decode(logs[i].data, (bytes));
+                feesCollectionFailedCount++;
+                totalFeesEventCount++;
+            }
+        }
+
+        assertEq(feesCollectedCount, 2);
+
+        assertEq(
+            bytes4(reasonFromEvent),
+            Index__NoFeesToCollect.selector,
+            "Wrong reason in event"
+        );
+        assertEq(
+            collectorFromEvent[0],
+            deployer,
+            "Wrong collector in event"
+        );
+        assertEq(
+            amountFromEvent[0] + amountFromEvent[1],
+            indexManager.getTotalFeesCollected(),
+            "Wrong amount in event"
+        );
+
+    }
 }
