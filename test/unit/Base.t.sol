@@ -44,11 +44,13 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     AssetTokenMock public mockWeth;
     AssetTokenMock public mockWbtc;
     AssetTokenMock public mockLink;
+    AssetTokenMock public mockComp;
 
     MockV3Aggregator public mockWethPriceFeed;
     MockV3Aggregator public mockUsdcPriceFeed;
     MockV3Aggregator public mockWbtcPriceFeed;
     MockV3Aggregator public mockLinkPriceFeed;
+    MockV3Aggregator public mockCompPriceFeed;
 
     UniversalRouterMock public mockUniRouter;
 
@@ -64,6 +66,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     uint256 public constant INITIAL_WETH_BALANCE = 1_000_000;
     uint256 public constant INITIAL_WBTC_BALANCE = 100_000;
     uint256 public constant INITIAL_LINK_BALANCE = 100_000_000;
+    uint256 public constant INITIAL_COMP_BALANCE = 10_000_000;
     uint256 public constant INITIAL_USDC_BALANCE = 10_000_000_000;
 
     //constants
@@ -79,6 +82,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     int256 public constant WETH_INITIAL_PRICE = 2000 * 10 ** 8; // $2000 with 8 decimals
     int256 public constant WBTC_INITIAL_PRICE = 30000 * 10 ** 8; // $30000 with 8 decimals
     int256 public constant LINK_INITIAL_PRICE = 7 * 10 ** 8; // $7 with 8 decimals
+    int256 public constant COMP_INITIAL_PRICE = 50 * 10 ** 8; // $50 with 8 decimals
     //int256 public constant USDC_INITIAL_PRICE = 9979999;
     int256 public constant USDC_INITIAL_PRICE = 1 * 10 ** 8; // $1 with 8 decimals, to be consistent with other price feeds
 
@@ -97,13 +101,14 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             deployer
         ) = deployerPeriphery.run();
 
-        (mockWeth, mockUsdc, mockWbtc, mockLink) = helperConfig
+        (mockWeth, mockUsdc, mockWbtc, mockLink, mockComp) = helperConfig
             .getAssetTokenMocks();
         (
             mockWethPriceFeed,
             mockUsdcPriceFeed,
             mockWbtcPriceFeed,
-            mockLinkPriceFeed
+            mockLinkPriceFeed,
+            mockCompPriceFeed
         ) = helperConfig.getPriceFeedMocks();
 
         mockUniRouter = helperConfig.getUniswapUniversalRouter();
@@ -131,6 +136,10 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             deployer,
             INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()
         );
+        mockComp.mint(
+            deployer,
+            INITIAL_COMP_BALANCE * 10 ** mockComp.decimals()
+        );
         mockUsdc.mint(
             deployer,
             INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()
@@ -149,6 +158,10 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             user1,
             (INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()) / 100
         );
+        mockComp.mint(
+            user1,
+            (INITIAL_COMP_BALANCE * 10 ** mockComp.decimals()) / 100
+        );
         mockUsdc.mint(
             user1,
             (INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()) / 100
@@ -166,6 +179,10 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             user2,
             (INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()) / 100
         );
+        mockComp.mint(
+            user2,
+            (INITIAL_COMP_BALANCE * 10 ** mockComp.decimals()) / 100
+        );
         mockUsdc.mint(
             user2,
             (INITIAL_USDC_BALANCE * 10 ** mockUsdc.decimals()) / 100
@@ -174,6 +191,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
         mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
         mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
+        mockCompPriceFeed.updateAnswer(COMP_INITIAL_PRICE);
 
         initializedIndex = deployAndInitNewIndex.run(
             helperConfig,
@@ -309,6 +327,78 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             )
         );
 
+        // ── USDC ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockComp),
+            mockUniRouter.computeRate(uint256(COMP_INITIAL_PRICE) / 1e2, 1e18) // COMP_INITIAL_PRICE has 8 dec, USDC has 6 dec → divide by 1e2
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e18, uint256(COMP_INITIAL_PRICE) / 1e2) // 1 COMP → 50 USDC (6 dec)
+        );
+
+        // ── WETH ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockComp),
+            mockUniRouter.computeRate(
+                1e18, // 1 WETH (18 dec)
+                (uint256(WETH_INITIAL_PRICE) * 1e18) /
+                    uint256(COMP_INITIAL_PRICE) // COMP amount (18 dec) per 1 WETH
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockWeth),
+            mockUniRouter.computeRate(
+                (uint256(WETH_INITIAL_PRICE) * 1e18) /
+                    uint256(COMP_INITIAL_PRICE), // COMP amount (18 dec) per 1 WETH
+                1e18 // 1 WETH (18 dec)
+            )
+        );
+
+        // ── WBTC ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockComp),
+            mockUniRouter.computeRate(
+                1e8, // 1 WBTC (8 dec)
+                (uint256(WBTC_INITIAL_PRICE) * 1e18) /
+                    uint256(COMP_INITIAL_PRICE) // COMP amount (18 dec) per 1 WBTC
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockWbtc),
+            mockUniRouter.computeRate(
+                (uint256(WBTC_INITIAL_PRICE) * 1e18) /
+                    uint256(COMP_INITIAL_PRICE), // COMP amount (18 dec) per 1 WBTC
+                1e8 // 1 WBTC (8 dec)
+            )
+        );
+
+        // ── LINK ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockComp),
+            mockUniRouter.computeRate(
+                1e18, // 1 LINK (18 dec)
+                (uint256(LINK_INITIAL_PRICE) * 1e18) /
+                    uint256(COMP_INITIAL_PRICE) // COMP amount (18 dec) per 1 LINK
+            )
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockLink),
+            mockUniRouter.computeRate(
+                (uint256(LINK_INITIAL_PRICE) * 1e18) /
+                    uint256(COMP_INITIAL_PRICE), // COMP amount (18 dec) per 1 LINK
+                1e18 // 1 LINK (18 dec)
+            )
+        );
+
         // Fund mock router with tokens for swaps
         deal(
             address(mockWeth),
@@ -324,6 +414,11 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             address(mockLink),
             address(mockUniRouter),
             INITIAL_LINK_BALANCE * 10 ** mockLink.decimals()
+        );
+        deal(
+            address(mockComp),
+            address(mockUniRouter),
+            INITIAL_COMP_BALANCE * 10 ** mockComp.decimals()
         );
         deal(
             address(mockUsdc),
@@ -342,6 +437,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         mockUsdcPriceFeed.updateAnswer(USDC_INITIAL_PRICE);
         mockLinkPriceFeed.updateAnswer(LINK_INITIAL_PRICE);
         mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE);
+        mockCompPriceFeed.updateAnswer(COMP_INITIAL_PRICE);
     }
 
     function _updatePriceFeedsWithNewPrices(
@@ -373,6 +469,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         uint256 wethPrice = uint256(mockWethPriceFeed.latestAnswer()); // 8 decimals
         uint256 wbtcPrice = uint256(mockWbtcPriceFeed.latestAnswer()); // 8 decimals
         uint256 linkPrice = uint256(mockLinkPriceFeed.latestAnswer()); // 8 decimals
+        uint256 compPrice = uint256(mockCompPriceFeed.latestAnswer()); // 8 decimals
 
         // ── USDC ↔ token pairs ──
         // Chainlink prices have 8 dec, USDC has 6 dec → divide by 1e2
@@ -460,6 +557,54 @@ abstract contract BaseTest is Test, ContractCodeConstants {
                 (wbtcPrice * 1e18) / linkPrice, // LINK amount (18 dec) per 1 WBTC
                 1e8 // 1 WBTC (8 dec)
             )
+        );
+
+        // ── USDC ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockUsdc),
+            address(mockComp),
+            mockUniRouter.computeRate(compPrice / 1e2, 1e18)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockUsdc),
+            mockUniRouter.computeRate(1e18, compPrice / 1e2)
+        );
+
+        // ── WETH ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockWeth),
+            address(mockComp),
+            mockUniRouter.computeRate(1e18, (wethPrice * 1e18) / compPrice)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockWeth),
+            mockUniRouter.computeRate((wethPrice * 1e18) / compPrice, 1e18)
+        );
+
+        // ── WBTC ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockWbtc),
+            address(mockComp),
+            mockUniRouter.computeRate(1e8, (wbtcPrice * 1e18) / compPrice)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockWbtc),
+            mockUniRouter.computeRate((wbtcPrice * 1e18) / compPrice, 1e8)
+        );
+
+        // ── LINK ↔ COMP ──
+        mockUniRouter.setExchangeRate(
+            address(mockLink),
+            address(mockComp),
+            mockUniRouter.computeRate(1e18, (linkPrice * 1e18) / compPrice)
+        );
+        mockUniRouter.setExchangeRate(
+            address(mockComp),
+            address(mockLink),
+            mockUniRouter.computeRate((linkPrice * 1e18) / compPrice, 1e18)
         );
     }
 }

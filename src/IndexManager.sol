@@ -134,6 +134,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         if (_assetA.asset == _assetB.asset) {
             revert IndexManager__InvalidIndexAssetsAddress();
         }
+        if (_assetA.asset == i_usdc || _assetB.asset == i_usdc) {
+            revert IndexManager__UsdcCannotBeIndexAsset();
+        }
         if (
             _feePercentage > MAX_FEES_PERCENTAGE ||
             _feePercentage < MIN_FEES_PERCENTAGE
@@ -397,7 +400,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
-            (bool success, bytes memory reasonBytes) = _executeSingleWeightUpdate(_indexAddresses[i]);
+            (
+                bool success,
+                bytes memory reasonBytes
+            ) = _executeSingleWeightUpdate(_indexAddresses[i]);
             if (!success) {
                 emit WeightUpdateFailed(_indexAddresses[i], reasonBytes);
             } else {

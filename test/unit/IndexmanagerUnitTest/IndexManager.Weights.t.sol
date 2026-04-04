@@ -23,7 +23,7 @@ import "../../../src/events/IndexEvents.sol";
 
 contract IndexManagerWeightsTest is BaseTest {
     IIndex public newIndexLinkWeth;
-    IIndex public newIndexUsdcWeth;
+    IIndex public newIndexWbtcComp;
 
     function setUp() public override {
         super.setUp();
@@ -48,16 +48,16 @@ contract IndexManagerWeightsTest is BaseTest {
         // asset1 = newIndex.getAsset1();
 
         RunParams memory secondIndexParams = RunParams({
-            assetA: AssetAvailable.WETH,
-            assetB: AssetAvailable.USDC,
+            assetA: AssetAvailable.WBTC,
+            assetB: AssetAvailable.COMP,
             weightA: 60 * WEIGHT_PRECISION,
             weightB: 40 * WEIGHT_PRECISION,
             feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
             initialAssetADeposit: 0,
-            initialAssetBDeposit: 1_000_000 * 10 ** 6 // 1,000,000 USDC
+            initialAssetBDeposit: 1_000_000 * 10 ** 18 // 1,000,000 COMP
         });
 
-        newIndexUsdcWeth = deployScript.run(
+        newIndexWbtcComp = deployScript.run(
             helperConfig,
             address(indexManager),
             secondIndexParams
@@ -352,7 +352,7 @@ contract IndexManagerWeightsTest is BaseTest {
         address[] memory indexes = new address[](3);
         indexes[0] = address(initializedIndex);
         indexes[1] = address(newIndexLinkWeth);
-        indexes[2] = address(newIndexUsdcWeth); // this will fail execution because it has no pending weight update
+        indexes[2] = address(newIndexWbtcComp); // this will fail execution because it has no pending weight update
 
         vm.prank(deployer);
         vm.recordLogs();
@@ -396,8 +396,8 @@ contract IndexManagerWeightsTest is BaseTest {
         );
         assertEq(
             indexesFromFailedEvents[0],
-            address(newIndexUsdcWeth),
-            "Failed event should be for newIndexUsdcWeth"
+            address(newIndexWbtcComp),
+            "Failed event should be for newIndexWbtcComp"
         );
     }
 

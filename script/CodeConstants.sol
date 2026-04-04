@@ -20,6 +20,8 @@ abstract contract CodeConstants {
         0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
     address public constant LINK_MAINNET =
         0x514910771AF9Ca656af840dff83E8264EcF986CA;
+    address public constant COMP_MAINNET =
+        0xc00e94Cb662C3520282E6f5717214004A7f26888;
 
     // Pricefeeds Asset/USD Contracts
     address public constant WETH_USD_PRICEFEED_MAINNET =
@@ -30,6 +32,8 @@ abstract contract CodeConstants {
         0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c;
     address public constant LINK_USD_PRICEFEED_MAINNET =
         0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c;
+    address public constant COMP_USD_PRICEFEED_MAINNET =
+        0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
 
     // Uniswap V4 addresses
     address public constant UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET =

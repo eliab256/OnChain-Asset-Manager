@@ -15,3 +15,4 @@ error IndexManager__InvalidPercentage();
 error IndexManager__RouterAddressNotSet();
 error IndexManager__SwapManagerAddressNotSet();
 error IndexManager__InvalidFeePercentage();
+error IndexManager__UsdcCannotBeIndexAsset();

@@ -22,9 +22,10 @@ struct InitStateCache {
 
 enum AssetAvailable {
     WETH,
-    USDC,
+    //USDC,
     WBTC,
-    LINK
+    LINK,
+    COMP
 }
 
 enum SwapType {

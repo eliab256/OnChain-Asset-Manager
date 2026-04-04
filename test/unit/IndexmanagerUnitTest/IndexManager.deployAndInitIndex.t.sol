@@ -63,7 +63,7 @@ contract IndexManagerTest is BaseTest {
     //  createIndex
     // =========================================================================
 
-    function testCreateIndexRegistersIndexInIsIndexMappingsAndArrays() public {
+    function testCreateIndexRegistersIndexInIsIndexMappingsAndArrays() public view{
         assertTrue(indexManager.isIndexAddress(address(nonInitializedIndex)));
         assertFalse(
             indexManager.checkIsIndexInitialized(address(nonInitializedIndex))
@@ -321,6 +321,16 @@ contract IndexManagerTest is BaseTest {
 
         vm.prank(deployer);
         vm.expectRevert(IndexManager__RouterAddressNotSet.selector);
+        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
+    }
+
+    function testCreateIndexRevertISwapManagerNotSet() public {
+        // Remove the swap manager so the guard triggers.
+        vm.prank(deployer);
+        indexManager.setSwapManagerAddress(address(0));
+
+        vm.prank(deployer);
+        vm.expectRevert(IndexManager__SwapManagerAddressNotSet.selector);
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
     }
 

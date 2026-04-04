@@ -75,13 +75,6 @@ contract HelperConfig is CodeConstants, Script {
     function getMainnetConfig() public returns (NetworkConfig memory) {
         address mainnetDeployer = vm.envAddress("MAINNET_DEPLOYER");
 
-        assetConfigByChainId[AssetAvailable.USDC][
-            MAINNET_CHAIN_ID
-        ] = AssetConfig({
-            token: USDC_MAINNET,
-            priceFeed: USDC_USD_PRICEFEED_MAINNET
-        });
-
         assetConfigByChainId[AssetAvailable.WETH][
             MAINNET_CHAIN_ID
         ] = AssetConfig({
@@ -101,6 +94,13 @@ contract HelperConfig is CodeConstants, Script {
         ] = AssetConfig({
             token: LINK_MAINNET,
             priceFeed: LINK_USD_PRICEFEED_MAINNET
+        });
+
+        assetConfigByChainId[AssetAvailable.COMP][
+            MAINNET_CHAIN_ID
+        ] = AssetConfig({
+            token: COMP_MAINNET,
+            priceFeed: COMP_USD_PRICEFEED_MAINNET
         });
         return
             NetworkConfig({
@@ -134,6 +134,7 @@ contract HelperConfig is CodeConstants, Script {
             "LINK",
             18
         );
+        AssetTokenMock mockComp = new AssetTokenMock("Compound", "COMP", 18);
 
         MockV3Aggregator mockWethPriceFeed = new MockV3Aggregator(
             PRICE_FEED_DECIMALS,
@@ -151,13 +152,10 @@ contract HelperConfig is CodeConstants, Script {
             PRICE_FEED_DECIMALS,
             int256(7 * 10 ** PRICE_FEED_DECIMALS)
         );
-
-        assetConfigByChainId[AssetAvailable.USDC][
-            ANVIL_CHAIN_ID
-        ] = AssetConfig({
-            token: address(mockUsdc),
-            priceFeed: address(mockUsdcPriceFeed)
-        });
+        MockV3Aggregator mockCompPriceFeed = new MockV3Aggregator(
+            PRICE_FEED_DECIMALS,
+            int256(50 * 10 ** PRICE_FEED_DECIMALS)
+        );
 
         assetConfigByChainId[AssetAvailable.WETH][
             ANVIL_CHAIN_ID
@@ -178,6 +176,13 @@ contract HelperConfig is CodeConstants, Script {
         ] = AssetConfig({
             token: address(mockLink),
             priceFeed: address(mockLinkPriceFeed)
+        });
+
+        assetConfigByChainId[AssetAvailable.COMP][
+            ANVIL_CHAIN_ID
+        ] = AssetConfig({
+            token: address(mockComp),
+            priceFeed: address(mockCompPriceFeed)
         });
 
         UniversalRouterMock mockUniRouter = new UniversalRouterMock();
@@ -294,14 +299,17 @@ contract HelperConfig is CodeConstants, Script {
     function getAssetTokenMocks()
         public
         view
-        returns (AssetTokenMock, MockUSDC, AssetTokenMock, AssetTokenMock)
+        returns (
+            AssetTokenMock,
+            MockUSDC,
+            AssetTokenMock,
+            AssetTokenMock,
+            AssetTokenMock
+        )
     {
         if (block.chainid != ANVIL_CHAIN_ID) {
             revert HelperConfig__GetRealContractsOnMainnet();
         }
-        AssetConfig memory usdcConfig = getActiveAssetConfig(
-            AssetAvailable.USDC
-        );
         AssetConfig memory wethConfig = getActiveAssetConfig(
             AssetAvailable.WETH
         );
@@ -311,12 +319,16 @@ contract HelperConfig is CodeConstants, Script {
         AssetConfig memory linkConfig = getActiveAssetConfig(
             AssetAvailable.LINK
         );
+        AssetConfig memory compConfig = getActiveAssetConfig(
+            AssetAvailable.COMP
+        );
 
         return (
             AssetTokenMock(wethConfig.token),
-            MockUSDC(usdcConfig.token),
+            MockUSDC(activeNetworkConfig.usdcAddress),
             AssetTokenMock(wbtcConfig.token),
-            AssetTokenMock(linkConfig.token)
+            AssetTokenMock(linkConfig.token),
+            AssetTokenMock(compConfig.token)
         );
     }
 
@@ -327,15 +339,13 @@ contract HelperConfig is CodeConstants, Script {
             MockV3Aggregator,
             MockV3Aggregator,
             MockV3Aggregator,
+            MockV3Aggregator,
             MockV3Aggregator
         )
     {
         if (block.chainid != ANVIL_CHAIN_ID) {
             revert HelperConfig__GetRealContractsOnMainnet();
         }
-        AssetConfig memory usdcConfig = getActiveAssetConfig(
-            AssetAvailable.USDC
-        );
         AssetConfig memory wethConfig = getActiveAssetConfig(
             AssetAvailable.WETH
         );
@@ -345,12 +355,16 @@ contract HelperConfig is CodeConstants, Script {
         AssetConfig memory linkConfig = getActiveAssetConfig(
             AssetAvailable.LINK
         );
+        AssetConfig memory compConfig = getActiveAssetConfig(
+            AssetAvailable.COMP
+        );
 
         return (
             MockV3Aggregator(wethConfig.priceFeed),
-            MockV3Aggregator(usdcConfig.priceFeed),
+            MockV3Aggregator(activeNetworkConfig.usdcPriceFeedAddress),
             MockV3Aggregator(wbtcConfig.priceFeed),
-            MockV3Aggregator(linkConfig.priceFeed)
+            MockV3Aggregator(linkConfig.priceFeed),
+            MockV3Aggregator(compConfig.priceFeed)
         );
     }
 

@@ -80,9 +80,9 @@ contract HelperConfigTest is Test, CodeConstants {
         AssetConfig memory link = anvilHelperConfig.getActiveAssetConfig(
             AssetAvailable.LINK
         );
-        AssetConfig memory usdc = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.USDC
-        );
+        // AssetConfig memory usdc = anvilHelperConfig.getActiveAssetConfig(
+        //     AssetAvailable.USDC
+        // );
 
         assertNotEq(
             weth.token,
@@ -115,12 +115,12 @@ contract HelperConfigTest is Test, CodeConstants {
             "LINK feed must not be mainnet address"
         );
         assertNotEq(
-            usdc.token,
+            config.usdcAddress,
             USDC_MAINNET,
             "USDC token must not be mainnet address"
         );
         assertNotEq(
-            usdc.priceFeed,
+            config.usdcPriceFeedAddress,
             USDC_USD_PRICEFEED_MAINNET,
             "USDC feed must not be mainnet address"
         );
@@ -157,9 +157,6 @@ contract HelperConfigTest is Test, CodeConstants {
         AssetConfig memory link = mainnetHelperConfig.getActiveAssetConfig(
             AssetAvailable.LINK
         );
-        AssetConfig memory usdc = mainnetHelperConfig.getActiveAssetConfig(
-            AssetAvailable.USDC
-        );
 
         assertEq(weth.token, WETH_MAINNET, "WETH token must be mainnet");
         assertEq(
@@ -179,9 +176,13 @@ contract HelperConfigTest is Test, CodeConstants {
             LINK_USD_PRICEFEED_MAINNET,
             "LINK feed must be mainnet"
         );
-        assertEq(usdc.token, USDC_MAINNET, "USDC token must be mainnet");
         assertEq(
-            usdc.priceFeed,
+            config.usdcAddress,
+            USDC_MAINNET,
+            "USDC token must be mainnet"
+        );
+        assertEq(
+            config.usdcPriceFeedAddress,
             USDC_USD_PRICEFEED_MAINNET,
             "USDC feed must be mainnet"
         );
@@ -491,13 +492,16 @@ contract HelperConfigTest is Test, CodeConstants {
     }
 
     function testGetAssetTokenMocksRevertIfNotAnvil() public onMainnetFork {
-        vm.expectRevert(HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector);
+        vm.expectRevert(
+            HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector
+        );
         mainnetHelperConfig.getAssetTokenMocks();
     }
 
-
     function testGetPriceFeedMocksRevertIfNotAnvil() public onMainnetFork {
-        vm.expectRevert(HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector);
+        vm.expectRevert(
+            HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector
+        );
         mainnetHelperConfig.getPriceFeedMocks();
     }
 }
