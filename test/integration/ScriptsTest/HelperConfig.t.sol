@@ -13,6 +13,12 @@ import {AssetAvailable, SwapRoute, PoolVersion} from "../../../src/types.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
+import {MockUSDC} from "../../mocks/USDCMock.sol";
+import {UniversalRouterMock} from "../../mocks/UniversalRouterMock.sol";
+import {
+    MockV3Aggregator
+} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 
 contract HelperConfigTest is Test, CodeConstants {
     HelperConfig public anvilHelperConfig;
@@ -503,5 +509,188 @@ contract HelperConfigTest is Test, CodeConstants {
             HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector
         );
         mainnetHelperConfig.getPriceFeedMocks();
+    }
+
+    // ──────────────────────────────────────────────
+    //  getConfigByChainId
+    // ──────────────────────────────────────────────
+
+    function testGetConfigByChainIdReturnsAnvilConfig() public onAnvilFork {
+        NetworkConfig memory config = anvilHelperConfig.getConfigByChainId(
+            ANVIL_CHAIN_ID
+        );
+        assertEq(
+            config.deployerAccount,
+            ANVIL_DEPLOYER,
+            "Deployer must be Anvil default"
+        );
+        assertNotEq(
+            config.usdcAddress,
+            address(0),
+            "USDC address must not be zero"
+        );
+    }
+
+    function testGetConfigByChainIdReturnsMainnetConfig() public onMainnetFork {
+        NetworkConfig memory config = mainnetHelperConfig.getConfigByChainId(
+            MAINNET_CHAIN_ID
+        );
+        assertEq(
+            config.usdcAddress,
+            USDC_MAINNET,
+            "USDC must be mainnet address"
+        );
+        assertEq(
+            config.uniswapUniversalRouter,
+            UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
+            "Router must be mainnet"
+        );
+    }
+
+    function testGetConfigByChainIdRevertsOnUnsupportedChain()
+        public
+        onAnvilFork
+    {
+        vm.expectRevert(HelperConfig.HelperConfig__InvalidChainId.selector);
+        anvilHelperConfig.getConfigByChainId(999);
+    }
+
+    // ──────────────────────────────────────────────
+    //  getAssetTokenMocks (success path)
+    // ──────────────────────────────────────────────
+
+    function testGetAssetTokenMocksReturnsValidMocks() public onAnvilFork {
+        (
+            AssetTokenMock weth,
+            MockUSDC usdc,
+            AssetTokenMock wbtc,
+            AssetTokenMock link,
+            AssetTokenMock comp
+        ) = anvilHelperConfig.getAssetTokenMocks();
+
+        assertNotEq(address(weth), address(0), "WETH mock must not be zero");
+        assertNotEq(address(usdc), address(0), "USDC mock must not be zero");
+        assertNotEq(address(wbtc), address(0), "WBTC mock must not be zero");
+        assertNotEq(address(link), address(0), "LINK mock must not be zero");
+        assertNotEq(address(comp), address(0), "COMP mock must not be zero");
+
+        // Verify symbols
+        assertEq(weth.symbol(), "WETH", "WETH symbol mismatch");
+        assertEq(usdc.symbol(), "USDC", "USDC symbol mismatch");
+        assertEq(wbtc.symbol(), "WBTC", "WBTC symbol mismatch");
+        assertEq(link.symbol(), "LINK", "LINK symbol mismatch");
+        assertEq(comp.symbol(), "COMP", "COMP symbol mismatch");
+
+        // Verify decimals
+        assertEq(weth.decimals(), 18, "WETH decimals mismatch");
+        assertEq(usdc.decimals(), 6, "USDC decimals mismatch");
+        assertEq(wbtc.decimals(), 8, "WBTC decimals mismatch");
+        assertEq(link.decimals(), 18, "LINK decimals mismatch");
+        assertEq(comp.decimals(), 18, "COMP decimals mismatch");
+    }
+
+    // ──────────────────────────────────────────────
+    //  getPriceFeedMocks (success path)
+    // ──────────────────────────────────────────────
+
+    function testGetPriceFeedMocksReturnsValidMocks() public onAnvilFork {
+        (
+            MockV3Aggregator wethFeed,
+            MockV3Aggregator usdcFeed,
+            MockV3Aggregator wbtcFeed,
+            MockV3Aggregator linkFeed,
+            MockV3Aggregator compFeed
+        ) = anvilHelperConfig.getPriceFeedMocks();
+
+        assertNotEq(
+            address(wethFeed),
+            address(0),
+            "WETH feed must not be zero"
+        );
+        assertNotEq(
+            address(usdcFeed),
+            address(0),
+            "USDC feed must not be zero"
+        );
+        assertNotEq(
+            address(wbtcFeed),
+            address(0),
+            "WBTC feed must not be zero"
+        );
+        assertNotEq(
+            address(linkFeed),
+            address(0),
+            "LINK feed must not be zero"
+        );
+        assertNotEq(
+            address(compFeed),
+            address(0),
+            "COMP feed must not be zero"
+        );
+
+        // Verify price feeds return reasonable answers
+        assertTrue(wethFeed.latestAnswer() > 0, "WETH price must be positive");
+        assertTrue(usdcFeed.latestAnswer() > 0, "USDC price must be positive");
+        assertTrue(wbtcFeed.latestAnswer() > 0, "WBTC price must be positive");
+        assertTrue(linkFeed.latestAnswer() > 0, "LINK price must be positive");
+        assertTrue(compFeed.latestAnswer() > 0, "COMP price must be positive");
+    }
+
+    // ──────────────────────────────────────────────
+    //  getUniswapUniversalRouter
+    // ──────────────────────────────────────────────
+
+    function testGetUniswapUniversalRouterOnAnvil() public onAnvilFork {
+        UniversalRouterMock router = anvilHelperConfig
+            .getUniswapUniversalRouter();
+        assertNotEq(
+            address(router),
+            address(0),
+            "Router must not be zero address"
+        );
+        // Verify it matches the network config
+        NetworkConfig memory config = anvilHelperConfig
+            .getActiveNetworkConfig();
+        assertEq(
+            address(router),
+            config.uniswapUniversalRouter,
+            "Router must match network config"
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    //  Mainnet COMP asset config
+    // ──────────────────────────────────────────────
+
+    function testGetActiveAssetConfigCompOnMainnet() public onMainnetFork {
+        AssetConfig memory comp = mainnetHelperConfig.getActiveAssetConfig(
+            AssetAvailable.COMP
+        );
+        assertEq(comp.token, COMP_MAINNET, "COMP token must be mainnet");
+        assertEq(
+            comp.priceFeed,
+            COMP_USD_PRICEFEED_MAINNET,
+            "COMP feed must be mainnet"
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    //  Anvil COMP asset config
+    // ──────────────────────────────────────────────
+
+    function testGetActiveAssetConfigCompOnAnvil() public onAnvilFork {
+        AssetConfig memory comp = anvilHelperConfig.getActiveAssetConfig(
+            AssetAvailable.COMP
+        );
+        assertNotEq(
+            comp.token,
+            address(0),
+            "COMP token must not be zero on Anvil"
+        );
+        assertNotEq(
+            comp.priceFeed,
+            address(0),
+            "COMP feed must not be zero on Anvil"
+        );
     }
 }
