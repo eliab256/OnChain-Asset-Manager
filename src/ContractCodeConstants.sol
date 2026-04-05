@@ -9,6 +9,12 @@ abstract contract ContractCodeConstants {
     uint256 public constant MAX_DELAY = 1 hours;
 
     /**
+     * @dev The maximum delay for USDC price feed updates, in seconds.
+     * @dev USDC pricefeed can be updated less frequently than the assets in the index, so we allow a longer delay for it.
+     */
+    uint256 public constant MAX_USDC_DELAY = 25 hours;
+
+    /**
      * @dev The standard number of decimals for tokens.
      * @dev This is used for normalizing token amounts and prices to a common decimal standard.
      */

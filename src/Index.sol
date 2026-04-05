@@ -251,7 +251,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         ) = _initFunctionValues();
 
         // 2. Fees (work in std decimals throughout).
-        uint256 netUsdcAmountStdDecimlas;
+        uint256 netUsdcAmountStdDecimals;
         {
             // 2.1 Calculate fees on token decimals avoid future rounding error
             uint128 feeAmount;
@@ -259,12 +259,18 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             (feeAmount, netUsdcAmount) = _calculateFees(_usdcAmountIn);
             s_totalFees += feeAmount;
 
-            // 2.2 Normalize netUsdcAmount to std decimlas for internal calculations.
-            netUsdcAmountStdDecimlas = _convertToDecimalStandard(
+            // 2.2 Normalize netUsdcAmount to std decimals for internal calculations.
+            netUsdcAmountStdDecimals = _convertToDecimalStandard(
                 netUsdcAmount,
                 i_decimalsUsdc
             );
         }
+
+        // 2.3 Convert net USDC amount to its real USD value using the USDC price feed.
+        uint256 netDepositUsdValue = _usdcToUsd(
+            netUsdcAmountStdDecimals,
+            initState.priceUsdc
+        );
 
         // 3. Swaps.
         // asset*ReceivedStd are in the 18-decimal standard (returned by _swapUsdcForAssets).
@@ -280,25 +286,35 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 initState.totalAssetUsdValue
             );
 
-            // 3.2 Calculate usd amount to swap for each underlyin token
+            // 3.2 Calculate USD amount to allocate to each underlying token
             (
-                uint256 usdcAmount0ToSwap,
-                uint256 usdcAmount1ToSwap
+                uint256 usdAmount0ToAllocate,
+                uint256 usdAmount1ToAllocate
             ) = UnderlyingMath.calculateDepositAllocationInUsd(
                     initState.totalAssetUsdValue,
-                    netUsdcAmountStdDecimlas,
+                    netDepositUsdValue,
                     targetWeight0,
                     targetWeight1,
                     effectiveWeight0
                 );
 
-            // 3.3 Swap USDC and receive Token0 and Token1 amount in std decimals
+            // 3.3 Convert USD allocation amounts back to USDC amounts for swaps
+            uint256 usdcAmount0ToSwap = _usdToUsdc(
+                usdAmount0ToAllocate,
+                initState.priceUsdc
+            );
+            uint256 usdcAmount1ToSwap = _usdToUsdc(
+                usdAmount1ToAllocate,
+                initState.priceUsdc
+            );
+
+            // 3.4 Swap USDC and receive Token0 and Token1 amount in std decimals
             (asset0ReceivedStd, asset1ReceivedStd) = _swapUsdcForAssets(
                 usdcAmount0ToSwap,
                 usdcAmount1ToSwap
             );
 
-            // 3.4 Calculate the USD value of the amounts received to perform the tolerance check later.
+            // 3.5 Calculate the USD value of the amounts received to perform the tolerance check later.
             asset0ReceivedUsdValue = UnderlyingMath
                 .calculateUSDValueOfTokenAmountStdDecimals(
                     asset0ReceivedStd,
@@ -315,7 +331,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
 
         // 4. Tolerance check.
         uint256 sharesToMint = _calculateShareToMintAndValidateTolerance(
-            netUsdcAmountStdDecimlas,
+            netDepositUsdValue,
             _maxTolerance,
             initState.totalAssetUsdValue,
             asset0ReceivedUsdValue,
@@ -414,17 +430,23 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 i_asset1.balanceOf(address(this))).toUint128();
         }
 
-        // 4. Fees.
+        // 4. Fees (applied on USDC amounts, not USD).
         (uint128 feeAmount, uint256 netUsdcAmount) = _calculateFees(
             usdcReceived
         );
 
         // 5. Tolerance check.
+        //    sharesBurnUsdValue is in USD. Convert expected USD → expected USDC
+        //    using the USDC price, then compare with actual USDC received.
         {
-            (, uint256 netExpectedUsdcAmount) = _calculateFees(
-                sharesBurnUsdValue
+            uint256 expectedUsdcBeforeFees = _usdToUsdc(
+                sharesBurnUsdValue,
+                initState.priceUsdc
             );
-            uint256 minNetAmountAcceptable = netExpectedUsdcAmount
+            (, uint256 netExpectedUsdc) = _calculateFees(
+                expectedUsdcBeforeFees
+            );
+            uint256 minNetAmountAcceptable = netExpectedUsdc
                 .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
 
             if (netUsdcAmount < minNetAmountAcceptable)
@@ -466,10 +488,24 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         );
         (, uint256 netUsdcAmount) = _calculateFees(usdcAmountInNormalized);
 
-        uint256 minimumUsdAmount = netUsdcAmount
-            .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
+        // Convert net USDC amount to real USD value using the price feed.
+        (
+            ,
+            ,
+            uint256 priceUsdc,
+            ,
+            ,
+            ,
+            ,
+            uint256 totalAssetUsdValue
+        ) = _initFunctionValues();
+        uint256 netUsdValue = _usdcToUsd(netUsdcAmount, priceUsdc);
 
-        (, , , , , , , uint256 totalAssetUsdValue) = _initFunctionValues();
+        uint256 minimumUsdAmount = netUsdValue.calculateNetAmountFromTolerance(
+            _maxTolerance,
+            MAX_PERCENTAGE
+        );
+
         minimumSharesToMint = _mintPreview(
             minimumUsdAmount,
             totalAssetUsdValue
@@ -483,11 +519,25 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         uint256 _sharesAmountIn,
         uint256 _maxTolerance
     ) public view isInitialized returns (uint256 minUsdcToReceive) {
-        (, , uint256 totalAssetUsdValue) = getAssetsUsdValue();
-        uint256 usdcAmountBeforeFees = _redeemPreview(
+        (
+            ,
+            ,
+            uint256 priceUsdc,
+            ,
+            ,
+            ,
+            ,
+            uint256 totalAssetUsdValue
+        ) = _initFunctionValues();
+
+        // _redeemPreview returns the USD value of the shares being redeemed.
+        uint256 sharesUsdValue = _redeemPreview(
             _sharesAmountIn,
             totalAssetUsdValue
         );
+
+        // Convert USD value → USDC amount, then apply fees.
+        uint256 usdcAmountBeforeFees = _usdToUsdc(sharesUsdValue, priceUsdc);
         (, uint256 netUsdcAmount) = _calculateFees(usdcAmountBeforeFees);
 
         uint256 minUsdcEighteenDec = netUsdcAmount
@@ -892,7 +942,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
      * @dev Swaps the underlying assets back to USDC.
      * @param _asset0UsdToSwap USD value of asset0 to sell, in std decimals.
      * @param _asset1UsdToSwap USD value of asset1 to sell, in std decimals.
-     * @return usdcReceived Received USDC in std decimals.
+     * @return usdcReceived Received USDC amount in std decimals (NOT USD value).
      */
     function _swapAssetsForUsdc(
         uint256 _asset0UsdToSwap,
@@ -1127,6 +1177,36 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         }
     }
 
+    /**
+     * @dev Converts a USDC amount (18-decimal std) to its real USD value
+     *      using the USDC/USD Chainlink price feed.
+     *      usdValue = (usdcAmountStd * priceUsdc) / 1e18
+     * @param _usdcAmountStd USDC amount in 18-decimal standard.
+     * @param _priceUsdc     USDC/USD price in 18-decimal standard.
+     * @return usdValue      The real USD value in 18-decimal standard.
+     */
+    function _usdcToUsd(
+        uint256 _usdcAmountStd,
+        uint256 _priceUsdc
+    ) internal pure returns (uint256 usdValue) {
+        usdValue = (_usdcAmountStd * _priceUsdc) / (10 ** DECIMALS_STANDARD);
+    }
+
+    /**
+     * @dev Converts a USD value (18-decimal std) to the equivalent USDC amount
+     *      using the USDC/USD Chainlink price feed.
+     *      usdcAmount = (usdValue * 1e18) / priceUsdc
+     * @param _usdValue  USD value in 18-decimal standard.
+     * @param _priceUsdc USDC/USD price in 18-decimal standard.
+     * @return usdcAmountStd The USDC amount in 18-decimal standard.
+     */
+    function _usdToUsdc(
+        uint256 _usdValue,
+        uint256 _priceUsdc
+    ) internal pure returns (uint256 usdcAmountStd) {
+        usdcAmountStd = (_usdValue * (10 ** DECIMALS_STANDARD)) / _priceUsdc;
+    }
+
     function _isInitialized() internal view {
         if (!s_initialized) revert Index__NotInitialized();
     }
@@ -1173,9 +1253,13 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
 
         if (answer <= 0) revert Index__PriceFeedNotAvailable();
         if (answeredInRound < roundId) revert Index__PriceFeedRoundStale();
-        if (block.timestamp - updatedAt > MAX_DELAY)
-            revert Index__PriceIsStale();
-
+        if (_asset == address(i_usdc)) {
+            if (block.timestamp - updatedAt > MAX_USDC_DELAY)
+                revert Index__PriceIsStale();
+        } else {
+            if (block.timestamp - updatedAt > MAX_DELAY)
+                revert Index__PriceIsStale();
+        }
         return _convertToDecimalStandard(uint256(answer), feed.decimals());
     }
 

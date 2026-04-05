@@ -123,7 +123,10 @@ contract IntegrationBase is Test {
             initialAssetBDeposit: 0
         });
 
-        wbtcWethIndex = indexDeployer.run(helperConfig, address(indexManager), wbtcWethParams);
+        wbtcWethIndex = indexDeployer.run(
+            helperConfig,
+            address(indexManager),
+            wbtcWethParams
+        );
     }
-
 }
