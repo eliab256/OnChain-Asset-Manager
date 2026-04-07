@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {IntegrationBase} from "./IntegrationBase.t.sol";
+import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {Index} from "../../../src/Index.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -11,41 +12,10 @@ import {
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/errors/RouterErrors.sol";
 
-/**
- * @title  IntegrationUniRouter
- * @notice End-to-end tests that verify the Index contracts can execute real
- *         token swaps through the Uniswap V4 Universal Router on mainnet.
- *
- * @dev    Tests cover:
- *           • mintShares  — USDC → WBTC + WETH via Uniswap
- *           • redeem      — WBTC + WETH → USDC via Uniswap
- *           • rebalance   — WBTC ↔ WETH via Uniswap (weight drift induced by
- *                           a mocked Chainlink answer to avoid forking a specific
- *                           block where the drift naturally occurred)
- *           • multi-user  — independent mint/redeem isolation
- *
- *         The WBTC/WETH index is initialised in IntegrationBase with:
- *           asset0 = WBTC (60 % weight)   asset1 = WETH (40 % weight)
- *           seed   = 10 WBTC              fee    = 2 %
- */
-contract IntegrationUniRouter is IntegrationBase {
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Constants
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// @dev  1 000 USDC (6-decimal token)
+contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     uint256 constant USDC_AMOUNT = 1_000e6;
 
-    /**
-     * @dev  Tolerance passed to the Router (valid range: 1 – 9 999).
-     *       5 000 / 1 000 000 = 0.5 % maximum slippage, comfortable for
-     *       mainnet V4 pools under normal market conditions.
-     */
-    uint256 constant TOLERANCE = 5_000;
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Setup
-    // ─────────────────────────────────────────────────────────────────────────
+    uint256 constant TOLERANCE = 5000; //5 * PERCENTAGE_FEE_PRECISION; // 5%
 
     function setUp() public override {
         super.setUp();
@@ -373,8 +343,8 @@ contract IntegrationUniRouter is IntegrationBase {
     // =========================================================================
 
     /**
-     * @dev  Doubles the Chainlink WBTC answer via vm.mockCall so the effective
-     *       weight of WBTC jumps from ~60 % to ~75 %, exceeding the
+     * @dev  Increases the Chainlink WBTC answer by 20 % via vm.mockCall so the
+     *       effective weight of WBTC rises from ~60 % to ~64 %, exceeding the
      *       REBALANCE_THRESHOLD of 3 %.  The rebalance then sells WBTC for WETH
      *       through the real Universal Router.
      */
@@ -556,9 +526,12 @@ contract IntegrationUniRouter is IntegrationBase {
     // =========================================================================
 
     /**
-     * @dev  Doubles the WBTC/USD answer returned by the Chainlink feed so that
-     *       WBTC's effective weight rises from ~60 % to ~75 %, exceeding the
-     *       REBALANCE_THRESHOLD of 3 % and triggering a rebalance.
+     * @dev  Increases the WBTC/USD answer by 20 % via vm.mockCall so the effective
+     *       weight of WBTC rises from ~60 % to ~64 %, exceeding the
+     *       REBALANCE_THRESHOLD of 3 %.  A moderate bump (instead of 2×) avoids
+     *       tripping the MAX_SLIPPAGE_TOLERANCE check, because the Chainlink
+     *       price used for USD accounting diverges only slightly from the real
+     *       pool price.
      *
      *       All other fields (roundId, startedAt, updatedAt, answeredInRound)
      *       are kept identical to the live values so staleness checks pass.
@@ -579,7 +552,7 @@ contract IntegrationUniRouter is IntegrationBase {
             ),
             abi.encode(
                 roundId,
-                answer * 2,
+                (answer * 120) / 100,
                 startedAt,
                 updatedAt,
                 answeredInRound

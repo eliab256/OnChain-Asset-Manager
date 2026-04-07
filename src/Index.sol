@@ -146,26 +146,30 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
     /**
      * @dev Initialises the index by depositing the seed amount of asset0.
      *      The proportional amount of asset1 is derived from the target weights.
-     *
-     * @param _depositor         Address that provides the seed tokens.
+     * @param _depositor Address that provides the seed tokens.
      * @param _underlyingAmount0 Amount of asset0 in **token decimals**.
      */
     function initialize(
         address _depositor,
         uint256 _underlyingAmount0
     ) external onlyRole(INDEX_MANAGER_ROLE) {
+        // 1. Check if index is already initialized, if not proceed with initialization
         if (s_initialized) revert Index__AlreadyInitialized();
+
+        // 2. Check if underlyingAmount0 is greater than 0 to avoid division by zero and meaningless initialization
         if (_underlyingAmount0 == 0) revert Index__InvalidUnderlyingAmount();
 
+        // 3. Transfer Asset0 amount from the depositor to the index contract
         i_asset0.safeTransferFrom(
             _depositor,
             address(this),
             _underlyingAmount0
         );
 
+        // 4. Get target weights to calculate underlying amount of asset1
         (uint128 weight0, uint128 weight1) = getAssetsWeights();
 
-        // ── Convert asset0 input to std decimals for USD maths ───────────────
+        // 5. Derive the required amount of asset1 from the provided amount of asset0 and the target weights.
         uint256 underlyingAmount0Std = _convertToDecimalStandard(
             _underlyingAmount0,
             i_decimals0
@@ -192,26 +196,29 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 DECIMALS_STANDARD
             );
 
-        // Convert asset1 std amount → token decimals for the actual transfer
+        // 6. Convert asset1 std amount to token decimals for the actual transfer
         uint256 underlyingAmount1TokenDec = _convertFromStdDecimalsToTokenDecimals(
                 underlyingAmount1Std,
                 i_decimals1
             );
 
+        // 7. Transfer the derived amount of asset1 from the depositor to the index contract
         i_asset1.safeTransferFrom(
             _depositor,
             address(this),
             underlyingAmount1TokenDec
         );
 
-        // ── Store reserves in token decimals ─────────────────────────────────
+        // 8. Update reserves in token decimals and set index as initialized
         s_asset0Reserve = _underlyingAmount0.toUint128();
         s_asset1Reserve = underlyingAmount1TokenDec.toUint128();
         s_initialized = true;
 
+        // 9. Calculate initialShersAmount and send to the depositor.
         uint256 initialShares = underlying0UsdValue + underlying1UsdValue;
         _mint(_depositor, initialShares);
 
+        // 10. Emit event with initialization details
         emit IndexInitialized(
             _underlyingAmount0,
             underlyingAmount1TokenDec,
@@ -335,7 +342,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             asset0ReceivedUsdValue,
             asset1ReceivedUsdValue
         );
-        
+
         if (sharesToMint == 0) revert Index__ToleranceExceeded();
 
         // 5. Mint.
@@ -401,12 +408,16 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         uint128 asset0AmountRedeemedTokenDec;
         uint128 asset1AmountRedeemedTokenDec;
         {
+            //3.1. Get target weights
             (uint128 weight0, uint128 weight1) = getAssetsWeights();
+
+            //3.2. Get Effective weights at the moment
             (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
                 initState.asset0UsdValue,
                 initState.totalAssetUsdValue
             );
 
+            //3.3. Calculate the amount of assets to swap in usdc
             (uint256 asset0UsdToSwap, uint256 asset1UsdToSwap) = UnderlyingMath
                 .calculateWithdrawUnderlyingAmountsInUsd(
                     initState.totalAssetUsdValue,
@@ -416,13 +427,14 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                     effectiveWeight0
                 );
 
-            // Snapshot balances before the swap to measure exact amounts consumed.
+            //3.4. Snapshot balances before the swap to measure exact amounts consumed.
             uint256 asset0Before = i_asset0.balanceOf(address(this));
             uint256 asset1Before = i_asset1.balanceOf(address(this));
 
+            //3.5. Swap Assets to Usdc
             usdcReceived = _swapAssetsForUsdc(asset0UsdToSwap, asset1UsdToSwap);
 
-            // Delta = tokens sent to the router, already in token decimals.
+            //3.6 Delta = tokens sent to the router, already in token decimals.
             asset0AmountRedeemedTokenDec = (asset0Before -
                 i_asset0.balanceOf(address(this))).toUint128();
             asset1AmountRedeemedTokenDec = (asset1Before -
@@ -435,9 +447,8 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         );
 
         // 5. Tolerance check.
-        //    sharesBurnUsdValue is in USD. Convert expected USD → expected USDC
-        //    using the USDC price, then compare with actual USDC received.
         {
+            //5.1. Get expected usdc amount
             uint256 expectedUsdcBeforeFees = _usdToUsdc(
                 sharesBurnUsdValue,
                 initState.priceUsdc
@@ -445,9 +456,12 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             (, uint256 netExpectedUsdc) = _calculateFees(
                 expectedUsdcBeforeFees
             );
+
+            //5.2. Get minimum acceptable to validate the splippage
             uint256 minNetAmountAcceptable = netExpectedUsdc
                 .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
 
+            //5.3. Revert if slippage is higher than tolerance
             if (netUsdcAmount < minNetAmountAcceptable)
                 revert Index__ToleranceExceeded();
         }
@@ -463,6 +477,8 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             i_decimalsUsdc
         );
         i_usdc.safeTransfer(_from, netUsdcAmountTokenDec);
+
+        //8. Burn shares and emit the event
         _burn(_from, _sharesAmount);
 
         emit SharesBurned(
@@ -476,18 +492,23 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
 
     /**
      * @dev Preview: minimum shares to mint for a given USDC input and tolerance.
+     * @param _usdcAmountIn USDC amount in token decimals.
+     * @param _maxTolerance Maximum tolerated deviation.
      */
     function minMintPreview(
         uint256 _usdcAmountIn,
         uint256 _maxTolerance
     ) public view isInitialized returns (uint256 minimumSharesToMint) {
+        // 1. Convert USDC amount from token decimals to std decimals for internal calculations
         uint256 usdcAmountInNormalized = _convertToDecimalStandard(
             _usdcAmountIn,
             i_decimalsUsdc
         );
+
+        // 2. apply fees in std decimals to avoid rounding issues.
         (, uint256 netUsdcAmount) = _calculateFees(usdcAmountInNormalized);
 
-        // Convert net USDC amount to real USD value using the price feed.
+        // 3. Cache initial state.
         (
             ,
             ,
@@ -498,13 +519,16 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             ,
             uint256 totalAssetUsdValue
         ) = _initFunctionValues();
+
+        // 4. Convert net USDC amount to real USD value using the price feed.
         uint256 netUsdValue = _usdcToUsd(netUsdcAmount, priceUsdc);
 
+        // 5. Calculate the minimum shares to mint based on the net USD value after fees and the tolerance.
         uint256 minimumUsdAmount = netUsdValue.calculateNetAmountFromTolerance(
             _maxTolerance,
             MAX_PERCENTAGE
         );
-
+        // 6. Returns the minimum shares to mint corresponding to the minimum USD amount to accept based on the current total asset USD value and total shares supply.
         minimumSharesToMint = _mintPreview(
             minimumUsdAmount,
             totalAssetUsdValue
@@ -513,11 +537,15 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
 
     /**
      * @dev Preview: minimum USDC to receive for a given shares amount and tolerance.
+     * @param _sharesAmountIn Shares amount to redeem.
+     * @param _maxTolerance Maximum tolerated deviation.
+     * @return minUsdcToReceive Minimum USDC amount in token decimals the user should receive to accept the redemption.
      */
     function minRedeemPreview(
         uint256 _sharesAmountIn,
         uint256 _maxTolerance
     ) public view isInitialized returns (uint256 minUsdcToReceive) {
+        // 1. Cache initial state.
         (
             ,
             ,
@@ -529,19 +557,21 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             uint256 totalAssetUsdValue
         ) = _initFunctionValues();
 
-        // _redeemPreview returns the USD value of the shares being redeemed.
+        // 2. _redeemPreview returns the USD value of the shares being redeemed.
         uint256 sharesUsdValue = _redeemPreview(
             _sharesAmountIn,
             totalAssetUsdValue
         );
 
-        // Convert USD value → USDC amount, then apply fees.
+        // 3. Convert USD value to USDC amount, then apply fees.
         uint256 usdcAmountBeforeFees = _usdToUsdc(sharesUsdValue, priceUsdc);
         (, uint256 netUsdcAmount) = _calculateFees(usdcAmountBeforeFees);
 
+        // 4. Calculate the minimum USDC amount to receive based on the net USDC amount after fees and the tolerance.
         uint256 minUsdcEighteenDec = netUsdcAmount
             .calculateNetAmountFromTolerance(_maxTolerance, MAX_PERCENTAGE);
 
+        //5. Convert minimum USDC amount from std decimals to token decimals for the actual value to return.
         minUsdcToReceive = _convertFromStdDecimalsToTokenDecimals(
             minUsdcEighteenDec,
             i_decimalsUsdc
@@ -560,22 +590,27 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         onlyRole(INDEX_MANAGER_ROLE)
         returns (uint256 implementationTimestamp)
     {
+        // 1. Check if there is already a pending weight update
         if (
             s_weightUpdateExecutableAt != 0 &&
             block.timestamp < s_weightUpdateExecutableAt
         ) revert Index__PendingWeightUpdate();
 
+        // 2. Check if the new proposed weight is valid (not equal to current, not above max or below min).
         bool invalidWeight0 = _newWeightAsset0 >= MAX_WEIGHT ||
             _newWeightAsset0 <= MIN_WEIGHT ||
             _newWeightAsset0 == s_weight0;
         if (invalidWeight0) revert Index__InvalidWeight();
 
+        // 3. Update implementationTimestamp with new timestamp for when the weight update can be executed,
         implementationTimestamp = block.timestamp + WEIGHT_UPDATE_DELAY;
 
+        // 4. Store the proposed weights in storage.
         s_pendingWeight0 = _newWeightAsset0;
         s_pendingWeight1 = MAX_PERCENTAGE - _newWeightAsset0;
         s_weightUpdateExecutableAt = implementationTimestamp;
 
+        // 5. Emit event with the proposed weights and the timestamp execution
         emit WeightsUpdateProposed(
             s_pendingWeight0,
             s_pendingWeight1,
@@ -588,40 +623,58 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
      * @notice Rebalance is attempted even if the update fails to execute to avoid getting stuck with pending weights that cannot be implemented.
      */
     function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
+        // 1. Check if there is a pending weight update ready to be executed, if not revert.
         if (
             s_weightUpdateExecutableAt == 0 ||
             block.timestamp < s_weightUpdateExecutableAt
         ) revert Index__NotPendingWeightUpdate();
 
+        // 2. Update target weights with the pending weights
         s_weight0 = s_pendingWeight0;
         s_weight1 = s_pendingWeight1;
 
+        // 3. Reset pending weights and timestamp in storage.
         s_pendingWeight0 = 0;
         s_pendingWeight1 = 0;
         s_weightUpdateExecutableAt = 0;
 
+        // 4. Trigger rebalance and emit event with failure or success rebalance.
         (bool rebalanceSuccess, bytes memory reasonData) = _tryRebalanceIndex();
         if (!rebalanceSuccess) emit WeightUpdateRebalanceFailed(reasonData);
 
+        // 5. Emit event with the new weights and the timestamp of the execution
         emit IndexWeightsUpdated(s_weight0, s_weight1, block.timestamp);
     }
 
     /**
      * @notice Transfers accrued protocol fees to the collector.
+     * @dev Only callable by an index manager. Reverts if there are no fees to collect.
+     * @param _collector Address that will receive the collected fees.
+     * @return feesCollected Amount of fees collected in token decimals.
      */
     function collectFees(
         address _collector
     ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
+        // 1. Cache totalFees in a local variable to avoid multiple storage reads
         uint128 cacheTotalFees = s_totalFees;
+
+        // 2. Check if there are fees to collect, if not revert.
         if (cacheTotalFees == 0) revert Index__NoFeesToCollect();
+
+        // 3. Reset totalFees in storage before the transfer to prevent reentrancy issues.
         feesCollected = cacheTotalFees;
         s_totalFees = 0;
+
+        // 4. Transfer the collected fees in USDC to the collector.
         i_usdc.safeTransfer(_collector, feesCollected);
+
+        // 5. Emit event with the amount of fees collected and the collector address.
         emit FeesCollected(_collector, feesCollected);
     }
 
     /**
      * @notice Rebalances the index to match its target weights.
+     * @dev Only callable by an index manager. Reverts if there are no fees to collect.
      */
     function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) {
         // 1. Cache initial state.
@@ -665,44 +718,47 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         //    when writing to storage.
         uint128 updatedReserv0;
         uint128 updatedReserv1;
+        {
+            if (amount0ToSwapStd > 0) {
+                // Swap asset0 → asset1; result is in std decimals.
+                uint128 token1ReceivedStd = _swapAssetForAsset(
+                    address(i_asset0),
+                    amount0ToSwapStd
+                );
 
-        if (amount0ToSwapStd > 0) {
-            // Swap asset0 → asset1; result is in std decimals.
-            uint128 token1ReceivedStd = _swapAssetForAsset(
-                address(i_asset0),
-                amount0ToSwapStd
-            );
+                // Convert amounts to token decimals for storage.
+                uint256 amount0TokenDec = _convertFromStdDecimalsToTokenDecimals(
+                        amount0ToSwapStd,
+                        i_decimals0
+                    );
+                uint256 token1TokenDec = _convertFromStdDecimalsToTokenDecimals(
+                    token1ReceivedStd,
+                    i_decimals1
+                );
 
-            // Convert amounts to token decimals for storage.
-            uint256 amount0TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                amount0ToSwapStd,
-                i_decimals0
-            );
-            uint256 token1TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                token1ReceivedStd,
-                i_decimals1
-            );
+                updatedReserv0 = (s_asset0Reserve -
+                    amount0TokenDec.toUint128());
+                updatedReserv1 = (s_asset1Reserve + token1TokenDec.toUint128());
+            } else {
+                // Swap asset1 → asset0; result is in std decimals.
+                uint128 token0ReceivedStd = _swapAssetForAsset(
+                    address(i_asset1),
+                    amount1ToSwapStd
+                );
 
-            updatedReserv0 = (s_asset0Reserve - amount0TokenDec.toUint128());
-            updatedReserv1 = (s_asset1Reserve + token1TokenDec.toUint128());
-        } else {
-            // Swap asset1 → asset0; result is in std decimals.
-            uint128 token0ReceivedStd = _swapAssetForAsset(
-                address(i_asset1),
-                amount1ToSwapStd
-            );
+                uint256 amount1TokenDec = _convertFromStdDecimalsToTokenDecimals(
+                        amount1ToSwapStd,
+                        i_decimals1
+                    );
+                uint256 token0TokenDec = _convertFromStdDecimalsToTokenDecimals(
+                    token0ReceivedStd,
+                    i_decimals0
+                );
 
-            uint256 amount1TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                amount1ToSwapStd,
-                i_decimals1
-            );
-            uint256 token0TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                token0ReceivedStd,
-                i_decimals0
-            );
-
-            updatedReserv1 = (s_asset1Reserve - amount1TokenDec.toUint128());
-            updatedReserv0 = (s_asset0Reserve + token0TokenDec.toUint128());
+                updatedReserv1 = (s_asset1Reserve -
+                    amount1TokenDec.toUint128());
+                updatedReserv0 = (s_asset0Reserve + token0TokenDec.toUint128());
+            }
         }
 
         // 5. Persist reserves (token decimals).
@@ -721,6 +777,8 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             )
         ) revert Index__RebalanceSlippageTooHigh();
 
+
+        // 7. Emit event with rebalance details.
         emit IndexRebalanced(
             prevReserv0,
             prevReserv1,

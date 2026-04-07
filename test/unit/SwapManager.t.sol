@@ -1009,15 +1009,11 @@ contract SwapManagerTest is BaseTest {
             SwapType.ASSET0_ASSET1
         );
 
-        // All three routes are V4 but must have different pool keys (different token pairs)
-        address r0c0 = Currency.unwrap(r0.poolKey.currency0);
-        address r1c0 = Currency.unwrap(r1.poolKey.currency0);
-        address r01c0 = Currency.unwrap(r01.poolKey.currency0);
-
-        // At least two of the three pool keys must differ
-        bool atLeastOneDifferent = (r0c0 != r1c0) ||
-            (r0c0 != r01c0) ||
-            (r1c0 != r01c0);
+        // All three routes are V3 — compare v3Path to verify distinctness
+        bool atLeastOneDifferent = (keccak256(r0.v3Path) !=
+            keccak256(r1.v3Path)) ||
+            (keccak256(r0.v3Path) != keccak256(r01.v3Path)) ||
+            (keccak256(r1.v3Path) != keccak256(r01.v3Path));
         assertTrue(
             atLeastOneDifferent,
             "the three routes must have different pool keys"
@@ -1041,10 +1037,10 @@ contract SwapManagerTest is BaseTest {
             SwapType.ASSET0_ASSET1
         );
 
-        // USDC routes are V3, asset ↔ asset route is V4
+        // All three default routes are V3 (V4 pools lack mainnet liquidity)
         assertEq(uint8(r0.version), uint8(PoolVersion.V3));
         assertEq(uint8(r1.version), uint8(PoolVersion.V3));
-        assertEq(uint8(r01.version), uint8(PoolVersion.V4));
+        assertEq(uint8(r01.version), uint8(PoolVersion.V3));
     }
 
     // =========================================================================

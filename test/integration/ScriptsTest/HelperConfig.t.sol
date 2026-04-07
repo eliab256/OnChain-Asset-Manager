@@ -403,8 +403,8 @@ contract HelperConfigTest is Test, CodeConstants {
         );
         assertEq(
             uint8(routeAsset0Asset1.version),
-            uint8(PoolVersion.V4),
-            "Route0-1 must be V4"
+            uint8(PoolVersion.V3),
+            "Route0-1 must be V3"
         );
     }
 
@@ -501,11 +501,18 @@ contract HelperConfigTest is Test, CodeConstants {
         (, , SwapRoute memory routeAsset0Asset1) = anvilHelperConfig
             .getDefaultSwapRoutes(asset0, asset1);
 
-        address c0 = Currency.unwrap(routeAsset0Asset1.poolKey.currency0);
-        address c1 = Currency.unwrap(routeAsset0Asset1.poolKey.currency1);
+        // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
+        bytes memory path = routeAsset0Asset1.v3Path;
+        assertGe(path.length, 43, "V3 path must be at least 43 bytes");
 
-        assertEq(c0, asset0, "currency0 must be asset0 (already sorted)");
-        assertEq(c1, asset1, "currency1 must be asset1 (already sorted)");
+        address pathToken0;
+        address pathToken1;
+        assembly {
+            pathToken0 := shr(96, mload(add(path, 32)))
+            pathToken1 := shr(96, mload(add(path, 55)))
+        }
+        assertEq(pathToken0, asset0, "first token in path must be asset0");
+        assertEq(pathToken1, asset1, "second token in path must be asset1");
     }
 
     function testGetAssetTokenMocksRevertIfNotAnvil() public onMainnetFork {

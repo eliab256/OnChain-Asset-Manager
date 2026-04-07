@@ -260,8 +260,9 @@ contract HelperConfig is CodeConstants, Script {
             _asset1,
             activeNetworkConfig.usdcAddress
         );
-        // Asset ↔ asset route uses V4.
-        routeAsset0Asset1 = _buildDefaultV4Route(_asset0, _asset1);
+        // Asset ↔ asset route also uses V3 (V4 pools currently lack
+        // sufficient liquidity on mainnet).
+        routeAsset0Asset1 = _buildDefaultV3Route(_asset0, _asset1);
     }
 
     /**
