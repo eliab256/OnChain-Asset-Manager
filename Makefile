@@ -30,19 +30,10 @@ INDEX_MANAGER_UNIT_TEST_PATH ?= test/unit/IndexmanagerUnitTest/*.sol
 INTEGRATION_TEST_PATH 		?= test/integration/**/*.sol
 FUZZ_TEST_PATH 			?= test/fuzz/**/*.sol
 
-# ─── Coverage ────────────────────────────────────────────────────────────────
-# Usage: make coverage-contract CONTRACT=src/IndexManager.sol
-CONTRACT 				?=
-
-# Usage: make coverage  (shows coverage only for src/ and script/ files)
-coverage:
-	@forge coverage --report summary 2>&1 | grep -E '(File|^\| src/|^\| script/|^Total)'
-
-
-
 # ─── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract coverage
-.PHONY: create-index build test unittest indextest indexmanagertest integrationtest fuzztest test-index test-index-manager test-router test-swap-manager test-base test-single coverage-contract coverage coverage-report
+.PHONY: build test unittest indextest indexmanagertest integrationtest fuzztest \
+        test-index test-indexmanager test-router test-swap-manager test-single \
+        test-manager coverage coverage-report create-index
 
 build:
 	forge build
@@ -62,9 +53,6 @@ indexmanagertest:
 integrationtest:
 	forge test --match-path '$(INTEGRATION_TEST_PATH)'
 
-fuzztest:
-	forge test --match-path '$(FUZZ_TEST_PATH)'
-
 test-index:
 	forge test --match-path test/unit/Index.t.sol
 
@@ -81,26 +69,18 @@ test-single:
 	forge test --match-test $(NAME) -vvvv
 
 # Test only IndexManager.t.sol
-.PHONY: test-manager
 test-manager:
 	@forge test --match-contract IndexManagerTest
 
 
-create-index:
-	forge create src/Index.sol:Index \
-		--rpc-url $(RPC_URL) \
-		--private-key $(PRIVATE_KEY) \
-		--constructor-args \
-			"$(INDEX_NAME)" \
-			"$(INDEX_SYMBOL)" \
-			$(ROUTER_ADDRESS) \
-			$(USDC_ADDRESS) \
-			"($(ASSET0_ADDRESS),$(WEIGHT0),$(ASSET0_PRICEFEED))" \
-			"($(ASSET1_ADDRESS),$(WEIGHT1),$(ASSET1_PRICEFEED))" \
-			$(FEE_PERCENTAGE)
 
-#// @audit-info fare post linkedin prendendo il phony
-# note: need makeFile externsion and lcov installed to run this target
+# ─── Coverage ────────────────────────────────────────────────────────────────
+
+# Usage: make coverage  (shows coverage only for src/ and script/ files)
+coverage:
+	@forge coverage --report summary 2>&1 | grep -E '(File|^\| src/|^\| script/|^Total)'
+
+# note: need Makefile extension and lcov installed to run this target
 coverage-report:
 	forge coverage --report lcov --no-match-coverage "test"
 	genhtml lcov.info --output-dir coverage && xdg-open coverage/index.html

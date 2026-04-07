@@ -37,7 +37,7 @@
           </tr>
           <tr>
             <td class="headerItem">Test Date:</td>
-            <td class="headerValue">2026-04-04 15:31:53</td>
+            <td class="headerValue">2026-04-07 19:14:16</td>
             <td></td>
             <td class="headerItem">Functions:</td>
             <td class="headerCovTableEntryHi">100.0&nbsp;%</td>
@@ -77,7 +77,7 @@
 <span id="L15"><span class="lineNum">      15</span>              :     HelperConfig public helperConfig;</span>
 <span id="L16"><span class="lineNum">      16</span>              :     SwapManager public swapManager;</span>
 <span id="L17"><span class="lineNum">      17</span>              : </span>
-<span id="L18"><span class="lineNum">      18</span> <span class="tlaGNC tlaBgGNC">         294 :     function run()</span></span>
+<span id="L18"><span class="lineNum">      18</span> <span class="tlaGNC tlaBgGNC">         171 :     function run()</span></span>
 <span id="L19"><span class="lineNum">      19</span>              :         external</span>
 <span id="L20"><span class="lineNum">      20</span>              :         returns (</span>
 <span id="L21"><span class="lineNum">      21</span>              :             IndexManager,</span>
@@ -87,58 +87,58 @@
 <span id="L25"><span class="lineNum">      25</span>              :             address deployer</span>
 <span id="L26"><span class="lineNum">      26</span>              :         )</span>
 <span id="L27"><span class="lineNum">      27</span>              :     {</span>
-<span id="L28"><span class="lineNum">      28</span> <span class="tlaGNC">         294 :         helperConfig = new HelperConfig();</span></span>
-<span id="L29"><span class="lineNum">      29</span> <span class="tlaGNC">         294 :         NetworkConfig memory config = helperConfig.getActiveNetworkConfig();</span></span>
+<span id="L28"><span class="lineNum">      28</span> <span class="tlaGNC">         171 :         helperConfig = new HelperConfig();</span></span>
+<span id="L29"><span class="lineNum">      29</span> <span class="tlaGNC">         171 :         NetworkConfig memory config = helperConfig.getActiveNetworkConfig();</span></span>
 <span id="L30"><span class="lineNum">      30</span>              : </span>
-<span id="L31"><span class="lineNum">      31</span> <span class="tlaGNC">         294 :         deployer = config.deployerAccount;</span></span>
+<span id="L31"><span class="lineNum">      31</span> <span class="tlaGNC">         171 :         deployer = config.deployerAccount;</span></span>
 <span id="L32"><span class="lineNum">      32</span>              : </span>
-<span id="L33"><span class="lineNum">      33</span> <span class="tlaGNC">         294 :         bool isAnvil = block.chainid == ANVIL_CHAIN_ID;</span></span>
+<span id="L33"><span class="lineNum">      33</span> <span class="tlaGNC">         171 :         bool isAnvil = block.chainid == ANVIL_CHAIN_ID;</span></span>
 <span id="L34"><span class="lineNum">      34</span>              : </span>
-<span id="L35"><span class="lineNum">      35</span> <span class="tlaGNC">         294 :         vm.startBroadcast(deployer);</span></span>
+<span id="L35"><span class="lineNum">      35</span> <span class="tlaGNC">         171 :         vm.startBroadcast(deployer);</span></span>
 <span id="L36"><span class="lineNum">      36</span>              : </span>
-<span id="L37"><span class="lineNum">      37</span> <span class="tlaGNC">         294 :         console.log(&quot;============== Contracts Deployment ==============&quot;);</span></span>
+<span id="L37"><span class="lineNum">      37</span> <span class="tlaGNC">         171 :         console.log(&quot;============== Contracts Deployment ==============&quot;);</span></span>
 <span id="L38"><span class="lineNum">      38</span>              :         // 1. Deploy IndexManager</span>
-<span id="L39"><span class="lineNum">      39</span> <span class="tlaGNC">         294 :         indexManager = new IndexManager(</span></span>
+<span id="L39"><span class="lineNum">      39</span> <span class="tlaGNC">         171 :         indexManager = new IndexManager(</span></span>
 <span id="L40"><span class="lineNum">      40</span>              :             config.usdcAddress,</span>
 <span id="L41"><span class="lineNum">      41</span>              :             config.usdcPriceFeedAddress,</span>
 <span id="L42"><span class="lineNum">      42</span>              :             config.uniswapUniversalRouter</span>
 <span id="L43"><span class="lineNum">      43</span>              :         );</span>
 <span id="L44"><span class="lineNum">      44</span>              : </span>
 <span id="L45"><span class="lineNum">      45</span>              :         // 2. Deploy Router with the address of the deployed IndexManager</span>
-<span id="L46"><span class="lineNum">      46</span> <span class="tlaGNC">         294 :         router = new Router(address(indexManager));</span></span>
+<span id="L46"><span class="lineNum">      46</span> <span class="tlaGNC">         171 :         router = new Router(address(indexManager));</span></span>
 <span id="L47"><span class="lineNum">      47</span>              : </span>
 <span id="L48"><span class="lineNum">      48</span>              :         // 3. Deploy SwapManager with the address of the deployed IndexManager</span>
-<span id="L49"><span class="lineNum">      49</span> <span class="tlaGNC">         294 :         swapManager = new SwapManager(address(indexManager));</span></span>
+<span id="L49"><span class="lineNum">      49</span> <span class="tlaGNC">         171 :         swapManager = new SwapManager(address(indexManager));</span></span>
 <span id="L50"><span class="lineNum">      50</span>              : </span>
 <span id="L51"><span class="lineNum">      51</span>              :         // 4. Set the Router address in the IndexManager</span>
-<span id="L52"><span class="lineNum">      52</span> <span class="tlaGNC">         294 :         indexManager.setRouterAddress(address(router));</span></span>
+<span id="L52"><span class="lineNum">      52</span> <span class="tlaGNC">         171 :         indexManager.setRouterAddress(address(router));</span></span>
 <span id="L53"><span class="lineNum">      53</span>              : </span>
 <span id="L54"><span class="lineNum">      54</span>              :         // 5. Set the SwapManager address in the IndexManager</span>
-<span id="L55"><span class="lineNum">      55</span> <span class="tlaGNC">         294 :         indexManager.setSwapManagerAddress(address(swapManager));</span></span>
+<span id="L55"><span class="lineNum">      55</span> <span class="tlaGNC">         171 :         indexManager.setSwapManagerAddress(address(swapManager));</span></span>
 <span id="L56"><span class="lineNum">      56</span>              : </span>
-<span id="L57"><span class="lineNum">      57</span> <span class="tlaGNC">         294 :         console.log(&quot;============== Deployment Summary ==============&quot;);</span></span>
+<span id="L57"><span class="lineNum">      57</span> <span class="tlaGNC">         171 :         console.log(&quot;============== Deployment Summary ==============&quot;);</span></span>
 <span id="L58"><span class="lineNum">      58</span>              :         </span>
-<span id="L59"><span class="lineNum">      59</span> <span class="tlaGNC">         294 :         if (!isAnvil) {</span></span>
-<span id="L60"><span class="lineNum">      60</span> <span class="tlaGNC">           2 :             console.log(&quot;Deployer Address:&quot;, deployer);</span></span>
-<span id="L61"><span class="lineNum">      61</span> <span class="tlaGNC">           2 :             console.log(&quot;IndexManager Address:&quot;, address(indexManager));</span></span>
-<span id="L62"><span class="lineNum">      62</span> <span class="tlaGNC">           2 :             console.log(&quot;SwapManager Address:&quot;, address(swapManager));</span></span>
-<span id="L63"><span class="lineNum">      63</span> <span class="tlaGNC">           2 :             console.log(&quot;Router Address:&quot;, address(router));</span></span>
-<span id="L64"><span class="lineNum">      64</span> <span class="tlaGNC">           2 :             console.log(</span></span>
+<span id="L59"><span class="lineNum">      59</span> <span class="tlaGNC">         171 :         if (!isAnvil) {</span></span>
+<span id="L60"><span class="lineNum">      60</span> <span class="tlaGNC">          42 :             console.log(&quot;Deployer Address:&quot;, deployer);</span></span>
+<span id="L61"><span class="lineNum">      61</span> <span class="tlaGNC">          42 :             console.log(&quot;IndexManager Address:&quot;, address(indexManager));</span></span>
+<span id="L62"><span class="lineNum">      62</span> <span class="tlaGNC">          42 :             console.log(&quot;SwapManager Address:&quot;, address(swapManager));</span></span>
+<span id="L63"><span class="lineNum">      63</span> <span class="tlaGNC">          42 :             console.log(&quot;Router Address:&quot;, address(router));</span></span>
+<span id="L64"><span class="lineNum">      64</span> <span class="tlaGNC">          42 :             console.log(</span></span>
 <span id="L65"><span class="lineNum">      65</span>              :                 &quot;Router sets IndexManager's router address to:&quot;,</span>
 <span id="L66"><span class="lineNum">      66</span>              :                 router.getIndexManager()</span>
 <span id="L67"><span class="lineNum">      67</span>              :             );</span>
-<span id="L68"><span class="lineNum">      68</span> <span class="tlaGNC">           2 :             console.log(</span></span>
+<span id="L68"><span class="lineNum">      68</span> <span class="tlaGNC">          42 :             console.log(</span></span>
 <span id="L69"><span class="lineNum">      69</span>              :                 &quot;IndexManager sets Router's address to:&quot;,</span>
 <span id="L70"><span class="lineNum">      70</span>              :                 indexManager.getRouterAddress()</span>
 <span id="L71"><span class="lineNum">      71</span>              :             );</span>
-<span id="L72"><span class="lineNum">      72</span> <span class="tlaGNC">           2 :             console.log(</span></span>
+<span id="L72"><span class="lineNum">      72</span> <span class="tlaGNC">          42 :             console.log(</span></span>
 <span id="L73"><span class="lineNum">      73</span>              :                 &quot;IndexManager sets SwapManager's address to:&quot;,</span>
 <span id="L74"><span class="lineNum">      74</span>              :                 indexManager.getSwapManagerAddress()</span>
 <span id="L75"><span class="lineNum">      75</span>              :             );</span>
 <span id="L76"><span class="lineNum">      76</span>              :         }</span>
 <span id="L77"><span class="lineNum">      77</span>              : </span>
-<span id="L78"><span class="lineNum">      78</span> <span class="tlaGNC">         294 :         vm.stopBroadcast();</span></span>
-<span id="L79"><span class="lineNum">      79</span> <span class="tlaGNC">         294 :         return (indexManager, router, helperConfig, swapManager, deployer);</span></span>
+<span id="L78"><span class="lineNum">      78</span> <span class="tlaGNC">         171 :         vm.stopBroadcast();</span></span>
+<span id="L79"><span class="lineNum">      79</span> <span class="tlaGNC">         171 :         return (indexManager, router, helperConfig, swapManager, deployer);</span></span>
 <span id="L80"><span class="lineNum">      80</span>              :     }</span>
 <span id="L81"><span class="lineNum">      81</span>              : }</span>
         </pre>
