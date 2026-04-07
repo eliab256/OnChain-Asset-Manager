@@ -30,12 +30,12 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 
 ### Core contracts
 
-| Contract | Responsibility |
-|---|---|
+| Contract           | Responsibility                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `IndexManager.sol` | Governance executor — creates and initialises indexes, orchestrates rebalancing, fee collection and weight updates |
-| `Index.sol` | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance |
-| `Router.sol` | UX entry point — validates user inputs, routes buy/sell calls to the correct index |
-| `SwapManager.sol` | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router |
+| `Index.sol`        | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance                          |
+| `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index                                 |
+| `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router                                   |
 
 ### Key design properties
 
@@ -223,11 +223,11 @@ Weight proposals are subject to `WEIGHT_UPDATE_DELAY` (2 days) before execution.
 
 Three distinct roles are enforced via OpenZeppelin `AccessControl`:
 
-| Role | Allowed operations |
-|---|---|
+| Role                 | Allowed operations                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
 | `ASSET_MANAGER_ROLE` | Create/initialise indexes, propose/execute weight updates, set router and swap manager addresses |
-| `REBALANCER_ROLE` | Trigger rebalancing on one or multiple indexes |
-| `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees |
+| `REBALANCER_ROLE`    | Trigger rebalancing on one or multiple indexes                                                   |
+| `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees                                                                   |
 
 Separating these roles means that in a real deployment the rebalancer could be a keeper bot while fee collection remains in the hands of a multisig.
 
@@ -244,6 +244,9 @@ Contributions are welcome and encouraged. This project was built as a learning e
 - **Performance fee** — implement a high-watermark performance fee on top of the existing protocol fee.
 - **Timelock governance** — replace the manual `WEIGHT_UPDATE_DELAY` with a proper on-chain Timelock or Governor contract.
 - **Additional test coverage** — fuzz tests and invariant tests for the math libraries and the rebalance logic.
+- **Gas optimization**: Further reduce transaction costs
+- **Access control refinement**: Role-based granular permissions
+- **Emergency pause mechanisms**: Circuit breakers for extreme market conditions
 
 ### How to contribute
 
@@ -265,10 +268,10 @@ This project is released under the [MIT License](LICENSE).
 
 ## 8. Contacts
 
-| Channel | Link |
-|---|---|
-| GitHub | [github.com/your-username](https://github.com/your-username) |
-| LinkedIn | [linkedin.com/in/your-profile](https://linkedin.com/in/your-profile) |
-| Email | your.email@example.com |
+| Channel  | Link                                                                 |
+| -------- | -------------------------------------------------------------------- |
+| GitHub   | [github.com/eliab256](https://github.com/eliab256)              |
+| LinkedIn | [linkedin.com/in/elia-bordoni](https://www.linkedin.com/in/elia-bordoni/) |
+| Email    | bordonielia96@gmail.com                                               |
 
 Feel free to open an issue on GitHub for bug reports, feature requests or questions.
