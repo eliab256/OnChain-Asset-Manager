@@ -104,11 +104,11 @@ contract IntegrationBase is Test {
             helperConfig.getActiveAssetConfig(AssetAvailable.COMP).priceFeed
         );
 
-        deal(address(wbtc), deployer, 100e6); // 100 WBTC
-        deal(address(weth), deployer, 100e18); // 100 WETH
+        deal(address(wbtc), deployer, 100e8); // 100 WBTC (8 decimals)
+        deal(address(weth), deployer, 500e18); // 500 WETH (18 decimals)
         deal(address(link), deployer, 100e18); // 100 LINK
         deal(address(comp), deployer, 100e18); // 100 COMP
-        deal(address(usdc), deployer, 100e6); // 100 USDC
+        deal(address(usdc), deployer, 100e6); // 100 USDC (6 decimals)
 
         // Deploy Wbtc/Weth index
         indexDeployer = new DeployAndInitNewIndex();
@@ -119,7 +119,7 @@ contract IntegrationBase is Test {
             weightA: 600000, // 60% weight for WBTC
             weightB: 400000, // 40% weight for WETH
             feePercentage: 20000, // 2% fee
-            initialAssetADeposit: 10e6, // 10 WBTC
+            initialAssetADeposit: 10e8, // 10 WBTC (8 decimals)
             initialAssetBDeposit: 0
         });
 

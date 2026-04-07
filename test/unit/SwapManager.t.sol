@@ -561,7 +561,10 @@ contract SwapManagerTest is BaseTest {
         assertEq(inputs.length, SINGLE_SWAP_COMMANDS_LENGTH);
     }
 
-    function testBuildSingleSwapParamsV4UsesCorrectCommandByte() public view {
+    function testBuildSingleSwapParamsV3UsesCorrectCommandByteForUsdcRoute()
+        public
+        view
+    {
         (bytes memory commands, , , ) = swapManager.buildSingleSwapParams(
             address(initializedIndex),
             SwapType.ASSET0_USDC,
@@ -569,7 +572,8 @@ contract SwapManagerTest is BaseTest {
             1e18
         );
 
-        assertEq(uint8(commands[0]), V4_SWAP_COMMAND);
+        // USDC ↔ asset routes use V3
+        assertEq(uint8(commands[0]), V3_SWAP_EXACT_IN_COMMAND);
     }
 
     function testBuildSingleSwapParamsV4ReturnsCorrectTokenIn() public view {
@@ -583,22 +587,11 @@ contract SwapManagerTest is BaseTest {
         assertEq(tokenIn, address(mockWeth));
     }
 
-    function testBuildSingleSwapParamsV4ZeroForOneReturnsCorrectTokenOut()
+    function testBuildSingleSwapParamsV3ReturnsCorrectTokenOutForUsdcRoute()
         public
         view
     {
-        // ASSET0_USDC route: pool between WETH and USDC
-        // tokenIn = WETH → zeroForOne depends on sorted order
-        SwapRoute memory route = swapManager.getRoute(
-            address(initializedIndex),
-            SwapType.ASSET0_USDC
-        );
-        address c0 = Currency.unwrap(route.poolKey.currency0);
-        address c1 = Currency.unwrap(route.poolKey.currency1);
-
-        // tokenIn = WETH, expected tokenOut = the other token (USDC)
-        address expectedTokenOut = (address(mockWeth) == c0) ? c1 : c0;
-
+        // ASSET0_USDC route is V3: tokenIn = WETH → tokenOut = USDC
         (, , , address tokenOut) = swapManager.buildSingleSwapParams(
             address(initializedIndex),
             SwapType.ASSET0_USDC,
@@ -606,8 +599,6 @@ contract SwapManagerTest is BaseTest {
             1e18
         );
 
-        assertEq(tokenOut, expectedTokenOut);
-        // The tokenOut must be USDC in this route
         assertEq(tokenOut, address(mockUsdc));
     }
 
@@ -866,7 +857,7 @@ contract SwapManagerTest is BaseTest {
         assertEq(inputs.length, DOUBLE_SWAP_COMMANDS_LENGTH);
     }
 
-    function testBuildDoubleSwapParamsCommandsAreConcatenationOfTwoV4Commands()
+    function testBuildDoubleSwapParamsCommandsAreConcatenationOfTwoV3Commands()
         public
         view
     {
@@ -880,9 +871,9 @@ contract SwapManagerTest is BaseTest {
             1e8
         );
 
-        // Both routes are V4, so both command bytes must be V4_SWAP_COMMAND
-        assertEq(uint8(commands[0]), V4_SWAP_COMMAND);
-        assertEq(uint8(commands[1]), V4_SWAP_COMMAND);
+        // Both USDC routes are V3
+        assertEq(uint8(commands[0]), V3_SWAP_EXACT_IN_COMMAND);
+        assertEq(uint8(commands[1]), V3_SWAP_EXACT_IN_COMMAND);
     }
 
     function testBuildDoubleSwapParamsMixedV4AndV3Commands() public {
@@ -959,25 +950,22 @@ contract SwapManagerTest is BaseTest {
     //  getRoute
     // =========================================================================
 
-    function testGetRouteReturnsCorrectV4RouteForRegisteredIndex() public view {
+    function testGetRouteReturnsCorrectV3RouteForRegisteredInitializedIndex()
+        public
+        view
+    {
         SwapRoute memory route = swapManager.getRoute(
             address(initializedIndex),
             SwapType.ASSET0_USDC
         );
 
-        assertEq(uint8(route.version), uint8(PoolVersion.V4));
-
-        // Pool key must contain the two sorted token addresses
-        address c0 = Currency.unwrap(route.poolKey.currency0);
-        address c1 = Currency.unwrap(route.poolKey.currency1);
-
-        bool containsWeth = (c0 == address(mockWeth)) ||
-            (c1 == address(mockWeth));
-        bool containsUsdc = (c0 == address(mockUsdc)) ||
-            (c1 == address(mockUsdc));
-
-        assertTrue(containsWeth, "pool key must contain WETH");
-        assertTrue(containsUsdc, "pool key must contain USDC");
+        // USDC ↔ asset routes now use V3
+        assertEq(uint8(route.version), uint8(PoolVersion.V3));
+        assertGe(
+            route.v3Path.length,
+            MIN_V3_PATH_LENGTH,
+            "v3Path must be at least 43 bytes"
+        );
     }
 
     function testGetRouteReturnsCorrectV3RouteForRegisteredIndex() public {
@@ -1053,9 +1041,9 @@ contract SwapManagerTest is BaseTest {
             SwapType.ASSET0_ASSET1
         );
 
-        // All must be V4 (registered by deployAndInitNewIndex in Base.setUp)
-        assertEq(uint8(r0.version), uint8(PoolVersion.V4));
-        assertEq(uint8(r1.version), uint8(PoolVersion.V4));
+        // USDC routes are V3, asset ↔ asset route is V4
+        assertEq(uint8(r0.version), uint8(PoolVersion.V3));
+        assertEq(uint8(r1.version), uint8(PoolVersion.V3));
         assertEq(uint8(r01.version), uint8(PoolVersion.V4));
     }
 
@@ -1063,11 +1051,11 @@ contract SwapManagerTest is BaseTest {
     //  Integration: buildSingleSwapParams matches getRoute data
     // =========================================================================
 
-    function testBuildSingleSwapParamsV4CommandBytesMatchExpectedEncoding()
+    function testBuildSingleSwapParamsV3CommandBytesMatchExpectedEncoding()
         public
         view
     {
-        // Verify that the returned commands can be decoded back to a V4 command byte
+        // Verify that the returned commands can be decoded back to a V3 command byte
         (bytes memory commands, bytes[] memory inputs, , ) = swapManager
             .buildSingleSwapParams(
                 address(initializedIndex),
@@ -1076,19 +1064,23 @@ contract SwapManagerTest is BaseTest {
                 1e18
             );
 
-        // Commands must be 1 byte = V4_SWAP_COMMAND
+        // Commands must be 1 byte = V3_SWAP_EXACT_IN_COMMAND
         assertEq(commands.length, SINGLE_SWAP_COMMANDS_LENGTH);
-        assertEq(uint8(commands[0]), V4_SWAP_COMMAND);
+        assertEq(uint8(commands[0]), V3_SWAP_EXACT_IN_COMMAND);
 
-        // Input must be abi.encode(bytes actions, bytes[] actionParams)
-        // We just verify it's decodable and non-trivially sized
+        // V3 input: abi.encode(recipient, amountIn, amountOutMin, path, payerIsUser)
         assertGt(inputs[0].length, 0);
-        (bytes memory actions, bytes[] memory actionParams) = abi.decode(
-            inputs[0],
-            (bytes, bytes[])
-        );
-        assertEq(actionParams.length, 3); // SWAP_EXACT_IN_SINGLE + SETTLE_ALL + TAKE_ALL
-        assertEq(actions.length, 3);
+        (
+            address recipient,
+            uint256 amountIn,
+            ,
+            bytes memory path,
+            bool payerIsUser
+        ) = abi.decode(inputs[0], (address, uint256, uint256, bytes, bool));
+        assertNotEq(recipient, address(0), "recipient must not be zero");
+        assertEq(amountIn, 1e18, "amountIn must match");
+        assertGe(path.length, MIN_V3_PATH_LENGTH, "path too short");
+        assertFalse(payerIsUser, "payerIsUser must be false");
     }
 
     function testBuildSingleSwapParamsV3InputEncodesExpectedFields() public {

@@ -21,12 +21,10 @@ import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
 import {ContractCodeConstants} from "./ContractCodeConstants.sol";
-import {console} from "forge-std/console.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {
     IUniversalRouter
 } from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
-import {console2} from "forge-std/console2.sol";
 
 /**
  * @title Index
@@ -337,6 +335,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             asset0ReceivedUsdValue,
             asset1ReceivedUsdValue
         );
+        
         if (sharesToMint == 0) revert Index__ToleranceExceeded();
 
         // 5. Mint.
@@ -763,7 +762,6 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             asset0ReceivedUsdValue + asset1ReceivedUsdValue,
             _totalAssetUsdValueBefore
         );
-
         if (sharesToMint < minimumSharesToMint) sharesToMint = 0;
     }
 
@@ -908,8 +906,10 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
             asset1BalanceBefore = i_asset1.balanceOf(address(this));
         }
 
-        // @audit-info: implement swap slippage protection
-        i_usdc.forceApprove(
+        // Transfer input tokens to the Universal Router before executing.
+        // The V4 SETTLE / V3 commands use payerIsUser=false, so the router
+        // pays from its own balance — no Permit2 needed.
+        i_usdc.safeTransfer(
             address(i_universalRouter),
             usdcAmount0TokenDec + usdcAmount1TokenDec
         );
@@ -988,7 +988,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 address(i_asset0),
                 asset0AmountTokenDec.toUint128()
             );
-            i_asset0.forceApprove(
+            i_asset0.safeTransfer(
                 address(i_universalRouter),
                 asset0AmountTokenDec
             );
@@ -999,7 +999,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 address(i_asset1),
                 asset1AmountTokenDec.toUint128()
             );
-            i_asset1.forceApprove(
+            i_asset1.safeTransfer(
                 address(i_universalRouter),
                 asset1AmountTokenDec
             );
@@ -1013,11 +1013,11 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 asset0AmountTokenDec.toUint128(),
                 asset1AmountTokenDec.toUint128()
             );
-            i_asset0.forceApprove(
+            i_asset0.safeTransfer(
                 address(i_universalRouter),
                 asset0AmountTokenDec
             );
-            i_asset1.forceApprove(
+            i_asset1.safeTransfer(
                 address(i_universalRouter),
                 asset1AmountTokenDec
             );
@@ -1081,7 +1081,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
                 address(this)
             );
 
-            IERC20(tokenToSwap).forceApprove(
+            IERC20(tokenToSwap).safeTransfer(
                 address(i_universalRouter),
                 amountToSwapTokenDec
             );

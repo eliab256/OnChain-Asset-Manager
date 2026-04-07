@@ -35,6 +35,7 @@ contract HelperConfig is CodeConstants, Script {
 
     uint24 public constant DEFAULT_V4_POOL_FEE = 3000;
     int24 public constant DEFAULT_V4_TICK_SPACING = 60;
+    uint24 public constant DEFAULT_V3_POOL_FEE = 3000;
 
     NetworkConfig public activeNetworkConfig;
 
@@ -250,14 +251,16 @@ contract HelperConfig is CodeConstants, Script {
             SwapRoute memory routeAsset0Asset1
         )
     {
-        routeAsset0Usdc = _buildDefaultV4Route(
+        // USDC ↔ asset routes use V3 (deep, established liquidity).
+        routeAsset0Usdc = _buildDefaultV3Route(
             _asset0,
             activeNetworkConfig.usdcAddress
         );
-        routeAsset1Usdc = _buildDefaultV4Route(
+        routeAsset1Usdc = _buildDefaultV3Route(
             _asset1,
             activeNetworkConfig.usdcAddress
         );
+        // Asset ↔ asset route uses V4.
         routeAsset0Asset1 = _buildDefaultV4Route(_asset0, _asset1);
     }
 
@@ -293,6 +296,31 @@ contract HelperConfig is CodeConstants, Script {
                 hooks: IHooks(address(0))
             }),
             v3Path: bytes("")
+        });
+    }
+
+    /**
+     * @notice Builds a default Uniswap V3 route for two tokens.
+     * @dev The path is encoded as: tokenA (20 bytes) + fee (3 bytes) + tokenB (20 bytes).
+     *      Direction is adjusted at swap time by SwapManager._getDirectionalV3Path.
+     * @param _tokenA The first token address.
+     * @param _tokenB The second token address.
+     * @return route The generated V3 route.
+     */
+    function _buildDefaultV3Route(
+        address _tokenA,
+        address _tokenB
+    ) internal pure returns (SwapRoute memory route) {
+        route = SwapRoute({
+            version: PoolVersion.V3,
+            poolKey: PoolKey({
+                currency0: Currency.wrap(address(0)),
+                currency1: Currency.wrap(address(0)),
+                fee: 0,
+                tickSpacing: 0,
+                hooks: IHooks(address(0))
+            }),
+            v3Path: abi.encodePacked(_tokenA, DEFAULT_V3_POOL_FEE, _tokenB)
         });
     }
 

@@ -216,13 +216,13 @@ contract SwapManager is Ownable {
 
         bytes memory actions = abi.encodePacked(
             uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE_ALL),
+            uint8(Actions.SETTLE),
             uint8(Actions.TAKE_ALL)
         );
 
         bytes[] memory actionParams = new bytes[](3);
         actionParams[0] = abi.encode(swapParams);
-        actionParams[1] = abi.encode(Currency.wrap(tokenIn), _amountIn);
+        actionParams[1] = abi.encode(Currency.wrap(tokenIn), _amountIn, false);
         actionParams[2] = abi.encode(Currency.wrap(tokenOut), uint256(0));
 
         commands = abi.encodePacked(uint8(Commands.V4_SWAP));
@@ -247,7 +247,7 @@ contract SwapManager is Ownable {
         uint128 _amountIn
     )
         internal
-        view
+        pure
         returns (
             bytes memory commands,
             bytes[] memory inputs,
@@ -260,20 +260,24 @@ contract SwapManager is Ownable {
         // Extract tokenOut from the last address in the path.
         // Path format: [address(20) | fee(3) | address(20) | ...]
         // The last token starts at offset: pathLen - 20.
-        tokenOut = _extractTokenOutFromV3Path(_v3Path);
+        // Ensure the V3 path goes from _tokenIn → tokenOut.
+        // The stored path may be in either direction; reverse it if needed.
+        bytes memory directionalPath = _getDirectionalV3Path(_v3Path, _tokenIn);
+        tokenOut = _extractTokenOutFromV3Path(directionalPath);
 
         // V3_SWAP_EXACT_IN params:
         // (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
-        // payerIsUser = false because the tokens have already been transferred to the Universal Router.
+        // recipient = address(1) → Universal Router maps this to msg.sender (the Index).
+        // payerIsUser = false → the router pays from its own balance (tokens pre-transferred).
         commands = abi.encodePacked(uint8(Commands.V3_SWAP_EXACT_IN));
 
         inputs = new bytes[](1);
         inputs[0] = abi.encode(
-            address(this), // recipient: the Index contract receives the tokens
+            address(1), // recipient: MSG_SENDER → maps to the Index (caller of execute)
             uint256(_amountIn),
             uint256(0), // amountOutMinimum — @audit-info: slippage handling still needed
-            _v3Path,
-            false // payerIsUser: false, tokens are already in the router via TRANSFER or PERMIT2
+            directionalPath,
+            false // payerIsUser: false, tokens are pre-transferred to the Universal Router
         );
     }
 
@@ -334,6 +338,55 @@ contract SwapManager is Ownable {
         uint256 offset = _path.length - 20;
         assembly {
             tokenOut := shr(96, mload(add(add(_path, 0x20), offset)))
+        }
+    }
+
+    /**
+     * @dev Returns the V3 path oriented from _tokenIn → tokenOut.
+     *      If the stored path already starts with _tokenIn, returns it as-is.
+     *      Otherwise reverses the path so that _tokenIn leads the encoding.
+     */
+    function _getDirectionalV3Path(
+        bytes memory _path,
+        address _tokenIn
+    ) internal pure returns (bytes memory) {
+        address firstToken;
+        assembly {
+            firstToken := shr(96, mload(add(_path, 0x20)))
+        }
+        if (firstToken == _tokenIn) return _path;
+        return _reverseV3Path(_path);
+    }
+
+    /**
+     * @dev Reverses a Uniswap V3 encoded path.
+     *      Single hop:  [A(20) fee(3) B(20)]              → [B(20) fee(3) A(20)]
+     *      Multi hop:   [A(20) fAB(3) B(20) fBC(3) C(20)] → [C(20) fBC(3) B(20) fAB(3) A(20)]
+     */
+    function _reverseV3Path(
+        bytes memory _path
+    ) internal pure returns (bytes memory reversed) {
+        uint256 len = _path.length;
+        uint256 numPools = (len - 20) / 23;
+        reversed = new bytes(len);
+
+        for (uint256 i = 0; i <= numPools; i++) {
+            uint256 srcOff = i * 23;
+            uint256 dstOff = (numPools - i) * 23;
+
+            // Copy 20-byte token address
+            for (uint256 j = 0; j < 20; j++) {
+                reversed[dstOff + j] = _path[srcOff + j];
+            }
+
+            // Copy 3-byte fee (between token[i] and token[i+1])
+            if (i < numPools) {
+                uint256 srcFee = srcOff + 20;
+                uint256 dstFee = (numPools - 1 - i) * 23 + 20;
+                for (uint256 j = 0; j < 3; j++) {
+                    reversed[dstFee + j] = _path[srcFee + j];
+                }
+            }
         }
     }
 }

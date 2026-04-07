@@ -6,43 +6,7 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/**
- * @title MockUniversalRouter
- * @notice Simulates Uniswap's UniversalRouter for unit tests.
- *
- * @dev Supports both V3 (command 0x00) and V4 (command 0x10) swap formats,
- *      mirroring the exact encoding produced by SwapManager.sol.
- *
- * ── Exchange rate model ────────────────────────────────────────────────────
- *
- *   amountOut = (amountIn * rate) / RATE_PRECISION   (RATE_PRECISION = 1e18)
- *
- *   Example: USDC (6 dec) → WETH (18 dec) at $2 000 / ETH
- *
- *     1 USDC  = 1e6  raw units in
- *     0.0005 WETH = 5e14 raw units out
- *
- *     rate = (5e14 * 1e18) / 1e6  =  5e26
- *
- *   Helper (pure):  computeRate(amountIn, amountOut)  does this for you.
- *
- * ── Funding ────────────────────────────────────────────────────────────────
- *
- *   The mock must hold the output tokens before any swap is executed.
- *   Call  fundToken(token, amount)  from your test (after minting/transferring
- *   tokens to this contract) to pre-load liquidity.
- *
- * ── Approval requirement ───────────────────────────────────────────────────
- *
- *   The mock uses safeTransferFrom to pull input tokens, so the caller
- *   (the Index contract) MUST have approved this mock for tokenIn before
- *   calling execute(). Index.sol does this correctly for:
- *     - USDC → Asset swaps  (_swapUsdcForAssets, forceApprove before execute)
- *     - Asset → Asset swaps (_swapAssetForAsset, forceApprove before execute)
- *   NOTE: _swapAssetsForUsdc in Index.sol currently lacks a forceApprove —
- *   that is a known issue in the source; tests for that flow should add an
- *   explicit approval via vm.prank + IERC20.approve in the test setup.
- */
+
 contract UniversalRouterMock {
     using SafeERC20 for IERC20;
 
@@ -163,8 +127,11 @@ contract UniversalRouterMock {
             , // amountOutMin — ignored in mock
             bytes memory path,
 
-        ) = // payerIsUser — ignored in mock (we always pull from msg.sender)
-            abi.decode(input, (address, uint256, uint256, bytes, bool));
+        ) = abi.decode(input, (address, uint256, uint256, bytes, bool)); // payerIsUser — ignored in mock
+
+        // Map special addresses like the real Universal Router's Dispatcher.map().
+        // address(1) = Constants.MSG_SENDER → maps to the caller (the Index).
+        if (recipient == address(1)) recipient = msg.sender;
 
         if (path.length < 43) revert UniversalRouterMock__InvalidPath();
 
@@ -183,7 +150,7 @@ contract UniversalRouterMock {
      *        abi.encode(bytes actions, bytes[] actionParams)
      *
      *      actionParams[0] = abi.encode(ExactInputSingleParams) — not read
-     *      actionParams[1] = abi.encode(Currency tokenIn,  uint256 amountIn)   // SETTLE_ALL
+     *      actionParams[1] = abi.encode(Currency tokenIn, uint256 amountIn, bool payerIsUser)  // SETTLE
      *      actionParams[2] = abi.encode(Currency tokenOut, uint256 minOut)     // TAKE_ALL
      *
      *      Currency is address-wrapped, so it decodes cleanly as address.
@@ -227,8 +194,9 @@ contract UniversalRouterMock {
             );
         }
 
-        // Pull input tokens from the caller.
-        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        // Input tokens are pre-transferred to this contract by the caller
+        // (Index.safeTransfer) before execute() is called, mirroring the
+        // real Universal Router pattern with payerIsUser = false.
 
         // Send output tokens to the recipient.
         IERC20(tokenOut).safeTransfer(recipient, amountOut);

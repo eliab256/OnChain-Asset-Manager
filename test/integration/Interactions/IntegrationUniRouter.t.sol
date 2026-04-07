@@ -5,7 +5,9 @@ import {IntegrationBase} from "./IntegrationBase.t.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {Index} from "../../../src/Index.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {
+    AggregatorV3Interface
+} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/errors/RouterErrors.sol";
 
@@ -27,7 +29,6 @@ import "../../../src/errors/RouterErrors.sol";
  *           seed   = 10 WBTC              fee    = 2 %
  */
 contract IntegrationUniRouter is IntegrationBase {
-
     // ─────────────────────────────────────────────────────────────────────────
     //  Constants
     // ─────────────────────────────────────────────────────────────────────────
@@ -65,10 +66,18 @@ contract IntegrationUniRouter is IntegrationBase {
 
         vm.startPrank(user1);
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
 
-        assertGt(wbtcWethIndex.balanceOf(user1), sharesBefore, "User must receive shares after buying");
+        assertGt(
+            wbtcWethIndex.balanceOf(user1),
+            sharesBefore,
+            "User must receive shares after buying"
+        );
     }
 
     function test_mintShares_fullUsdcAmountIsSpent() public {
@@ -76,20 +85,33 @@ contract IntegrationUniRouter is IntegrationBase {
 
         vm.startPrank(user1);
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(user1), 0, "Entire USDC input must be consumed");
+        assertEq(
+            usdc.balanceOf(user1),
+            0,
+            "Entire USDC input must be consumed"
+        );
     }
 
     function test_mintShares_indexReservesIncrease() public {
         deal(address(usdc), user1, USDC_AMOUNT);
 
-        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
+            .getAssetsReserves();
 
         vm.startPrank(user1);
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
 
         (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
@@ -108,10 +130,18 @@ contract IntegrationUniRouter is IntegrationBase {
 
         vm.startPrank(user1);
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
 
-        assertGt(wbtcWethIndex.totalSupply(), supplyBefore, "Total share supply must increase after mint");
+        assertGt(
+            wbtcWethIndex.totalSupply(),
+            supplyBefore,
+            "Total share supply must increase after mint"
+        );
     }
 
     function test_mintShares_indexUsdValueIncreases() public {
@@ -121,12 +151,20 @@ contract IntegrationUniRouter is IntegrationBase {
 
         vm.startPrank(user1);
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
 
         (, , uint256 totalUsdAfter) = wbtcWethIndex.getAssetsUsdValue();
 
-        assertGt(totalUsdAfter, totalUsdBefore, "Index total USD value must increase after mint");
+        assertGt(
+            totalUsdAfter,
+            totalUsdBefore,
+            "Index total USD value must increase after mint"
+        );
     }
 
     // ─── Router input validation ───────────────────────────────────────────────
@@ -139,11 +177,15 @@ contract IntegrationUniRouter is IntegrationBase {
         vm.expectRevert(
             abi.encodeWithSelector(
                 Router__InsufficientUsdcBalance.selector,
-                0,           // userBalance
-                USDC_AMOUNT  // requiredAmount
+                0, // userBalance
+                USDC_AMOUNT // requiredAmount
             )
         );
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
     }
 
@@ -165,7 +207,11 @@ contract IntegrationUniRouter is IntegrationBase {
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
 
         vm.expectRevert(Router__InvalidTolerance.selector);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, 0);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            0
+        );
         vm.stopPrank();
     }
 
@@ -176,7 +222,11 @@ contract IntegrationUniRouter is IntegrationBase {
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
 
         vm.expectRevert(Router__InvalidTolerance.selector);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, 10_000);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            10_000
+        );
         vm.stopPrank();
     }
 
@@ -184,11 +234,17 @@ contract IntegrationUniRouter is IntegrationBase {
     //  redeem — underlying assets → USDC via Uniswap
     // =========================================================================
 
-    function _mintSharesForUser(address _user) internal returns (uint256 shares) {
+    function _mintSharesForUser(
+        address _user
+    ) internal returns (uint256 shares) {
         deal(address(usdc), _user, USDC_AMOUNT);
         vm.startPrank(_user);
         usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        router.buyExactUsdcAmountOfShares(
+            address(wbtcWethIndex),
+            USDC_AMOUNT,
+            TOLERANCE
+        );
         vm.stopPrank();
         shares = wbtcWethIndex.balanceOf(_user);
     }
@@ -199,28 +255,49 @@ contract IntegrationUniRouter is IntegrationBase {
         uint256 usdcBefore = usdc.balanceOf(user1);
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares,
+            TOLERANCE
+        );
 
-        assertGt(usdc.balanceOf(user1), usdcBefore, "User must receive USDC after redeeming shares");
+        assertGt(
+            usdc.balanceOf(user1),
+            usdcBefore,
+            "User must receive USDC after redeeming shares"
+        );
     }
 
     function test_redeem_allSharesAreBurned() public {
         uint256 shares = _mintSharesForUser(user1);
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares,
+            TOLERANCE
+        );
 
-        assertEq(wbtcWethIndex.balanceOf(user1), 0, "All shares must be burned on full redeem");
+        assertEq(
+            wbtcWethIndex.balanceOf(user1),
+            0,
+            "All shares must be burned on full redeem"
+        );
     }
 
     function test_redeem_indexReservesDecrease() public {
         _mintSharesForUser(user1);
         uint256 shares = wbtcWethIndex.balanceOf(user1);
 
-        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
+            .getAssetsReserves();
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares,
+            TOLERANCE
+        );
 
         (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
 
@@ -236,9 +313,17 @@ contract IntegrationUniRouter is IntegrationBase {
         uint256 supplyBefore = wbtcWethIndex.totalSupply();
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares,
+            TOLERANCE
+        );
 
-        assertLt(wbtcWethIndex.totalSupply(), supplyBefore, "Total supply must decrease after redeem");
+        assertLt(
+            wbtcWethIndex.totalSupply(),
+            supplyBefore,
+            "Total supply must decrease after redeem"
+        );
     }
 
     /**
@@ -250,7 +335,11 @@ contract IntegrationUniRouter is IntegrationBase {
         uint256 shares = _mintSharesForUser(user1);
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares,
+            TOLERANCE
+        );
 
         assertLt(
             usdc.balanceOf(user1),
@@ -271,7 +360,11 @@ contract IntegrationUniRouter is IntegrationBase {
                 1e18
             )
         );
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), 1e18, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            1e18,
+            TOLERANCE
+        );
         vm.stopPrank();
     }
 
@@ -288,7 +381,8 @@ contract IntegrationUniRouter is IntegrationBase {
     function test_rebalance_swapsSellsOverweightAsset() public {
         _mockDoubleWbtcPrice();
 
-        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
+            .getAssetsReserves();
 
         vm.prank(deployer);
         indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
@@ -296,9 +390,17 @@ contract IntegrationUniRouter is IntegrationBase {
         (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
 
         // WBTC (asset0) is overweighted → index sells WBTC → reserve0 decreases
-        assertLt(r0After, r0Before, "WBTC reserve must decrease: overweight asset is sold");
+        assertLt(
+            r0After,
+            r0Before,
+            "WBTC reserve must decrease: overweight asset is sold"
+        );
         // WETH (asset1) is underweighted → index buys WETH → reserve1 increases
-        assertGt(r1After, r1Before, "WETH reserve must increase: underweight asset is bought");
+        assertGt(
+            r1After,
+            r1Before,
+            "WETH reserve must increase: underweight asset is bought"
+        );
     }
 
     function test_rebalance_reducesWeightDeviation() public {
@@ -319,7 +421,11 @@ contract IntegrationUniRouter is IntegrationBase {
             ? uint256(ew0After - tw0)
             : uint256(tw0 - ew0After);
 
-        assertLt(deviationAfter, deviationBefore, "Weight deviation must shrink after rebalance");
+        assertLt(
+            deviationAfter,
+            deviationBefore,
+            "Weight deviation must shrink after rebalance"
+        );
     }
 
     /**
@@ -338,7 +444,11 @@ contract IntegrationUniRouter is IntegrationBase {
 
         // Allow up to 2 % loss from slippage (conservative upper bound on top of the 0.2 % protocol limit)
         uint256 minAcceptable = (totalUsdBefore * 98) / 100;
-        assertGe(totalUsdAfter, minAcceptable, "Index total USD value dropped beyond acceptable slippage");
+        assertGe(
+            totalUsdAfter,
+            minAcceptable,
+            "Index total USD value dropped beyond acceptable slippage"
+        );
     }
 
     // ─── Rebalance gating ─────────────────────────────────────────────────────
@@ -348,21 +458,29 @@ contract IntegrationUniRouter is IntegrationBase {
      *       REBALANCE_THRESHOLD, so the call must revert with Index__RebalanceNotNeeded.
      */
     function test_rebalance_revertsWhenNotNeeded() public {
-        vm.prank(deployer);
-
         // The rebalance call propagates the revert through IndexManager.
         // _rebalanceSingleIndex wraps it in try/catch and emits IndexRebalanceFailed.
         // We verify by checking that no revert at the IndexManager level occurs but
         // the on-chain state is unchanged (reserves identical before and after).
-        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
+            .getAssetsReserves();
 
+        vm.prank(deployer);
         indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
 
         (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
 
         // Reserves must be untouched since no rebalance was executed
-        assertEq(r0After, r0Before, "asset0 reserve changed despite no rebalance needed");
-        assertEq(r1After, r1Before, "asset1 reserve changed despite no rebalance needed");
+        assertEq(
+            r0After,
+            r0Before,
+            "asset0 reserve changed despite no rebalance needed"
+        );
+        assertEq(
+            r1After,
+            r1Before,
+            "asset1 reserve changed despite no rebalance needed"
+        );
     }
 
     // =========================================================================
@@ -377,7 +495,11 @@ contract IntegrationUniRouter is IntegrationBase {
         assertGt(shares1, 0, "user1 must hold shares");
         assertGt(shares2, 0, "user2 must hold shares");
         // After user1's deposit the NAV is higher, so user2 receives fewer shares per USDC
-        assertGt(shares1, shares2, "Earlier depositor receives more shares per USDC");
+        assertGt(
+            shares1,
+            shares2,
+            "Earlier depositor receives more shares per USDC"
+        );
     }
 
     function test_user1Redeem_doesNotAffectUser2Shares() public {
@@ -385,10 +507,22 @@ contract IntegrationUniRouter is IntegrationBase {
         uint256 shares2 = _mintSharesForUser(user2);
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares1, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares1,
+            TOLERANCE
+        );
 
-        assertEq(wbtcWethIndex.balanceOf(user1), 0, "user1 shares must be fully burned");
-        assertEq(wbtcWethIndex.balanceOf(user2), shares2, "user2 shares must be untouched");
+        assertEq(
+            wbtcWethIndex.balanceOf(user1),
+            0,
+            "user1 shares must be fully burned"
+        );
+        assertEq(
+            wbtcWethIndex.balanceOf(user2),
+            shares2,
+            "user2 shares must be untouched"
+        );
     }
 
     function test_user1Redeem_receivesUsdc_user2SharesUnchanged() public {
@@ -399,10 +533,22 @@ contract IntegrationUniRouter is IntegrationBase {
         uint256 shares1 = wbtcWethIndex.balanceOf(user1);
 
         vm.prank(user1);
-        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares1, TOLERANCE);
+        router.sellExactAmountOfSharesForUsdc(
+            address(wbtcWethIndex),
+            shares1,
+            TOLERANCE
+        );
 
-        assertGt(usdc.balanceOf(user1), user1UsdcBefore, "user1 must receive USDC on redeem");
-        assertEq(wbtcWethIndex.balanceOf(user2), shares2, "user2 balance must be unaffected");
+        assertGt(
+            usdc.balanceOf(user1),
+            user1UsdcBefore,
+            "user1 must receive USDC on redeem"
+        );
+        assertEq(
+            wbtcWethIndex.balanceOf(user2),
+            shares2,
+            "user2 balance must be unaffected"
+        );
     }
 
     // =========================================================================
@@ -428,8 +574,16 @@ contract IntegrationUniRouter is IntegrationBase {
 
         vm.mockCall(
             address(wbtcPriceFeed),
-            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
-            abi.encode(roundId, answer * 2, startedAt, updatedAt, answeredInRound)
+            abi.encodeWithSelector(
+                AggregatorV3Interface.latestRoundData.selector
+            ),
+            abi.encode(
+                roundId,
+                answer * 2,
+                startedAt,
+                updatedAt,
+                answeredInRound
+            )
         );
     }
 }

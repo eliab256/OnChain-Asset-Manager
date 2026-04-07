@@ -390,16 +390,16 @@ contract HelperConfigTest is Test, CodeConstants {
             SwapRoute memory routeAsset0Asset1
         ) = anvilHelperConfig.getDefaultSwapRoutes(asset0, asset1);
 
-        // All three must be V4
+        // USDC ↔ asset routes use V3 (deep liquidity), asset ↔ asset uses V4
         assertEq(
             uint8(routeAsset0Usdc.version),
-            uint8(PoolVersion.V4),
-            "Route0-USDC must be V4"
+            uint8(PoolVersion.V3),
+            "Route0-USDC must be V3"
         );
         assertEq(
             uint8(routeAsset1Usdc.version),
-            uint8(PoolVersion.V4),
-            "Route1-USDC must be V4"
+            uint8(PoolVersion.V3),
+            "Route1-USDC must be V3"
         );
         assertEq(
             uint8(routeAsset0Asset1.version),
@@ -428,17 +428,22 @@ contract HelperConfigTest is Test, CodeConstants {
         (SwapRoute memory routeAsset0Usdc, , ) = anvilHelperConfig
             .getDefaultSwapRoutes(asset0, asset1);
 
-        // The pool key must contain asset0 and usdc (sorted)
-        address c0 = Currency.unwrap(routeAsset0Usdc.poolKey.currency0);
-        address c1 = Currency.unwrap(routeAsset0Usdc.poolKey.currency1);
+        // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
+        bytes memory path = routeAsset0Usdc.v3Path;
+        assertGe(path.length, 43, "V3 path must be at least 43 bytes");
 
+        // Extract first and last 20-byte addresses from the packed path
+        address pathToken0;
+        address pathToken1;
+        assembly {
+            pathToken0 := shr(96, mload(add(path, 32)))
+            pathToken1 := shr(96, mload(add(path, 55)))
+        }
         assertTrue(
-            (c0 == asset0 && c1 == config.usdcAddress) ||
-                (c0 == config.usdcAddress && c1 == asset0),
+            (pathToken0 == asset0 && pathToken1 == config.usdcAddress) ||
+                (pathToken0 == config.usdcAddress && pathToken1 == asset0),
             "Route asset0-USDC must contain asset0 and USDC"
         );
-        // Sorted invariant
-        assertTrue(c0 < c1, "currency0 must be less than currency1");
     }
 
     function testGetDefaultSwapRoutesAsset1UsdcContainsCorrectPair()
@@ -461,15 +466,21 @@ contract HelperConfigTest is Test, CodeConstants {
         (, SwapRoute memory routeAsset1Usdc, ) = anvilHelperConfig
             .getDefaultSwapRoutes(asset0, asset1);
 
-        address c0 = Currency.unwrap(routeAsset1Usdc.poolKey.currency0);
-        address c1 = Currency.unwrap(routeAsset1Usdc.poolKey.currency1);
+        // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
+        bytes memory path = routeAsset1Usdc.v3Path;
+        assertGe(path.length, 43, "V3 path must be at least 43 bytes");
 
+        address pathToken0;
+        address pathToken1;
+        assembly {
+            pathToken0 := shr(96, mload(add(path, 32)))
+            pathToken1 := shr(96, mload(add(path, 55)))
+        }
         assertTrue(
-            (c0 == asset1 && c1 == config.usdcAddress) ||
-                (c0 == config.usdcAddress && c1 == asset1),
+            (pathToken0 == asset1 && pathToken1 == config.usdcAddress) ||
+                (pathToken0 == config.usdcAddress && pathToken1 == asset1),
             "Route asset1-USDC must contain asset1 and USDC"
         );
-        assertTrue(c0 < c1, "currency0 must be less than currency1");
     }
 
     function testGetDefaultSwapRoutesAsset0Asset1ContainsCorrectPair()

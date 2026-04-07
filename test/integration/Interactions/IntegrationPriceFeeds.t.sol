@@ -15,9 +15,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         super.setUp();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  WBTC price feed
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
     function test_getLatestPrice_wbtc_returnsPositivePrice() public view {
         uint256 price = wbtcWethIndex.getLatestPrice(address(wbtc));
@@ -48,9 +48,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         assertLt(price, 50_000e18, "WETH price above $50 000 ceiling");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  USDC price feed
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
     /**
      * @dev  USDC should always be within 5 % of its $1 peg.
@@ -61,9 +61,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         assertLt(price, 1.05e18, "USDC above $1.05 peg band");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  Price relationship sanity: WBTC >> WETH
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
     function test_wbtcPrice_isGreaterThan_wethPrice() public view {
         uint256 wbtcPrice = wbtcWethIndex.getLatestPrice(address(wbtc));
@@ -71,9 +71,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         assertGt(wbtcPrice, wethPrice, "WBTC must be priced above WETH");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  USD value calculations
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
     function test_getAssetsUsdValue_returnsPositiveComponentsAndCorrectTotal()
         public
@@ -113,9 +113,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  Effective weights
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
 
     function test_effectiveWeights_closeToTargetWeightsAfterInit() public view {
@@ -154,9 +154,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  Staleness guard — MAX_DELAY = 1 hour
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
 
     function test_getLatestPrice_revertsWhenPriceIsStale() public {
@@ -180,9 +180,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         wbtcWethIndex.getLatestPrice(address(usdc));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  Unsupported asset guard
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
     function test_getLatestPrice_revertsForAssetNotInIndex() public {
         vm.expectRevert(Index__AssetNotSupported.selector);
@@ -194,9 +194,9 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         wbtcWethIndex.getLatestPrice(address(0));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
     //  Reserves are consistent with prices
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================================================================
 
     /**
      * @dev  Compute the expected USD value of the stored reserves manually and
