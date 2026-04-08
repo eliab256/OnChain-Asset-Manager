@@ -11,6 +11,12 @@ interface ISwapManager {
         SwapRoute memory _routeAsset0Asset1
     ) external;
 
+    function updateRoute(
+        address _indexAddress,
+        SwapType _swapType,
+        SwapRoute memory _newRoute
+    ) external;
+
     function buildSingleSwapParams(
         address _indexAddress,
         SwapType _swapType,
