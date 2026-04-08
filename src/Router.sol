@@ -182,12 +182,22 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         minSharesAmount = index.minMintPreview(_usdcAmount, _maxTolerance);
     }
 
+    /**
+     * @dev Validates that the given amount is non-zero.
+     * @param _amount The amount to validate.
+     */
     function _validAmount(uint256 _amount) internal pure {
         if (_amount == 0) {
             revert Router__InvalidAmounts();
         }
     }
 
+    /**
+     * @dev Validates that the caller has sufficient balance for the operation.
+     * @param _indexAddress The address of the index.
+     * @param _amount The amount to validate.
+     * @param isBuying True if the operation is a buy, false if it's a sell.
+     */
     function _validBalance(
         address _indexAddress,
         uint256 _amount,
@@ -213,18 +223,37 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         }
     }
 
+    /**
+     * @dev Validates that the given index address is initialized.
+     * @param _indexAddress The address of the index to validate.
+     */
     function _validIndex(address _indexAddress) internal view {
         if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {
             revert Router__InvalidIndexAddress();
         }
     }
 
+    /**
+     * @dev Validates that the given tolerance is within the allowed range.
+     * @param _tolerance The tolerance to validate. Must be > 0 and < 10%.
+     */
     function _validTolerance(uint256 _tolerance) internal pure {
-        if (_tolerance >= MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION || _tolerance == 0) {
+        if (
+            _tolerance >= MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION ||
+            _tolerance == 0
+        ) {
             revert Router__InvalidTolerance();
         }
     }
 
+    /**
+     * @notice It works as a single validation layer for all the inputs of the buy and sell functions.
+     * @dev Validates that the given inputs are valid for a buy or sell operation.
+     * @param _indexAddress The address of the index.
+     * @param _amount The amount to validate.
+     * @param _tolerance The tolerance to validate.
+     * @param isBuying True if the operation is a buy, false if it's a sell.
+     */
     function _validInputs(
         address _indexAddress,
         uint256 _amount,
