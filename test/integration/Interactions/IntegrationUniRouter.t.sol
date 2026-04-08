@@ -15,7 +15,9 @@ import "../../../src/errors/RouterErrors.sol";
 contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     uint256 constant USDC_AMOUNT = 1_000e6;
 
-    uint256 constant TOLERANCE = 5000; //5 * PERCENTAGE_FEE_PRECISION; // 5%
+    uint256 constant TOLERANCE = 5 * PERCENTAGE_FEE_PRECISION; //5%
+    uint256 constant INVALID_TOLERANCE_ABOVE = 11 * PERCENTAGE_FEE_PRECISION; //11%
+    uint256 constant INVALID_TOLERANCE_ZERO = 0;
 
     function setUp() public override {
         super.setUp();
@@ -25,10 +27,6 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     //  mintShares — USDC → underlying assets via Uniswap
     // =========================================================================
 
-    /**
-     * @dev  Happy-path: buying shares swaps USDC for WBTC + WETH through the
-     *       Universal Router and mints index shares to the buyer.
-     */
     function test_mintShares_userReceivesShares() public {
         deal(address(usdc), user1, USDC_AMOUNT);
 
@@ -185,7 +183,7 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
         vm.stopPrank();
     }
 
-    function test_mintShares_revertsOnTolerance10000OrAbove() public {
+    function test_mintShares_revertsOnToleranceAboveMax() public {
         deal(address(usdc), user1, USDC_AMOUNT);
 
         vm.startPrank(user1);
@@ -195,7 +193,7 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
         router.buyExactUsdcAmountOfShares(
             address(wbtcWethIndex),
             USDC_AMOUNT,
-            10_000
+            INVALID_TOLERANCE_ABOVE
         );
         vm.stopPrank();
     }

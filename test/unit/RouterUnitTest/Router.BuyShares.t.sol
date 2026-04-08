@@ -158,7 +158,7 @@ contract RouterBuySharesTest is BaseTest {
     }
 
     function testBuySharesRevertsIfToleranceEqualsMaxTolerance() public {
-        // tolerance >= 10_000 is invalid
+        // tolerance >= MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION (100_000) is invalid
         uint256 usdcAmount = 1_000e6;
         mockUsdc.mint(user1, usdcAmount);
         vm.prank(user1);
@@ -169,7 +169,7 @@ contract RouterBuySharesTest is BaseTest {
         router.buyExactUsdcAmountOfShares(
             address(initializedIndex),
             usdcAmount,
-            10_000
+            MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION
         );
     }
 
@@ -184,12 +184,12 @@ contract RouterBuySharesTest is BaseTest {
         router.buyExactUsdcAmountOfShares(
             address(initializedIndex),
             usdcAmount,
-            10_001
+            MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION + 1
         );
     }
 
     function testBuySharesAcceptsMaxValidTolerance() public {
-        // 9_999 is the highest valid tolerance
+        // MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION - 1 is the highest valid tolerance
         uint256 usdcAmount = 1_000e6;
         mockUsdc.mint(user1, usdcAmount);
         vm.prank(user1);
@@ -199,7 +199,7 @@ contract RouterBuySharesTest is BaseTest {
         router.buyExactUsdcAmountOfShares(
             address(initializedIndex),
             usdcAmount,
-            9_999
+            MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION - 1
         );
         // No revert expected
     }

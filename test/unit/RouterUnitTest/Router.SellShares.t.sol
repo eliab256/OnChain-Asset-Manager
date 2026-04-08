@@ -128,7 +128,7 @@ contract RouterTest is BaseTest {
         router.sellExactAmountOfSharesForUsdc(
             address(initializedIndex),
             100e18,
-            10_000
+            MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION
         );
     }
 

@@ -31,6 +31,13 @@ abstract contract ContractCodeConstants {
     uint32 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
 
     /**
+     * @dev The maximum tolerance allowed for mint/redeem operations.
+     * @dev Expressed as a percentage (10 = 10%). The actual ceiling used in
+     *      validation is MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION = 100_000.
+     */
+    uint256 internal constant MAX_TOLERANCE = 10; // 10%
+
+    /**
      * @dev The delay between weight updates propose and execution.
      * @dev This is used to ensure users have enough time to react to a proposed weight update.
      */

@@ -24,9 +24,6 @@ contract RouterGettersTest is BaseTest {
     //  Helpers
     // =========================================================================
 
-    /**
-     * @dev Sets exchange rates and funds the UniversalRouterMock for WETH/WBTC swaps.
-     */
     function _setupMockRouterForWethWbtcIndex() internal {
         mockUniRouter.setExchangeRate(
             address(mockUsdc),
@@ -64,10 +61,6 @@ contract RouterGettersTest is BaseTest {
         deal(address(mockUsdc), address(mockUniRouter), 1_000_000_000e6);
     }
 
-    /**
-     * @dev Mints USDC to `_user`, approves the Index to spend it, then buys
-     *      shares via the Router. Returns the share balance gained.
-     */
     function _buySharesForUser(
         address _user,
         uint256 _usdcAmount
@@ -158,7 +151,7 @@ contract RouterGettersTest is BaseTest {
 
     function testGetMinMintPreviewRevertsIfToleranceIsAtOrAboveMax() public {
         vm.expectRevert();
-        router.getMinMintPreview(address(initializedIndex), 1_000e6, 10_000);
+        router.getMinMintPreview(address(initializedIndex), 1_000e6, MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION);
     }
 
     // =========================================================================
@@ -224,7 +217,7 @@ contract RouterGettersTest is BaseTest {
         router.getMinRedeemPreview(
             address(initializedIndex),
             sharesAmount,
-            10_000
+            MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION
         );
     }
 

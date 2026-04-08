@@ -37,7 +37,7 @@
           </tr>
           <tr>
             <td class="headerItem">Test Date:</td>
-            <td class="headerValue">2026-04-07 19:14:16</td>
+            <td class="headerValue">2026-04-08 15:36:25</td>
             <td></td>
             <td class="headerItem">Functions:</td>
             <td class="headerCovTableEntryHi">100.0&nbsp;%</td>
@@ -109,27 +109,27 @@
 <span id="L47"><span class="lineNum">      47</span>              :      * @dev Automatically detects chain ID and loads appropriate configuration</span>
 <span id="L48"><span class="lineNum">      48</span>              :      * @dev Reverts with HelperConfig__InvalidChainId if chain is not supported</span>
 <span id="L49"><span class="lineNum">      49</span>              :      */</span>
-<span id="L50"><span class="lineNum">      50</span> <span class="tlaGNC tlaBgGNC">         237 :     constructor() {</span></span>
-<span id="L51"><span class="lineNum">      51</span> <span class="tlaGNC">         237 :         if (block.chainid == MAINNET_CHAIN_ID) {</span></span>
+<span id="L50"><span class="lineNum">      50</span> <span class="tlaGNC tlaBgGNC">         400 :     constructor() {</span></span>
+<span id="L51"><span class="lineNum">      51</span> <span class="tlaGNC">         400 :         if (block.chainid == MAINNET_CHAIN_ID) {</span></span>
 <span id="L52"><span class="lineNum">      52</span> <span class="tlaGNC">          90 :             activeNetworkConfig = getMainnetConfig();</span></span>
-<span id="L53"><span class="lineNum">      53</span> <span class="tlaGNC">         147 :         } else if (block.chainid == ANVIL_CHAIN_ID) {</span></span>
-<span id="L54"><span class="lineNum">      54</span> <span class="tlaGNC">         146 :             activeNetworkConfig = getAnvilConfig();</span></span>
+<span id="L53"><span class="lineNum">      53</span> <span class="tlaGNC">         310 :         } else if (block.chainid == ANVIL_CHAIN_ID) {</span></span>
+<span id="L54"><span class="lineNum">      54</span> <span class="tlaGNC">         309 :             activeNetworkConfig = getAnvilConfig();</span></span>
 <span id="L55"><span class="lineNum">      55</span>              :         } else {</span>
 <span id="L56"><span class="lineNum">      56</span> <span class="tlaGNC">           1 :             revert HelperConfig__InvalidChainId();</span></span>
 <span id="L57"><span class="lineNum">      57</span>              :         }</span>
 <span id="L58"><span class="lineNum">      58</span>              :     }</span>
-<span id="L59"><span class="lineNum">      59</span> <span class="tlaGNC">         451 :     function getActiveNetworkConfig()</span></span>
+<span id="L59"><span class="lineNum">      59</span> <span class="tlaGNC">         777 :     function getActiveNetworkConfig()</span></span>
 <span id="L60"><span class="lineNum">      60</span>              :         public</span>
 <span id="L61"><span class="lineNum">      61</span>              :         view</span>
 <span id="L62"><span class="lineNum">      62</span>              :         returns (NetworkConfig memory)</span>
 <span id="L63"><span class="lineNum">      63</span>              :     {</span>
-<span id="L64"><span class="lineNum">      64</span> <span class="tlaGNC">         451 :         return activeNetworkConfig;</span></span>
+<span id="L64"><span class="lineNum">      64</span> <span class="tlaGNC">         777 :         return activeNetworkConfig;</span></span>
 <span id="L65"><span class="lineNum">      65</span>              :     }</span>
 <span id="L66"><span class="lineNum">      66</span>              : </span>
-<span id="L67"><span class="lineNum">      67</span> <span class="tlaGNC">        1052 :     function getActiveAssetConfig(</span></span>
+<span id="L67"><span class="lineNum">      67</span> <span class="tlaGNC">        1704 :     function getActiveAssetConfig(</span></span>
 <span id="L68"><span class="lineNum">      68</span>              :         AssetAvailable asset</span>
 <span id="L69"><span class="lineNum">      69</span>              :     ) public view returns (AssetConfig memory) {</span>
-<span id="L70"><span class="lineNum">      70</span> <span class="tlaGNC">        2092 :         return assetConfigByChainId[asset][block.chainid];</span></span>
+<span id="L70"><span class="lineNum">      70</span> <span class="tlaGNC">        4048 :         return assetConfigByChainId[asset][block.chainid];</span></span>
 <span id="L71"><span class="lineNum">      71</span>              :     }</span>
 <span id="L72"><span class="lineNum">      72</span>              :     /**</span>
 <span id="L73"><span class="lineNum">      73</span>              :      * @notice Returns network configuration for Ethereum mainnet.</span>
@@ -180,80 +180,80 @@
 <span id="L118"><span class="lineNum">     118</span>              :      * @notice Returns network configuration for Anvil local development network</span>
 <span id="L119"><span class="lineNum">     119</span>              :      * @return NetworkConfig Configuration struct with Anvil local development network parameters</span>
 <span id="L120"><span class="lineNum">     120</span>              :      */</span>
-<span id="L121"><span class="lineNum">     121</span> <span class="tlaGNC">         146 :     function getAnvilConfig() public returns (NetworkConfig memory) {</span></span>
-<span id="L122"><span class="lineNum">     122</span> <span class="tlaGNC">         147 :         MockUSDC mockUsdc = new MockUSDC();</span></span>
-<span id="L123"><span class="lineNum">     123</span> <span class="tlaGNC">         147 :         AssetTokenMock mockWeth = new AssetTokenMock(</span></span>
+<span id="L121"><span class="lineNum">     121</span> <span class="tlaGNC">         309 :     function getAnvilConfig() public returns (NetworkConfig memory) {</span></span>
+<span id="L122"><span class="lineNum">     122</span> <span class="tlaGNC">         310 :         MockUSDC mockUsdc = new MockUSDC();</span></span>
+<span id="L123"><span class="lineNum">     123</span> <span class="tlaGNC">         310 :         AssetTokenMock mockWeth = new AssetTokenMock(</span></span>
 <span id="L124"><span class="lineNum">     124</span>              :             &quot;Wrapped Ether&quot;,</span>
 <span id="L125"><span class="lineNum">     125</span>              :             &quot;WETH&quot;,</span>
 <span id="L126"><span class="lineNum">     126</span>              :             18</span>
 <span id="L127"><span class="lineNum">     127</span>              :         );</span>
-<span id="L128"><span class="lineNum">     128</span> <span class="tlaGNC">         147 :         AssetTokenMock mockWbtc = new AssetTokenMock(</span></span>
+<span id="L128"><span class="lineNum">     128</span> <span class="tlaGNC">         310 :         AssetTokenMock mockWbtc = new AssetTokenMock(</span></span>
 <span id="L129"><span class="lineNum">     129</span>              :             &quot;Wrapped Bitcoin&quot;,</span>
 <span id="L130"><span class="lineNum">     130</span>              :             &quot;WBTC&quot;,</span>
 <span id="L131"><span class="lineNum">     131</span>              :             8</span>
 <span id="L132"><span class="lineNum">     132</span>              :         );</span>
-<span id="L133"><span class="lineNum">     133</span> <span class="tlaGNC">         147 :         AssetTokenMock mockLink = new AssetTokenMock(</span></span>
+<span id="L133"><span class="lineNum">     133</span> <span class="tlaGNC">         310 :         AssetTokenMock mockLink = new AssetTokenMock(</span></span>
 <span id="L134"><span class="lineNum">     134</span>              :             &quot;Chainlink Token&quot;,</span>
 <span id="L135"><span class="lineNum">     135</span>              :             &quot;LINK&quot;,</span>
 <span id="L136"><span class="lineNum">     136</span>              :             18</span>
 <span id="L137"><span class="lineNum">     137</span>              :         );</span>
-<span id="L138"><span class="lineNum">     138</span> <span class="tlaGNC">         147 :         AssetTokenMock mockComp = new AssetTokenMock(&quot;Compound&quot;, &quot;COMP&quot;, 18);</span></span>
+<span id="L138"><span class="lineNum">     138</span> <span class="tlaGNC">         310 :         AssetTokenMock mockComp = new AssetTokenMock(&quot;Compound&quot;, &quot;COMP&quot;, 18);</span></span>
 <span id="L139"><span class="lineNum">     139</span>              : </span>
-<span id="L140"><span class="lineNum">     140</span> <span class="tlaGNC">         147 :         MockV3Aggregator mockWethPriceFeed = new MockV3Aggregator(</span></span>
+<span id="L140"><span class="lineNum">     140</span> <span class="tlaGNC">         310 :         MockV3Aggregator mockWethPriceFeed = new MockV3Aggregator(</span></span>
 <span id="L141"><span class="lineNum">     141</span>              :             PRICE_FEED_DECIMALS,</span>
 <span id="L142"><span class="lineNum">     142</span>              :             int256(2000 * 10 ** PRICE_FEED_DECIMALS)</span>
 <span id="L143"><span class="lineNum">     143</span>              :         );</span>
-<span id="L144"><span class="lineNum">     144</span> <span class="tlaGNC">         147 :         MockV3Aggregator mockUsdcPriceFeed = new MockV3Aggregator(</span></span>
+<span id="L144"><span class="lineNum">     144</span> <span class="tlaGNC">         310 :         MockV3Aggregator mockUsdcPriceFeed = new MockV3Aggregator(</span></span>
 <span id="L145"><span class="lineNum">     145</span>              :             PRICE_FEED_DECIMALS,</span>
 <span id="L146"><span class="lineNum">     146</span>              :             int256(1 * 10 ** PRICE_FEED_DECIMALS)</span>
 <span id="L147"><span class="lineNum">     147</span>              :         );</span>
-<span id="L148"><span class="lineNum">     148</span> <span class="tlaGNC">         147 :         MockV3Aggregator mockWbtcPriceFeed = new MockV3Aggregator(</span></span>
+<span id="L148"><span class="lineNum">     148</span> <span class="tlaGNC">         310 :         MockV3Aggregator mockWbtcPriceFeed = new MockV3Aggregator(</span></span>
 <span id="L149"><span class="lineNum">     149</span>              :             PRICE_FEED_DECIMALS,</span>
 <span id="L150"><span class="lineNum">     150</span>              :             int256(30000 * 10 ** PRICE_FEED_DECIMALS)</span>
 <span id="L151"><span class="lineNum">     151</span>              :         );</span>
-<span id="L152"><span class="lineNum">     152</span> <span class="tlaGNC">         147 :         MockV3Aggregator mockLinkPriceFeed = new MockV3Aggregator(</span></span>
+<span id="L152"><span class="lineNum">     152</span> <span class="tlaGNC">         310 :         MockV3Aggregator mockLinkPriceFeed = new MockV3Aggregator(</span></span>
 <span id="L153"><span class="lineNum">     153</span>              :             PRICE_FEED_DECIMALS,</span>
 <span id="L154"><span class="lineNum">     154</span>              :             int256(7 * 10 ** PRICE_FEED_DECIMALS)</span>
 <span id="L155"><span class="lineNum">     155</span>              :         );</span>
-<span id="L156"><span class="lineNum">     156</span> <span class="tlaGNC">         147 :         MockV3Aggregator mockCompPriceFeed = new MockV3Aggregator(</span></span>
+<span id="L156"><span class="lineNum">     156</span> <span class="tlaGNC">         310 :         MockV3Aggregator mockCompPriceFeed = new MockV3Aggregator(</span></span>
 <span id="L157"><span class="lineNum">     157</span>              :             PRICE_FEED_DECIMALS,</span>
 <span id="L158"><span class="lineNum">     158</span>              :             int256(50 * 10 ** PRICE_FEED_DECIMALS)</span>
 <span id="L159"><span class="lineNum">     159</span>              :         );</span>
 <span id="L160"><span class="lineNum">     160</span>              : </span>
-<span id="L161"><span class="lineNum">     161</span> <span class="tlaGNC">         147 :         assetConfigByChainId[AssetAvailable.WETH][</span></span>
+<span id="L161"><span class="lineNum">     161</span> <span class="tlaGNC">         310 :         assetConfigByChainId[AssetAvailable.WETH][</span></span>
 <span id="L162"><span class="lineNum">     162</span>              :             ANVIL_CHAIN_ID</span>
 <span id="L163"><span class="lineNum">     163</span>              :         ] = AssetConfig({</span>
 <span id="L164"><span class="lineNum">     164</span>              :             token: address(mockWeth),</span>
 <span id="L165"><span class="lineNum">     165</span>              :             priceFeed: address(mockWethPriceFeed)</span>
 <span id="L166"><span class="lineNum">     166</span>              :         });</span>
 <span id="L167"><span class="lineNum">     167</span>              : </span>
-<span id="L168"><span class="lineNum">     168</span> <span class="tlaGNC">         147 :         assetConfigByChainId[AssetAvailable.WBTC][</span></span>
+<span id="L168"><span class="lineNum">     168</span> <span class="tlaGNC">         310 :         assetConfigByChainId[AssetAvailable.WBTC][</span></span>
 <span id="L169"><span class="lineNum">     169</span>              :             ANVIL_CHAIN_ID</span>
 <span id="L170"><span class="lineNum">     170</span>              :         ] = AssetConfig({</span>
 <span id="L171"><span class="lineNum">     171</span>              :             token: address(mockWbtc),</span>
 <span id="L172"><span class="lineNum">     172</span>              :             priceFeed: address(mockWbtcPriceFeed)</span>
 <span id="L173"><span class="lineNum">     173</span>              :         });</span>
 <span id="L174"><span class="lineNum">     174</span>              : </span>
-<span id="L175"><span class="lineNum">     175</span> <span class="tlaGNC">         147 :         assetConfigByChainId[AssetAvailable.LINK][</span></span>
+<span id="L175"><span class="lineNum">     175</span> <span class="tlaGNC">         310 :         assetConfigByChainId[AssetAvailable.LINK][</span></span>
 <span id="L176"><span class="lineNum">     176</span>              :             ANVIL_CHAIN_ID</span>
 <span id="L177"><span class="lineNum">     177</span>              :         ] = AssetConfig({</span>
 <span id="L178"><span class="lineNum">     178</span>              :             token: address(mockLink),</span>
 <span id="L179"><span class="lineNum">     179</span>              :             priceFeed: address(mockLinkPriceFeed)</span>
 <span id="L180"><span class="lineNum">     180</span>              :         });</span>
 <span id="L181"><span class="lineNum">     181</span>              : </span>
-<span id="L182"><span class="lineNum">     182</span> <span class="tlaGNC">         147 :         assetConfigByChainId[AssetAvailable.COMP][</span></span>
+<span id="L182"><span class="lineNum">     182</span> <span class="tlaGNC">         310 :         assetConfigByChainId[AssetAvailable.COMP][</span></span>
 <span id="L183"><span class="lineNum">     183</span>              :             ANVIL_CHAIN_ID</span>
 <span id="L184"><span class="lineNum">     184</span>              :         ] = AssetConfig({</span>
 <span id="L185"><span class="lineNum">     185</span>              :             token: address(mockComp),</span>
 <span id="L186"><span class="lineNum">     186</span>              :             priceFeed: address(mockCompPriceFeed)</span>
 <span id="L187"><span class="lineNum">     187</span>              :         });</span>
 <span id="L188"><span class="lineNum">     188</span>              : </span>
-<span id="L189"><span class="lineNum">     189</span> <span class="tlaGNC">         147 :         UniversalRouterMock mockUniRouter = new UniversalRouterMock();</span></span>
+<span id="L189"><span class="lineNum">     189</span> <span class="tlaGNC">         310 :         UniversalRouterMock mockUniRouter = new UniversalRouterMock();</span></span>
 <span id="L190"><span class="lineNum">     190</span>              : </span>
-<span id="L191"><span class="lineNum">     191</span> <span class="tlaGNC">         147 :         address anvilFeeCollector = makeAddr(&quot;feeCollector&quot;);</span></span>
-<span id="L192"><span class="lineNum">     192</span> <span class="tlaGNC">         147 :         address anvilRebalancer = makeAddr(&quot;rebalancer&quot;);</span></span>
+<span id="L191"><span class="lineNum">     191</span> <span class="tlaGNC">         310 :         address anvilFeeCollector = makeAddr(&quot;feeCollector&quot;);</span></span>
+<span id="L192"><span class="lineNum">     192</span> <span class="tlaGNC">         310 :         address anvilRebalancer = makeAddr(&quot;rebalancer&quot;);</span></span>
 <span id="L193"><span class="lineNum">     193</span>              : </span>
-<span id="L194"><span class="lineNum">     194</span> <span class="tlaGNC">         147 :         return</span></span>
+<span id="L194"><span class="lineNum">     194</span> <span class="tlaGNC">         310 :         return</span></span>
 <span id="L195"><span class="lineNum">     195</span>              :             NetworkConfig({</span>
 <span id="L196"><span class="lineNum">     196</span>              :                 usdcAddress: address(mockUsdc),</span>
 <span id="L197"><span class="lineNum">     197</span>              :                 usdcPriceFeedAddress: address(mockUsdcPriceFeed),</span>
@@ -284,12 +284,12 @@
 <span id="L222"><span class="lineNum">     222</span>              :     }</span>
 <span id="L223"><span class="lineNum">     223</span>              : </span>
 <span id="L224"><span class="lineNum">     224</span>              :     //Helpers</span>
-<span id="L225"><span class="lineNum">     225</span> <span class="tlaGNC">         131 :     function getFeeCollector() public view returns (address) {</span></span>
-<span id="L226"><span class="lineNum">     226</span> <span class="tlaGNC">         131 :         return activeNetworkConfig.feeCollector;</span></span>
+<span id="L225"><span class="lineNum">     225</span> <span class="tlaGNC">         294 :     function getFeeCollector() public view returns (address) {</span></span>
+<span id="L226"><span class="lineNum">     226</span> <span class="tlaGNC">         294 :         return activeNetworkConfig.feeCollector;</span></span>
 <span id="L227"><span class="lineNum">     227</span>              :     }</span>
 <span id="L228"><span class="lineNum">     228</span>              : </span>
-<span id="L229"><span class="lineNum">     229</span> <span class="tlaGNC">         131 :     function getRebalancer() public view returns (address) {</span></span>
-<span id="L230"><span class="lineNum">     230</span> <span class="tlaGNC">         131 :         return activeNetworkConfig.rebalancer;</span></span>
+<span id="L229"><span class="lineNum">     229</span> <span class="tlaGNC">         294 :     function getRebalancer() public view returns (address) {</span></span>
+<span id="L230"><span class="lineNum">     230</span> <span class="tlaGNC">         294 :         return activeNetworkConfig.rebalancer;</span></span>
 <span id="L231"><span class="lineNum">     231</span>              :     }</span>
 <span id="L232"><span class="lineNum">     232</span>              : </span>
 <span id="L233"><span class="lineNum">     233</span>              :     /**</span>
@@ -301,7 +301,7 @@
 <span id="L239"><span class="lineNum">     239</span>              :      * @return routeAsset1Usdc The default route for Asset1 ↔ USDC swaps.</span>
 <span id="L240"><span class="lineNum">     240</span>              :      * @return routeAsset0Asset1 The default route for Asset0 ↔ Asset1 swaps.</span>
 <span id="L241"><span class="lineNum">     241</span>              :      */</span>
-<span id="L242"><span class="lineNum">     242</span> <span class="tlaGNC">         237 :     function getDefaultSwapRoutes(</span></span>
+<span id="L242"><span class="lineNum">     242</span> <span class="tlaGNC">         400 :     function getDefaultSwapRoutes(</span></span>
 <span id="L243"><span class="lineNum">     243</span>              :         address _asset0,</span>
 <span id="L244"><span class="lineNum">     244</span>              :         address _asset1</span>
 <span id="L245"><span class="lineNum">     245</span>              :     )</span>
@@ -314,17 +314,17 @@
 <span id="L252"><span class="lineNum">     252</span>              :         )</span>
 <span id="L253"><span class="lineNum">     253</span>              :     {</span>
 <span id="L254"><span class="lineNum">     254</span>              :         // USDC ↔ asset routes use V3 (deep, established liquidity).</span>
-<span id="L255"><span class="lineNum">     255</span> <span class="tlaGNC">         237 :         routeAsset0Usdc = _buildDefaultV3Route(</span></span>
+<span id="L255"><span class="lineNum">     255</span> <span class="tlaGNC">         400 :         routeAsset0Usdc = _buildDefaultV3Route(</span></span>
 <span id="L256"><span class="lineNum">     256</span>              :             _asset0,</span>
 <span id="L257"><span class="lineNum">     257</span>              :             activeNetworkConfig.usdcAddress</span>
 <span id="L258"><span class="lineNum">     258</span>              :         );</span>
-<span id="L259"><span class="lineNum">     259</span> <span class="tlaGNC">         237 :         routeAsset1Usdc = _buildDefaultV3Route(</span></span>
+<span id="L259"><span class="lineNum">     259</span> <span class="tlaGNC">         400 :         routeAsset1Usdc = _buildDefaultV3Route(</span></span>
 <span id="L260"><span class="lineNum">     260</span>              :             _asset1,</span>
 <span id="L261"><span class="lineNum">     261</span>              :             activeNetworkConfig.usdcAddress</span>
 <span id="L262"><span class="lineNum">     262</span>              :         );</span>
 <span id="L263"><span class="lineNum">     263</span>              :         // Asset ↔ asset route also uses V3 (V4 pools currently lack</span>
 <span id="L264"><span class="lineNum">     264</span>              :         // sufficient liquidity on mainnet).</span>
-<span id="L265"><span class="lineNum">     265</span> <span class="tlaGNC">         237 :         routeAsset0Asset1 = _buildDefaultV3Route(_asset0, _asset1);</span></span>
+<span id="L265"><span class="lineNum">     265</span> <span class="tlaGNC">         400 :         routeAsset0Asset1 = _buildDefaultV3Route(_asset0, _asset1);</span></span>
 <span id="L266"><span class="lineNum">     266</span>              :     }</span>
 <span id="L267"><span class="lineNum">     267</span>              : </span>
 <span id="L268"><span class="lineNum">     268</span>              :     /**</span>
@@ -370,11 +370,11 @@
 <span id="L308"><span class="lineNum">     308</span>              :      * @param _tokenB The second token address.</span>
 <span id="L309"><span class="lineNum">     309</span>              :      * @return route The generated V3 route.</span>
 <span id="L310"><span class="lineNum">     310</span>              :      */</span>
-<span id="L311"><span class="lineNum">     311</span> <span class="tlaGNC">         711 :     function _buildDefaultV3Route(</span></span>
+<span id="L311"><span class="lineNum">     311</span> <span class="tlaGNC">        1200 :     function _buildDefaultV3Route(</span></span>
 <span id="L312"><span class="lineNum">     312</span>              :         address _tokenA,</span>
 <span id="L313"><span class="lineNum">     313</span>              :         address _tokenB</span>
 <span id="L314"><span class="lineNum">     314</span>              :     ) internal pure returns (SwapRoute memory route) {</span>
-<span id="L315"><span class="lineNum">     315</span> <span class="tlaGNC">         711 :         route = SwapRoute({</span></span>
+<span id="L315"><span class="lineNum">     315</span> <span class="tlaGNC">        1200 :         route = SwapRoute({</span></span>
 <span id="L316"><span class="lineNum">     316</span>              :             version: PoolVersion.V3,</span>
 <span id="L317"><span class="lineNum">     317</span>              :             poolKey: PoolKey({</span>
 <span id="L318"><span class="lineNum">     318</span>              :                 currency0: Currency.wrap(address(0)),</span>
@@ -387,7 +387,7 @@
 <span id="L325"><span class="lineNum">     325</span>              :         });</span>
 <span id="L326"><span class="lineNum">     326</span>              :     }</span>
 <span id="L327"><span class="lineNum">     327</span>              : </span>
-<span id="L328"><span class="lineNum">     328</span> <span class="tlaGNC">         131 :     function getAssetTokenMocks()</span></span>
+<span id="L328"><span class="lineNum">     328</span> <span class="tlaGNC">         294 :     function getAssetTokenMocks()</span></span>
 <span id="L329"><span class="lineNum">     329</span>              :         public</span>
 <span id="L330"><span class="lineNum">     330</span>              :         view</span>
 <span id="L331"><span class="lineNum">     331</span>              :         returns (</span>
@@ -398,23 +398,23 @@
 <span id="L336"><span class="lineNum">     336</span>              :             AssetTokenMock</span>
 <span id="L337"><span class="lineNum">     337</span>              :         )</span>
 <span id="L338"><span class="lineNum">     338</span>              :     {</span>
-<span id="L339"><span class="lineNum">     339</span> <span class="tlaGNC">         131 :         if (block.chainid != ANVIL_CHAIN_ID) {</span></span>
+<span id="L339"><span class="lineNum">     339</span> <span class="tlaGNC">         294 :         if (block.chainid != ANVIL_CHAIN_ID) {</span></span>
 <span id="L340"><span class="lineNum">     340</span> <span class="tlaGNC">           1 :             revert HelperConfig__GetRealContractsOnMainnet();</span></span>
 <span id="L341"><span class="lineNum">     341</span>              :         }</span>
-<span id="L342"><span class="lineNum">     342</span> <span class="tlaGNC">         130 :         AssetConfig memory wethConfig = getActiveAssetConfig(</span></span>
+<span id="L342"><span class="lineNum">     342</span> <span class="tlaGNC">         293 :         AssetConfig memory wethConfig = getActiveAssetConfig(</span></span>
 <span id="L343"><span class="lineNum">     343</span>              :             AssetAvailable.WETH</span>
 <span id="L344"><span class="lineNum">     344</span>              :         );</span>
-<span id="L345"><span class="lineNum">     345</span> <span class="tlaGNC">         130 :         AssetConfig memory wbtcConfig = getActiveAssetConfig(</span></span>
+<span id="L345"><span class="lineNum">     345</span> <span class="tlaGNC">         293 :         AssetConfig memory wbtcConfig = getActiveAssetConfig(</span></span>
 <span id="L346"><span class="lineNum">     346</span>              :             AssetAvailable.WBTC</span>
 <span id="L347"><span class="lineNum">     347</span>              :         );</span>
-<span id="L348"><span class="lineNum">     348</span> <span class="tlaGNC">         130 :         AssetConfig memory linkConfig = getActiveAssetConfig(</span></span>
+<span id="L348"><span class="lineNum">     348</span> <span class="tlaGNC">         293 :         AssetConfig memory linkConfig = getActiveAssetConfig(</span></span>
 <span id="L349"><span class="lineNum">     349</span>              :             AssetAvailable.LINK</span>
 <span id="L350"><span class="lineNum">     350</span>              :         );</span>
-<span id="L351"><span class="lineNum">     351</span> <span class="tlaGNC">         130 :         AssetConfig memory compConfig = getActiveAssetConfig(</span></span>
+<span id="L351"><span class="lineNum">     351</span> <span class="tlaGNC">         293 :         AssetConfig memory compConfig = getActiveAssetConfig(</span></span>
 <span id="L352"><span class="lineNum">     352</span>              :             AssetAvailable.COMP</span>
 <span id="L353"><span class="lineNum">     353</span>              :         );</span>
 <span id="L354"><span class="lineNum">     354</span>              : </span>
-<span id="L355"><span class="lineNum">     355</span> <span class="tlaGNC">         130 :         return (</span></span>
+<span id="L355"><span class="lineNum">     355</span> <span class="tlaGNC">         293 :         return (</span></span>
 <span id="L356"><span class="lineNum">     356</span>              :             AssetTokenMock(wethConfig.token),</span>
 <span id="L357"><span class="lineNum">     357</span>              :             MockUSDC(activeNetworkConfig.usdcAddress),</span>
 <span id="L358"><span class="lineNum">     358</span>              :             AssetTokenMock(wbtcConfig.token),</span>
@@ -423,7 +423,7 @@
 <span id="L361"><span class="lineNum">     361</span>              :         );</span>
 <span id="L362"><span class="lineNum">     362</span>              :     }</span>
 <span id="L363"><span class="lineNum">     363</span>              : </span>
-<span id="L364"><span class="lineNum">     364</span> <span class="tlaGNC">         131 :     function getPriceFeedMocks()</span></span>
+<span id="L364"><span class="lineNum">     364</span> <span class="tlaGNC">         294 :     function getPriceFeedMocks()</span></span>
 <span id="L365"><span class="lineNum">     365</span>              :         public</span>
 <span id="L366"><span class="lineNum">     366</span>              :         view</span>
 <span id="L367"><span class="lineNum">     367</span>              :         returns (</span>
@@ -434,23 +434,23 @@
 <span id="L372"><span class="lineNum">     372</span>              :             MockV3Aggregator</span>
 <span id="L373"><span class="lineNum">     373</span>              :         )</span>
 <span id="L374"><span class="lineNum">     374</span>              :     {</span>
-<span id="L375"><span class="lineNum">     375</span> <span class="tlaGNC">         131 :         if (block.chainid != ANVIL_CHAIN_ID) {</span></span>
+<span id="L375"><span class="lineNum">     375</span> <span class="tlaGNC">         294 :         if (block.chainid != ANVIL_CHAIN_ID) {</span></span>
 <span id="L376"><span class="lineNum">     376</span> <span class="tlaGNC">           1 :             revert HelperConfig__GetRealContractsOnMainnet();</span></span>
 <span id="L377"><span class="lineNum">     377</span>              :         }</span>
-<span id="L378"><span class="lineNum">     378</span> <span class="tlaGNC">         130 :         AssetConfig memory wethConfig = getActiveAssetConfig(</span></span>
+<span id="L378"><span class="lineNum">     378</span> <span class="tlaGNC">         293 :         AssetConfig memory wethConfig = getActiveAssetConfig(</span></span>
 <span id="L379"><span class="lineNum">     379</span>              :             AssetAvailable.WETH</span>
 <span id="L380"><span class="lineNum">     380</span>              :         );</span>
-<span id="L381"><span class="lineNum">     381</span> <span class="tlaGNC">         130 :         AssetConfig memory wbtcConfig = getActiveAssetConfig(</span></span>
+<span id="L381"><span class="lineNum">     381</span> <span class="tlaGNC">         293 :         AssetConfig memory wbtcConfig = getActiveAssetConfig(</span></span>
 <span id="L382"><span class="lineNum">     382</span>              :             AssetAvailable.WBTC</span>
 <span id="L383"><span class="lineNum">     383</span>              :         );</span>
-<span id="L384"><span class="lineNum">     384</span> <span class="tlaGNC">         130 :         AssetConfig memory linkConfig = getActiveAssetConfig(</span></span>
+<span id="L384"><span class="lineNum">     384</span> <span class="tlaGNC">         293 :         AssetConfig memory linkConfig = getActiveAssetConfig(</span></span>
 <span id="L385"><span class="lineNum">     385</span>              :             AssetAvailable.LINK</span>
 <span id="L386"><span class="lineNum">     386</span>              :         );</span>
-<span id="L387"><span class="lineNum">     387</span> <span class="tlaGNC">         130 :         AssetConfig memory compConfig = getActiveAssetConfig(</span></span>
+<span id="L387"><span class="lineNum">     387</span> <span class="tlaGNC">         293 :         AssetConfig memory compConfig = getActiveAssetConfig(</span></span>
 <span id="L388"><span class="lineNum">     388</span>              :             AssetAvailable.COMP</span>
 <span id="L389"><span class="lineNum">     389</span>              :         );</span>
 <span id="L390"><span class="lineNum">     390</span>              : </span>
-<span id="L391"><span class="lineNum">     391</span> <span class="tlaGNC">         130 :         return (</span></span>
+<span id="L391"><span class="lineNum">     391</span> <span class="tlaGNC">         293 :         return (</span></span>
 <span id="L392"><span class="lineNum">     392</span>              :             MockV3Aggregator(wethConfig.priceFeed),</span>
 <span id="L393"><span class="lineNum">     393</span>              :             MockV3Aggregator(activeNetworkConfig.usdcPriceFeedAddress),</span>
 <span id="L394"><span class="lineNum">     394</span>              :             MockV3Aggregator(wbtcConfig.priceFeed),</span>
@@ -459,12 +459,12 @@
 <span id="L397"><span class="lineNum">     397</span>              :         );</span>
 <span id="L398"><span class="lineNum">     398</span>              :     }</span>
 <span id="L399"><span class="lineNum">     399</span>              : </span>
-<span id="L400"><span class="lineNum">     400</span> <span class="tlaGNC">         130 :     function getUniswapUniversalRouter()</span></span>
+<span id="L400"><span class="lineNum">     400</span> <span class="tlaGNC">         293 :     function getUniswapUniversalRouter()</span></span>
 <span id="L401"><span class="lineNum">     401</span>              :         public</span>
 <span id="L402"><span class="lineNum">     402</span>              :         view</span>
 <span id="L403"><span class="lineNum">     403</span>              :         returns (UniversalRouterMock)</span>
 <span id="L404"><span class="lineNum">     404</span>              :     {</span>
-<span id="L405"><span class="lineNum">     405</span> <span class="tlaGNC">         130 :         return UniversalRouterMock(activeNetworkConfig.uniswapUniversalRouter);</span></span>
+<span id="L405"><span class="lineNum">     405</span> <span class="tlaGNC">         293 :         return UniversalRouterMock(activeNetworkConfig.uniswapUniversalRouter);</span></span>
 <span id="L406"><span class="lineNum">     406</span>              :     }</span>
 <span id="L407"><span class="lineNum">     407</span>              : }</span>
         </pre>

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {IIndex} from "./Interface/IIndex.sol";
+import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
@@ -13,7 +14,7 @@ import {
     ReentrancyGuard
 } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Router is IRouter, ReentrancyGuard {
+contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
     IIndexManager private immutable i_IndexManager;
     IERC20 private immutable i_usdc;
 
@@ -53,7 +54,7 @@ contract Router is IRouter, ReentrancyGuard {
      * @notice If the amount of shares received is less than the minimum amount calculated with tolerance, the transaction will revert.
      * @param _indexAddress The address of the index.
      * @param _usdcAmount The amount of USDC to spend.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
      */
     function buyExactUsdcAmountOfShares(
         address _indexAddress,
@@ -74,7 +75,7 @@ contract Router is IRouter, ReentrancyGuard {
      * @notice If the amount of USDC received is less than the minimum amount calculated with tolerance, the transaction will revert.
      * @param _indexAddress The address of the index.
      * @param _sharesAmount The amount of shares to sell.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
      */
     function sellExactAmountOfSharesForUsdc(
         address _indexAddress,
@@ -96,7 +97,7 @@ contract Router is IRouter, ReentrancyGuard {
      *   logic in future iterations (e.g. dynamic fee tiers, multi-asset routing, conditional share pricing).
      * @param _indexAddress The address of the index.
      * @param _usdcAmount The amount of USDC to spend.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
      */
     function _buyShares(
         address _indexAddress,
@@ -117,7 +118,7 @@ contract Router is IRouter, ReentrancyGuard {
      *   logic in future iterations (e.g. dynamic fee tiers, multi-asset routing, conditional share pricing).
      * @param _indexAddress The address of the index.
      * @param _sharesAmount The amount of shares to sell.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
      */
     function _sellShares(
         address _indexAddress,
@@ -135,7 +136,7 @@ contract Router is IRouter, ReentrancyGuard {
      * This is the inverse of redeemPreview: given shares, calculate USDC, then apply fees and tolerance to get minimum USDC to receive.
      * @param _indexAddress The address of the index.
      * @param _sharesAmount The amount of shares to redeem.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 100 = 1%).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
      * @return minUsdcAmount The minimum amount of USDC to receive after fees and tolerance (in token decimals, 6 for USDC).
      */
     function getMinRedeemPreview(
@@ -164,7 +165,7 @@ contract Router is IRouter, ReentrancyGuard {
      * sharesAmount = (usdcAfterFeesAndTolerance * totalShares) / totalAsset
      * @param _indexAddress The address of the index.
      * @param _usdcAmount The amount of USDC to spend.
-     * @param _maxTolerance The maximum tolerance allowed (in basis points, e.g. 10000 = 1%).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
      */
     function getMinMintPreview(
         address _indexAddress,
@@ -219,7 +220,7 @@ contract Router is IRouter, ReentrancyGuard {
     }
 
     function _validTolerance(uint256 _tolerance) internal pure {
-        if (_tolerance >= 10_000 || _tolerance == 0) {
+        if (_tolerance >= MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION || _tolerance == 0) {
             revert Router__InvalidTolerance();
         }
     }
