@@ -144,6 +144,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             revert IndexManager__InvalidFeePercentage();
         }
 
+        // 1. Sort TokenA and TokenB
         (address tokenAsset0, ) = sortAssets(_assetA.asset, _assetB.asset);
 
         IndexAsset memory asset0;
@@ -157,28 +158,30 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             asset1 = _assetA;
         }
 
-        // Check that the index does not already exist.
+        // 2. Check that the index does not already exist.
         if (s_getIndex[asset0.asset][asset1.asset] != address(0)) {
             revert IndexManager__IndexAlreadyExists(
                 s_getIndex[asset0.asset][asset1.asset]
             );
         }
 
-        // Check that the weights sum to 100%.
+        // 3. Check that the weights sum to 100%.
         if (asset0.weightPercentage + asset1.weightPercentage != MAX_WEIGHT) {
             revert IndexManager__InvalidIndexAssetsPercentages();
         }
 
-        // Check that the underlying assets implement ERC20 metadata.
+        // 4. Check that the underlying assets implement ERC20 metadata.
         _validateAssetIsERC20(asset0.asset);
         _validateAssetIsERC20(asset1.asset);
 
-        // Check that the underlying assets have valid Chainlink price feeds.
+        // 5. Check that the underlying assets have valid Chainlink price feeds.
         _validatePriceFeed(asset0.priceFeed);
         _validatePriceFeed(asset1.priceFeed);
 
+        // 6. Deploy the index contract
         index = _deployIndex(asset0, asset1, _feePercentage);
 
+        // 7. Store its address in the mappings and arrays.
         s_getIndex[asset0.asset][asset1.asset] = index;
         s_indexAssets[index] = IndexAssets({
             asset0: asset0.asset,
@@ -187,7 +190,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         s_isIndex[index] = true;
         s_deployedIndexes.push(index);
 
+        // 8. Emit event with the index address and its assets addresses.
         emit IndexCreated(index, asset0.asset, asset1.asset, msg.sender);
+
+        // 9. Return the index address and its assets addresses.
         return (index, asset0.asset, asset1.asset);
     }
 
@@ -232,6 +238,16 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         emit IndexInitialized(_indexAddress, msg.sender);
     }
 
+    /**
+     * @notice Calculates the required deposit amount of one asset given a known amount of the other, using the index's current target weights and Chainlink prices.
+     * @dev Uses the ratio: amountOut_USD = amountIn_USD * weightOut / weightIn, then converts the resulting USD value back to token units via the price feed.
+     * @param _amount The known token amount, expressed in the asset's native token decimals.
+     * @param _indexAddress  The address of the index whose weights and price feeds are used.
+     * @param _zeroToOne Direction flag:
+     *                   - true  → `_amount` is denominated in asset0; returns the proportional asset1 amount required.
+     *                   - false → `_amount` is denominated in asset1; returns the proportional asset0 amount required.
+     * @return amountToDeposit The required amount of the complementary asset, expressed in that asset's native token decimals.
+     */
     function retrieveAmountFromAmount(
         uint256 _amount,
         address _indexAddress,
@@ -265,6 +281,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         }
     }
 
+    /**
+     * @notice Rebalances a single index.
+     * @dev This function doesn't revert if rebalance fails but emit an event with the failure reason.
+     * @param _indexAddress The address of the index to rebalance.
+     */
     function rebalanceSingleIndex(
         address _indexAddress
     )
@@ -561,6 +582,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         }
     }
 
+    /**
+     * @dev Checks if the swap manager address is set and reverts if it is not
+     * @dev This is thw wrapper for the isSwapManagerSet modifier.
+     */
     function _isSwapManagerSet() internal view {
         if (s_swapManager == address(0)) {
             revert IndexManager__SwapManagerAddressNotSet();
@@ -849,14 +874,26 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         return s_totalFeesCollected;
     }
 
+    /**
+     * @dev Returns the address of the USDC token used by the index manager
+     * @return address The address of the USDC token
+     */
     function getUsdc() public view returns (address) {
         return i_usdc;
     }
 
+    /**
+     * @dev Returns the address of the USDC Chainlink price feed used by the index manager
+     * @return address The address of the USDC Chainlink price feed
+     */
     function getUsdcPriceFeed() public view returns (address) {
         return i_usdcPriceFeed;
     }
 
+    /**
+     * @dev Returns the address of the Uniswap Universal Router used by the index manager
+     * @return address The address of the Uniswap Universal Router
+     */
     function getUniswapUniversalRouter() public view returns (address) {
         return i_uniswapUniversalRouter;
     }

@@ -283,6 +283,11 @@ contract SwapManager is Ownable {
 
     /**
      * @dev Validates a swap route before registration.
+     *      For V4 routes, ensures that at least one of the two pool currencies is non-zero.
+     *      For V3 routes, ensures the encoded path is at least 43 bytes long
+     *      (the minimum for a single-hop path: 20 bytes tokenIn + 3 bytes fee + 20 bytes tokenOut).
+     *      Reverts if the pool version is unrecognised.
+     * @param _route The swap route struct to validate.
      */
     function _validateRoute(SwapRoute memory _route) internal pure {
         if (_route.version == PoolVersion.V4) {
@@ -303,8 +308,11 @@ contract SwapManager is Ownable {
     }
 
     /**
-     * @dev Checks whether an index is registered.
-     * @dev An index is considered registered if the ASSET0_ASSET1 route is valid.
+     * @dev Checks whether an index has been registered in the SwapManager by verifying
+     *      that its ASSET0_ASSET1 route contains a valid, non-default configuration.
+     *      For V4 routes this means at least one currency must be non-zero; for V3 routes
+     *      the encoded path must be at least 43 bytes. Reverts with
+     *      `SwapManager__IndexNotRegistered` if the index is not registered.
      * @param _indexAddress The index contract address to check.
      */
     function _checkIfRegisteredIndex(address _indexAddress) internal view {
@@ -330,7 +338,12 @@ contract SwapManager is Ownable {
     }
 
     /**
-     * @dev Extracts tokenOut from the last position of an encoded V3 path.
+     * @dev Extracts the output token address from the last 20 bytes of an ABI-encoded
+     *      Uniswap V3 path. The path must already be oriented so that the desired output
+     *      token sits at the end (use `_getDirectionalV3Path` beforehand if needed).
+     *      Path layout: [token0 (20)] [fee (3)] [token1 (20)] ... [tokenN (20)]
+     * @param _path The ABI-encoded V3 swap path, oriented from tokenIn to tokenOut.
+     * @return tokenOut The address of the output token (last 20 bytes of `_path`).
      */
     function _extractTokenOutFromV3Path(
         bytes memory _path
@@ -342,9 +355,15 @@ contract SwapManager is Ownable {
     }
 
     /**
-     * @dev Returns the V3 path oriented from _tokenIn → tokenOut.
-     *      If the stored path already starts with _tokenIn, returns it as-is.
-     *      Otherwise reverses the path so that _tokenIn leads the encoding.
+     * @dev Returns the V3 path oriented so that it starts with `_tokenIn`.
+     *      If the first address encoded in `_path` already matches `_tokenIn`,
+     *      the original bytes are returned unchanged. Otherwise the path is reversed
+     *      via `_reverseV3Path` so that `_tokenIn` leads the encoding.
+     *      This allows routes to be stored in either direction and resolved correctly
+     *      at swap time without requiring two separate storage entries.
+     * @param _path    The stored V3 path bytes (may be in either direction).
+     * @param _tokenIn The address that must appear first in the returned path.
+     * @return         The directional path starting with `_tokenIn`.
      */
     function _getDirectionalV3Path(
         bytes memory _path,
@@ -359,9 +378,20 @@ contract SwapManager is Ownable {
     }
 
     /**
-     * @dev Reverses a Uniswap V3 encoded path.
-     *      Single hop:  [A(20) fee(3) B(20)]              → [B(20) fee(3) A(20)]
-     *      Multi hop:   [A(20) fAB(3) B(20) fBC(3) C(20)] → [C(20) fBC(3) B(20) fAB(3) A(20)]
+     * @dev Reverses a Uniswap V3 encoded path so that the token order and associated
+     *      fees are mirrored end-to-end. This is used to derive the tokenOut→tokenIn
+     *      direction from a stored tokenIn→tokenOut path without duplicating storage.
+     *
+     *      Single-hop example:
+     *        Input:  [A (20)] [fAB (3)] [B (20)]
+     *        Output: [B (20)] [fAB (3)] [A (20)]
+     *
+     *      Multi-hop example:
+     *        Input:  [A (20)] [fAB (3)] [B (20)] [fBC (3)] [C (20)]
+     *        Output: [C (20)] [fBC (3)] [B (20)] [fAB (3)] [A (20)]
+     *
+     * @param _path    The original ABI-encoded V3 path to reverse.
+     * @return reversed The reversed path with the same total length as `_path`.
      */
     function _reverseV3Path(
         bytes memory _path
