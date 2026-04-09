@@ -1,21 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
-import {IEP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./events/MultiSigEvents.sol";
 import "./errors/MultiSigErrors.sol";
 import {Transaction} from "./types.sol";
 
-contract MultiSigWallet {
+contract MultiSigWallet is EIP712 {
+    using ECDSA for bytes32;
+
+    bytes32 constant CONFIRM_TYPEHASH =
+        keccak256("Confirm(uint256 txId,address wallet,uint256 nonce)");
+
     // =========================================================================
     //  State
     // =========================================================================
     address[] public s_owners;
     mapping(address => bool) public s_isOwner;
+
+    // owner => nonce (for replay protection in off-chain signatures)
+    mapping(address => uint256) public s_nonces;
     uint256 public immutable i_requiredConfirmations;
 
     Transaction[] public s_transactions;
 
-    ///txId => owner => confirmed
+    /// @dev txId => owner => confirmed
     mapping(uint256 => mapping(address => bool)) public s_isConfirmed;
 
     // =========================================================================
@@ -48,7 +57,10 @@ contract MultiSigWallet {
      * @param _owners  Array of signer addresses.
      * @param _required  Number of confirmations required to execute a tx.
      */
-    constructor(address[] memory _owners, uint256 _required) {
+    constructor(
+        address[] memory _owners,
+        uint256 _required
+    ) EIP712("MultiSigWallet", "1") {
         if (_owners.length == 0 || _required == 0 || _required > _owners.length)
             revert MultiSig__InvalidRequirement();
 
@@ -150,6 +162,72 @@ contract MultiSigWallet {
         s_isConfirmed[_txId][msg.sender] = false;
 
         emit ConfirmationRevoked(_txId, msg.sender);
+    }
+
+    /**
+     * @notice Confirm a transaction using an EIP-712 signature produced off-chain.
+     * @param _txId       The transaction ID to confirm.
+     * @param _signer     The address of the owner who signed.
+     * @param _signature  The ECDSA signature (65 bytes) produced off-chain.
+     */
+    function confirmTransactionWithSig(
+        uint256 _txId,
+        address _signer,
+        bytes calldata _signature
+    ) external txExists(_txId) notExecuted(_txId) {
+        // 1. Verify that the signer is an owner
+        if (!s_isOwner[_signer]) revert MultiSig__NotOwner();
+
+        // 2. Verify that they haven't already confirmed
+        if (s_isConfirmed[_txId][_signer])
+            revert MultiSig__TxAlreadyConfirmed();
+
+        // 3. Reconstruct the EIP-712 digest
+        bytes32 structHash = keccak256(
+            abi.encode(
+                CONFIRM_TYPEHASH,
+                _txId,
+                address(this),
+                s_nonces[_signer] 
+            )
+        );
+        bytes32 digest = _hashTypedDataV4(structHash); 
+
+        // 4. Recover the signer and compare
+        address recovered = digest.recover(_signature);
+        if (recovered != _signer) revert MultiSig__InvalidSignature();
+
+        // 5. Invalidate the nonce (replay protection)
+        s_nonces[_signer]++;
+
+        // 6. Record the confirmation
+        Transaction storage txn = s_transactions[_txId];
+        txn.confirmations += 1;
+        s_isConfirmed[_txId][_signer] = true;
+
+        emit TransactionConfirmed(_txId, _signer);
+    }
+
+    /**
+     * @notice Returns the digest to be signed off-chain.
+     * @dev Useful for the frontend to generate signatures.
+     * @param _txId   The transaction ID to get the digest for.
+     * @param _signer The address of the signer.
+     * @return The EIP-712 digest ready to be signed.
+     */
+    function getConfirmDigest(
+        uint256 _txId,
+        address _signer
+    ) external view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                CONFIRM_TYPEHASH,
+                _txId,
+                address(this),
+                s_nonces[_signer]
+            )
+        );
+        return _hashTypedDataV4(structHash);
     }
 
     // =========================================================================

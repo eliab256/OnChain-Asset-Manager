@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+error MultiSig__InvalidSignature();
 error MultiSig__NotOwner();
 error MultiSig__TxDoesNotExist();
 error MultiSig__TxAlreadyExecuted();
