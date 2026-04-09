@@ -2,11 +2,12 @@
 pragma solidity ^0.8.0;
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {IMultiSigWallet} from "./Interface/IMultiSigWallet.sol";
 import "./events/MultiSigEvents.sol";
 import "./errors/MultiSigErrors.sol";
 import {Transaction} from "./types.sol";
 
-contract MultiSigWallet is EIP712 {
+contract MultiSigWallet is IMultiSigWallet,EIP712 {
     using ECDSA for bytes32;
 
     bytes32 constant CONFIRM_TYPEHASH =
@@ -15,17 +16,17 @@ contract MultiSigWallet is EIP712 {
     // =========================================================================
     //  State
     // =========================================================================
-    address[] public s_owners;
-    mapping(address => bool) public s_isOwner;
+    address[] private s_owners;
+    mapping(address => bool) private s_isOwner;
 
     // owner => nonce (for replay protection in off-chain signatures)
-    mapping(address => uint256) public s_nonces;
-    uint256 public immutable i_requiredConfirmations;
+    mapping(address => uint256) private s_nonces;
+    uint256 private immutable i_requiredConfirmations;
 
-    Transaction[] public s_transactions;
+    Transaction[] private s_transactions;
 
     /// @dev txId => owner => confirmed
-    mapping(uint256 => mapping(address => bool)) public s_isConfirmed;
+    mapping(uint256 => mapping(address => bool)) private s_isConfirmed;
 
     // =========================================================================
     //  Modifiers
@@ -188,10 +189,10 @@ contract MultiSigWallet is EIP712 {
                 CONFIRM_TYPEHASH,
                 _txId,
                 address(this),
-                s_nonces[_signer] 
+                s_nonces[_signer]
             )
         );
-        bytes32 digest = _hashTypedDataV4(structHash); 
+        bytes32 digest = _hashTypedDataV4(structHash);
 
         // 4. Recover the signer and compare
         address recovered = digest.recover(_signature);
@@ -292,6 +293,41 @@ contract MultiSigWallet is EIP712 {
 
     function getRequiredConfirmations() external view returns (uint256) {
         return i_requiredConfirmations;
+    }
+
+    // =========================================================================
+    //  Public Getters for State Variables
+    // =========================================================================
+
+    /**
+     * @notice Get the address of an owner by index.
+     * @param _index The index in the owners array.
+     * @return The owner address at the given index.
+     */
+    function getOwnerAt(uint256 _index) external view returns (address) {
+        return s_owners[_index];
+    }
+
+    /**
+     * @notice Get the nonce for a given owner (for replay protection).
+     * @param _owner The owner address.
+     * @return The current nonce of the owner.
+     */
+    function getNonce(address _owner) external view returns (uint256) {
+        return s_nonces[_owner];
+    }
+
+    /**
+     * @notice Check if a transaction has been confirmed by a specific owner.
+     * @param _txId The transaction ID.
+     * @param _owner The owner address.
+     * @return True if the owner has confirmed the transaction, false otherwise.
+     */
+    function isTransactionConfirmed(
+        uint256 _txId,
+        address _owner
+    ) external view returns (bool) {
+        return s_isConfirmed[_txId][_owner];
     }
 
     receive() external payable {}
