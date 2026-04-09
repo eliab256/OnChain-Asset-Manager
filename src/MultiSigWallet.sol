@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
+import {IEP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "./events/MultiSigEvents.sol";
 import "./errors/MultiSigErrors.sol";
 import {Transaction} from "./types.sol";
