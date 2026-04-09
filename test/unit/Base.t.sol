@@ -9,6 +9,7 @@ import {
     RunParams
 } from "../../script/DeployAndInitNewIndex.s.sol";
 import {HelperConfig, AssetConfig} from "../../script/HelperConfig.s.sol";
+import {MultiSigWallet} from "../../src/MultiSigWallet.sol";
 import {Router} from "../../src/Router.sol";
 import {IndexManager} from "../../src/IndexManager.sol";
 import {Index} from "../../src/Index.sol";
@@ -23,6 +24,7 @@ import {IndexAsset, AssetAvailable} from "../../src/types.sol";
 import {ContractCodeConstants} from "../../src/ContractCodeConstants.sol";
 
 abstract contract BaseTest is Test, ContractCodeConstants {
+    MultiSigWallet public multiSigWallet;
     DeployPeriphery public deployerPeriphery;
     HelperConfig public helperConfig;
     Router public router;
@@ -98,6 +100,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             router,
             helperConfig,
             swapManager,
+            multiSigWallet,
             deployer
         ) = deployerPeriphery.run();
 
@@ -116,12 +119,13 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         feeCollector = helperConfig.getFeeCollector();
         rebalancer = helperConfig.getRebalancer();
 
-        vm.label(deployer, "assetManager");
-        vm.label(feeCollector, "feeCollector");
-        vm.label(rebalancer, "rebalancer");
-        vm.label(user1, "user1");
-        vm.label(user2, "user2");
-        vm.label(user3, "user3");
+        // After deployment, DEFAULT_ADMIN_ROLE and ASSET_MANAGER_ROLE belong to
+        // the MultiSigWallet.  For convenience in unit tests we grant them back
+        // to the deployer so that every existing vm.prank(deployer) keeps working.
+        vm.startPrank(address(multiSigWallet));
+        indexManager.grantRole(indexManager.DEFAULT_ADMIN_ROLE(), deployer);
+        indexManager.grantRole(indexManager.ASSET_MANAGER_ROLE(), deployer);
+        vm.stopPrank();
 
         // mint tokens to deployer
         mockWeth.mint(
@@ -196,6 +200,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         initializedIndex = deployAndInitNewIndex.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             RunParams({
                 assetA: AssetAvailable.WETH,
                 assetB: AssetAvailable.WBTC,

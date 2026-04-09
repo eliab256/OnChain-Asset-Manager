@@ -8,6 +8,9 @@ abstract contract CodeConstants {
 
     uint8 public constant PRICE_FEED_DECIMALS = 8;
 
+    //Multisig configuration
+    uint256 public constant MULTISIG_REQUIRED_CONFIRMATIONS = 2;
+
     ////////////////////////////
     ////////// MAINNET /////////
     ////////////////////////////
@@ -44,4 +47,12 @@ abstract contract CodeConstants {
 
     uint256 constant ANVIL_DEPLOYER_PK =
         0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+
+    // Anvil default account number 1,2,3
+    address public constant ANVIL_OWNER_1 =
+        0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+    address public constant ANVIL_OWNER_2 =
+        0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC;
+    address public constant ANVIL_OWNER_3 =
+        0x90F79bf6EB2c4f870365E785982E1f101E93b906;
 }

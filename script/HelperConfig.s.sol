@@ -26,6 +26,7 @@ struct NetworkConfig {
     address deployerAccount;
     address feeCollector;
     address rebalancer;
+    address[] multiSigOwners;
 }
 
 contract HelperConfig is CodeConstants, Script {
@@ -76,6 +77,11 @@ contract HelperConfig is CodeConstants, Script {
     function getMainnetConfig() public returns (NetworkConfig memory) {
         address mainnetDeployer = vm.envAddress("MAINNET_DEPLOYER");
 
+        address[] memory owners = new address[](3);
+        owners[0] = vm.envAddress("MULTISIG_OWNER_1");
+        owners[1] = vm.envAddress("MULTISIG_OWNER_2");
+        owners[2] = vm.envAddress("MULTISIG_OWNER_3");
+
         assetConfigByChainId[AssetAvailable.WETH][
             MAINNET_CHAIN_ID
         ] = AssetConfig({
@@ -110,7 +116,8 @@ contract HelperConfig is CodeConstants, Script {
                 uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
                 deployerAccount: mainnetDeployer,
                 feeCollector: mainnetDeployer,
-                rebalancer: mainnetDeployer
+                rebalancer: mainnetDeployer,
+                multiSigOwners: owners
             });
     }
 
@@ -191,6 +198,11 @@ contract HelperConfig is CodeConstants, Script {
         address anvilFeeCollector = makeAddr("feeCollector");
         address anvilRebalancer = makeAddr("rebalancer");
 
+        address[] memory owners = new address[](3);
+        owners[0] = ANVIL_OWNER_1;
+        owners[1] = ANVIL_OWNER_2;
+        owners[2] = ANVIL_OWNER_3;
+
         return
             NetworkConfig({
                 usdcAddress: address(mockUsdc),
@@ -198,7 +210,8 @@ contract HelperConfig is CodeConstants, Script {
                 uniswapUniversalRouter: address(mockUniRouter),
                 deployerAccount: ANVIL_DEPLOYER,
                 feeCollector: anvilFeeCollector,
-                rebalancer: anvilRebalancer
+                rebalancer: anvilRebalancer,
+                multiSigOwners: owners
             });
     }
     /**

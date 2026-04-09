@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
+import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
 import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {Index} from "../../../src/Index.sol";
@@ -11,6 +12,7 @@ import {SwapManager} from "../../../src/SwapManager.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 
 contract DeployPeripheryTest is Test, CodeConstants {
+    MultiSigWallet public multiSigWallet;
     IndexManager public mainnetIndexManager;
     Router public mainnetRouter;
     SwapManager public mainnetSwapManager;
@@ -33,6 +35,7 @@ contract DeployPeripheryTest is Test, CodeConstants {
             mainnetRouter,
             isolatedHelperConfig,
             mainnetSwapManager,
+            multiSigWallet,
             mainnetDeployer
         ) = mainnetDeployerPeriphery.run();
 

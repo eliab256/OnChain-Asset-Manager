@@ -41,6 +41,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         newIndexLinkWeth = deployScript.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             firstIndexParams
         );
         // asset0 = newIndex.getAsset0();
@@ -59,6 +60,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         newIndexWbtcComp = deployScript.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             secondIndexParams
         );
     }

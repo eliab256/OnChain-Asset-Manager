@@ -9,6 +9,7 @@ import {
     RunParams
 } from "../../../script/DeployAndInitNewIndex.s.sol";
 import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
+import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
 import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {Index} from "../../../src/Index.sol";
@@ -19,6 +20,7 @@ import {AssetAvailable} from "../../../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
+    MultiSigWallet public multiSigWallet;
     IndexManager public indexManager;
     Router public router;
     SwapManager public swapManager;
@@ -37,6 +39,7 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
             router,
             helperConfig,
             swapManager,
+            multiSigWallet,
             deployer
         ) = mainnetDeployerPeriphery.run();
     }
@@ -69,6 +72,7 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
         Index newIndex = deployAndInitNewIndex.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             params
         );
 

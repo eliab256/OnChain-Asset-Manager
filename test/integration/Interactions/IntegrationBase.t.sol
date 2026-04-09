@@ -14,6 +14,7 @@ import {
     NetworkConfig
 } from "../../../script/HelperConfig.s.sol";
 import {AssetAvailable} from "../../../src/types.sol";
+import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
 import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {Index} from "../../../src/Index.sol";
@@ -29,6 +30,7 @@ contract IntegrationBase is Test {
     DeployAndInitNewIndex indexDeployer;
     HelperConfig helperConfig;
 
+    MultiSigWallet multiSigWallet;
     IndexManager indexManager;
     SwapManager swapManager;
     Router router;
@@ -68,8 +70,16 @@ contract IntegrationBase is Test {
             router,
             helperConfig,
             swapManager,
+            multiSigWallet,
             deployer
         ) = deployScript.run();
+
+        // After deployment, admin roles belong to the MultiSigWallet.
+        // Grant them back to the deployer for convenience in integration tests.
+        vm.startPrank(address(multiSigWallet));
+        indexManager.grantRole(indexManager.DEFAULT_ADMIN_ROLE(), deployer);
+        indexManager.grantRole(indexManager.ASSET_MANAGER_ROLE(), deployer);
+        vm.stopPrank();
 
         // Setting up token and price feed interfaces
         NetworkConfig memory networkConfig = helperConfig
@@ -127,6 +137,7 @@ contract IntegrationBase is Test {
         wbtcWethIndex = indexDeployer.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             wbtcWethParams
         );
     }

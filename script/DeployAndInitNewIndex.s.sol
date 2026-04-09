@@ -5,6 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
 import {Index} from "../src/Index.sol";
 import {IndexManager} from "../src/IndexManager.sol";
+import {MultiSigWallet} from "../src/MultiSigWallet.sol";
 import {HelperConfig, AssetConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {IndexAsset, AssetAvailable, SwapRoute} from "../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -25,19 +26,47 @@ struct RunParams {
 contract DeployAndInitNewIndex is Script {
     IndexManager public indexManager;
     HelperConfig public helperConfig;
+    MultiSigWallet public multiSig;
+    address[] public owners;
+    uint256 public requiredConfirmations;
 
     using SafeERC20 for IERC20;
 
     function run(
         HelperConfig _helperConfig,
         address _indexManager,
+        address _multiSig,
         RunParams memory _params
     ) external returns (Index) {
         helperConfig = _helperConfig;
-        NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
         indexManager = IndexManager(_indexManager);
+        multiSig = MultiSigWallet(payable(_multiSig));
+        owners = multiSig.getOwners();
+        requiredConfirmations = multiSig.getRequiredConfirmations();
 
         console.log("================== Deploying New Index =================");
+
+        //  1. Create the index via MultiSig 
+        address newIndex = _createIndexViaMultiSig(_params);
+        console.log("New Index Address:", newIndex);
+
+        //  2. Approve tokens & initialize the index via MultiSig
+        _approveAndInitializeIndex(_params, newIndex);
+
+        console.log(
+            "=============== New Index Deployed and Initialized =============="
+        );
+        return (Index(newIndex));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Internal helpers
+    // ═════════════════════════════════════════════════════════════════════════
+
+
+    function _createIndexViaMultiSig(
+        RunParams memory _params
+    ) internal returns (address newIndex) {
         AssetConfig memory assetAConfig = helperConfig.getActiveAssetConfig(
             _params.assetA
         );
@@ -50,16 +79,36 @@ contract DeployAndInitNewIndex is Script {
             weightPercentage: _params.weightA,
             priceFeed: assetAConfig.priceFeed
         });
-
         IndexAsset memory indexAssetB = IndexAsset({
             asset: assetBConfig.token,
             weightPercentage: _params.weightB,
             priceFeed: assetBConfig.priceFeed
         });
-        vm.startBroadcast(config.deployerAccount);
 
-        (address newIndex, address token0, address token1) = indexManager
-            .createIndex(_params.feePercentage, indexAssetA, indexAssetB);
+        bytes memory createIndexData = abi.encodeCall(
+            IndexManager.createIndex,
+            (_params.feePercentage, indexAssetA, indexAssetB)
+        );
+
+        _submitConfirmAndExecute(address(indexManager), 0, createIndexData);
+
+        // The MultiSig doesn't return call results, so we read the last
+        // element of the deployed indexes array.
+        address[] memory deployedIndexes = indexManager.getDeployedIndexes();
+        newIndex = deployedIndexes[deployedIndexes.length - 1];
+    }
+
+    /**
+     * @dev Computes deposits, approves tokens from the depositor, then
+     *      submits initializeIndex through the MultiSig.
+     */
+    function _approveAndInitializeIndex(
+        RunParams memory _params,
+        address _newIndex
+    ) internal {
+        NetworkConfig memory config = helperConfig.getActiveNetworkConfig();
+        address token0 = Index(_newIndex).getAsset0();
+        address token1 = Index(_newIndex).getAsset1();
 
         (
             SwapRoute memory routeAsset0Usdc,
@@ -70,45 +119,71 @@ contract DeployAndInitNewIndex is Script {
         (
             uint256 initialAsset0Deposit,
             uint256 initialAsset1Deposit
-        ) = _computeInitialDeposits(
-                _params,
-                token0,
-                indexAssetA.asset,
-                newIndex
-            );
+        ) = _computeInitialDeposits(_params, token0, _newIndex);
 
-        IERC20(token0).forceApprove(address(newIndex), initialAsset0Deposit);
-        IERC20(token1).forceApprove(address(newIndex), initialAsset1Deposit);
-        // initialize new index
-        indexManager.initializeIndex(
-            config.deployerAccount,
-            newIndex,
-            initialAsset0Deposit,
-            routeAsset0Usdc,
-            routeAsset1Usdc,
-            routeAsset0Asset1
-        );
+        // Depositor approves tokens to the Index (no role needed)
+        vm.startBroadcast(config.deployerAccount);
+        IERC20(token0).forceApprove(_newIndex, initialAsset0Deposit);
+        IERC20(token1).forceApprove(_newIndex, initialAsset1Deposit);
         vm.stopBroadcast();
-        console.log(
-            "=============== New Index Deployed and Initialized =============="
+
+        bytes memory initIndexData = abi.encodeCall(
+            IndexManager.initializeIndex,
+            (
+                config.deployerAccount,
+                _newIndex,
+                initialAsset0Deposit,
+                routeAsset0Usdc,
+                routeAsset1Usdc,
+                routeAsset0Asset1
+            )
         );
-        console.log("New Index Address:", address(newIndex));
-        return (Index(newIndex));
+
+        _submitConfirmAndExecute(address(indexManager), 0, initIndexData);
+    }
+
+    /**
+     * @dev Submits a tx to the MultiSig, collects the required confirmations
+     *      from distinct owners, and executes it.  Each step is its own
+     *      broadcast so that on a real network each owner signs independently.
+     */
+    function _submitConfirmAndExecute(
+        address _target,
+        uint256 _value,
+        bytes memory _data
+    ) internal {
+        // Owner 0 submits (counts as first confirmation)
+        vm.startBroadcast(owners[0]);
+        uint256 txId = multiSig.submitTransaction(_target, _value, _data);
+        multiSig.confirmTransaction(txId);
+        vm.stopBroadcast();
+
+        // Remaining owners confirm until quorum is met
+        for (uint256 i = 1; i < requiredConfirmations; i++) {
+            vm.startBroadcast(owners[i]);
+            multiSig.confirmTransaction(txId);
+            vm.stopBroadcast();
+        }
+
+        // Any owner can execute once quorum is reached
+        vm.startBroadcast(owners[0]);
+        multiSig.executeTransaction(txId);
+        vm.stopBroadcast();
     }
 
     /**
      * @dev Resolves which raw deposit amount to use as token0 seed,
      *      then computes the proportional token1 amount.
-     *      Extracted to avoid stack-too-deep in run().
      */
     function _computeInitialDeposits(
         RunParams memory _params,
         address _token0,
-        address _assetA,
         address _newIndex
     ) internal view returns (uint256 asset0Deposit, uint256 asset1Deposit) {
-        if (_token0 == _assetA) {
-            // assetA is token0: prefer its deposit, fall back to deriving from assetB
+        AssetConfig memory assetAConfig = helperConfig.getActiveAssetConfig(
+            _params.assetA
+        );
+        if (_token0 == assetAConfig.token) {
             asset0Deposit = _params.initialAssetADeposit > 0
                 ? _params.initialAssetADeposit
                 : indexManager.retrieveAmountFromAmount(
@@ -117,7 +192,6 @@ contract DeployAndInitNewIndex is Script {
                     false
                 );
         } else {
-            // assetB is token0: prefer its deposit, fall back to deriving from assetA
             asset0Deposit = _params.initialAssetBDeposit > 0
                 ? _params.initialAssetBDeposit
                 : indexManager.retrieveAmountFromAmount(

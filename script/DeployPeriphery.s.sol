@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
+import {MultiSigWallet} from "../src/MultiSigWallet.sol";
 import {IndexManager} from "../src/IndexManager.sol";
 import {Router} from "../src/Router.sol";
 import {SwapManager} from "../src/SwapManager.sol";
@@ -10,6 +11,7 @@ import {HelperConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {CodeConstants} from "../script/CodeConstants.sol";
 
 contract DeployPeriphery is Script, CodeConstants {
+    MultiSigWallet public multiSigWallet;
     IndexManager public indexManager;
     Router public router;
     HelperConfig public helperConfig;
@@ -22,6 +24,7 @@ contract DeployPeriphery is Script, CodeConstants {
             Router,
             HelperConfig,
             SwapManager,
+            MultiSigWallet,
             address deployer
         )
     {
@@ -35,29 +38,51 @@ contract DeployPeriphery is Script, CodeConstants {
         vm.startBroadcast(deployer);
 
         console.log("============== Contracts Deployment ==============");
-        // 1. Deploy IndexManager
+        // 1. Deploy MultiSigWallet and fund it with some ETH to cover transaction costs for confirmations and execution
+        multiSigWallet = new MultiSigWallet(
+            config.multiSigOwners,
+            MULTISIG_REQUIRED_CONFIRMATIONS
+        );
+        address(multiSigWallet).call{value: 10 ether}("");
+
+        // 2. Deploy IndexManager
         indexManager = new IndexManager(
             config.usdcAddress,
             config.usdcPriceFeedAddress,
             config.uniswapUniversalRouter
         );
 
-        // 2. Deploy Router with the address of the deployed IndexManager
+        // 3. Deploy Router with the address of the deployed IndexManager
         router = new Router(address(indexManager));
 
-        // 3. Deploy SwapManager with the address of the deployed IndexManager
+        // 4. Deploy SwapManager with the address of the deployed IndexManager
         swapManager = new SwapManager(address(indexManager));
 
-        // 4. Set the Router address in the IndexManager
+        // 5. Set the Router address in the IndexManager
         indexManager.setRouterAddress(address(router));
 
-        // 5. Set the SwapManager address in the IndexManager
+        // 6. Set the SwapManager address in the IndexManager
         indexManager.setSwapManagerAddress(address(swapManager));
 
+        // 7. Transfer ownership to MultiSigWallet
+        // Grant roles to the multi-sig first
+        indexManager.grantRole(
+            indexManager.DEFAULT_ADMIN_ROLE(),
+            address(multiSigWallet)
+        );
+        indexManager.grantRole(
+            indexManager.ASSET_MANAGER_ROLE(),
+            address(multiSigWallet)
+        );
+        // Revoke ASSET_MANAGER_ROLE before DEFAULT_ADMIN_ROLE (revoking requires admin)
+        indexManager.revokeRole(indexManager.ASSET_MANAGER_ROLE(), deployer);
+        indexManager.revokeRole(indexManager.DEFAULT_ADMIN_ROLE(), deployer);
+
         console.log("============== Deployment Summary ==============");
-        
+
         if (!isAnvil) {
             console.log("Deployer Address:", deployer);
+            console.log("MultiSigWallet Address:", address(multiSigWallet));
             console.log("IndexManager Address:", address(indexManager));
             console.log("SwapManager Address:", address(swapManager));
             console.log("Router Address:", address(router));
@@ -76,6 +101,13 @@ contract DeployPeriphery is Script, CodeConstants {
         }
 
         vm.stopBroadcast();
-        return (indexManager, router, helperConfig, swapManager, deployer);
+        return (
+            indexManager,
+            router,
+            helperConfig,
+            swapManager,
+            multiSigWallet,
+            deployer
+        );
     }
 }

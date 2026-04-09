@@ -42,6 +42,7 @@ contract IndexManagerWeightsTest is BaseTest {
         newIndexLinkWeth = deployScript.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             firstIndexParams
         );
         // asset0 = newIndex.getAsset0();
@@ -60,6 +61,7 @@ contract IndexManagerWeightsTest is BaseTest {
         newIndexWbtcComp = deployScript.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             secondIndexParams
         );
     }
@@ -462,7 +464,10 @@ contract IndexManagerWeightsTest is BaseTest {
             totalIndexes - 2,
             "The rest of the events should be failed executions for indexes without pending updates"
         );
-        bytes memory reasonBytes = abi.decode(reasonDataFromFailedEvent, (bytes));
+        bytes memory reasonBytes = abi.decode(
+            reasonDataFromFailedEvent,
+            (bytes)
+        );
         assertEq(
             bytes4(reasonBytes),
             Index__NotPendingWeightUpdate.selector,
@@ -470,14 +475,14 @@ contract IndexManagerWeightsTest is BaseTest {
         );
 
         // control non initialized index is not included in the function
-        for(uint256 i = 0; i < failedCount; i++) {
+        for (uint256 i = 0; i < failedCount; i++) {
             assertTrue(
                 indexesFromFailedEvents[i] != address(nonInitializedIndex),
                 "Non initialized index should not be included in failed events"
             );
         }
 
-        for(uint256 i = 0; i < successCount; i++) {
+        for (uint256 i = 0; i < successCount; i++) {
             assertTrue(
                 indexesFromSuccessEvents[i] != address(nonInitializedIndex),
                 "Non initialized index should not be included in success events"

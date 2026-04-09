@@ -42,6 +42,7 @@ contract IndexManagerTest is BaseTest {
         newIndexLinkWeth = deployScript.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             firstIndexParams
         );
 
@@ -58,6 +59,7 @@ contract IndexManagerTest is BaseTest {
         newIndexWbtcComp = deployScript.run(
             helperConfig,
             address(indexManager),
+            address(multiSigWallet),
             secondIndexParams
         );
     }
@@ -423,16 +425,11 @@ contract IndexManagerTest is BaseTest {
             Index__NoFeesToCollect.selector,
             "Wrong reason in event"
         );
-        assertEq(
-            collectorFromEvent[0],
-            deployer,
-            "Wrong collector in event"
-        );
+        assertEq(collectorFromEvent[0], deployer, "Wrong collector in event");
         assertEq(
             amountFromEvent[0] + amountFromEvent[1],
             indexManager.getTotalFeesCollected(),
             "Wrong amount in event"
         );
-
     }
 }
