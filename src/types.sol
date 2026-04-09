@@ -97,3 +97,20 @@ struct SwapRoute {
     PoolKey poolKey;
     bytes v3Path;
 }
+
+/**
+ * @notice Represents a multi-sig transaction proposal.
+ * @param target        Address of the contract (or EOA) to call when the transaction is executed.
+ * @param value         Amount of ETH (in wei) to forward with the call. Typically 0 for governance calls.
+ * @param data          Calldata to send to `target`, e.g. abi.encodeWithSelector(...).
+ * @param executed      Whether the transaction has already been executed. Once true, it cannot be re-executed.
+ * @param confirmations Number of owner confirmations collected so far.
+ *                      Must reach `i_requiredConfirmations` before the transaction can be executed.
+ */
+struct Transaction {
+    address target;
+    uint256 value;
+    bytes data;
+    bool executed;
+    uint256 confirmations;
+}

@@ -1,0 +1,3 @@
+- Multisig con firma EIP-1271
+- creare backend con Node.js API design e indexing
+- aggiungere ERC-1643 document managment
