@@ -45,7 +45,6 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
     }
 
     function testDeployIndexOnMainnet() public {
-        // ── Build RunParams for a 60/40 WETH/WBTC index ──────────────────
         uint128 weight60 = 60 * WEIGHT_PRECISION;
         uint128 weight40 = 40 * WEIGHT_PRECISION;
         uint32 feePercentage = 1 * PERCENTAGE_FEE_PRECISION; // 1%
@@ -62,11 +61,9 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
             initialAssetBDeposit: initialWbtcDeposit
         });
 
-        // ── Fund deployer with WETH and WBTC on the fork ─────────────────
         deal(WETH_MAINNET, deployer, 100e18);
         deal(WBTC_MAINNET, deployer, 100e8);
 
-        // ── Deploy and initialise the index ──────────────────────────────
         DeployAndInitNewIndex deployAndInitNewIndex = new DeployAndInitNewIndex();
 
         Index newIndex = deployAndInitNewIndex.run(
@@ -76,7 +73,6 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
             params
         );
 
-        // ── Assertions ───────────────────────────────────────────────────
         assertTrue(
             address(newIndex) != address(0),
             "Index address must not be zero"
@@ -95,12 +91,16 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
         assertGt(r0, 0, "reserve0 must be > 0");
         assertGt(r1, 0, "reserve1 must be > 0");
 
-        // Deployer must hold initial shares
-        assertGt(newIndex.balanceOf(deployer), 0, "deployer must have shares");
+        // MultiSig must hold initial shares (it is now the depositor)
+        assertGt(
+            newIndex.balanceOf(address(multiSigWallet)),
+            0,
+            "multisig must have shares"
+        );
         assertEq(
-            newIndex.balanceOf(deployer),
+            newIndex.balanceOf(address(multiSigWallet)),
             newIndex.totalSupply(),
-            "deployer must hold all shares"
+            "multisig must hold all shares"
         );
 
         // Verify weights are set correctly

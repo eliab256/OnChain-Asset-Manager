@@ -46,7 +46,7 @@ contract DeployAndInitNewIndex is Script {
 
         console.log("================== Deploying New Index =================");
 
-        //  1. Create the index via MultiSig 
+        //  1. Create the index via MultiSig
         address newIndex = _createIndexViaMultiSig(_params);
         console.log("New Index Address:", newIndex);
 
@@ -59,10 +59,9 @@ contract DeployAndInitNewIndex is Script {
         return (Index(newIndex));
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
+    // =========================================================================
     //  Internal helpers
-    // ═════════════════════════════════════════════════════════════════════════
-
+    // =========================================================================
 
     function _createIndexViaMultiSig(
         RunParams memory _params
@@ -92,15 +91,13 @@ contract DeployAndInitNewIndex is Script {
 
         _submitConfirmAndExecute(address(indexManager), 0, createIndexData);
 
-        // The MultiSig doesn't return call results, so we read the last
-        // element of the deployed indexes array.
         address[] memory deployedIndexes = indexManager.getDeployedIndexes();
         newIndex = deployedIndexes[deployedIndexes.length - 1];
     }
 
     /**
-     * @dev Computes deposits, approves tokens from the depositor, then
-     *      submits initializeIndex through the MultiSig.
+     * @dev Computes deposits, funds the multisig with the underlying tokens,
+     *      then has the multisig approve and initialize the index.
      */
     function _approveAndInitializeIndex(
         RunParams memory _params,
@@ -121,16 +118,27 @@ contract DeployAndInitNewIndex is Script {
             uint256 initialAsset1Deposit
         ) = _computeInitialDeposits(_params, token0, _newIndex);
 
-        // Depositor approves tokens to the Index (no role needed)
         vm.startBroadcast(config.deployerAccount);
-        IERC20(token0).forceApprove(_newIndex, initialAsset0Deposit);
-        IERC20(token1).forceApprove(_newIndex, initialAsset1Deposit);
+        IERC20(token0).safeTransfer(address(multiSig), initialAsset0Deposit);
+        IERC20(token1).safeTransfer(address(multiSig), initialAsset1Deposit);
         vm.stopBroadcast();
+
+        bytes memory approveAsset0Data = abi.encodeCall(
+            IERC20.approve,
+            (_newIndex, initialAsset0Deposit)
+        );
+        _submitConfirmAndExecute(token0, 0, approveAsset0Data);
+
+        bytes memory approveAsset1Data = abi.encodeCall(
+            IERC20.approve,
+            (_newIndex, initialAsset1Deposit)
+        );
+        _submitConfirmAndExecute(token1, 0, approveAsset1Data);
 
         bytes memory initIndexData = abi.encodeCall(
             IndexManager.initializeIndex,
             (
-                config.deployerAccount,
+                address(multiSig),
                 _newIndex,
                 initialAsset0Deposit,
                 routeAsset0Usdc,
@@ -152,20 +160,17 @@ contract DeployAndInitNewIndex is Script {
         uint256 _value,
         bytes memory _data
     ) internal {
-        // Owner 0 submits (counts as first confirmation)
         vm.startBroadcast(owners[0]);
         uint256 txId = multiSig.submitTransaction(_target, _value, _data);
         multiSig.confirmTransaction(txId);
         vm.stopBroadcast();
 
-        // Remaining owners confirm until quorum is met
         for (uint256 i = 1; i < requiredConfirmations; i++) {
             vm.startBroadcast(owners[i]);
             multiSig.confirmTransaction(txId);
             vm.stopBroadcast();
         }
 
-        // Any owner can execute once quorum is reached
         vm.startBroadcast(owners[0]);
         multiSig.executeTransaction(txId);
         vm.stopBroadcast();
