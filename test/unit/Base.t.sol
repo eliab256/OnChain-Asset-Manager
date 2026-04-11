@@ -612,4 +612,59 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             mockUniRouter.computeRate((linkPrice * 1e18) / compPrice, 1e18)
         );
     }
+
+    // =========================================================================
+    //  Helpers — price manipulation
+    // =========================================================================
+
+    /// @dev Makes asset0 of `initializedIndex` severely overweight by pumping
+    ///      its price 5×. Also refreshes router exchange rates.
+    function _makeAsset0Overweight() internal {
+        address token0 = initializedIndex.getAsset0();
+
+        if (token0 == address(mockWeth)) {
+            mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 5);
+        } else {
+            mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE * 5);
+        }
+
+        _refreshExchangeRates();
+    }
+
+    /// @dev Makes asset1 of `initializedIndex` severely overweight by pumping
+    ///      its price 5×. Also refreshes router exchange rates.
+    function _makeAsset1Overweight() internal {
+        address token1 = initializedIndex.getAsset1();
+
+        if (token1 == address(mockWeth)) {
+            mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 5);
+        } else {
+            mockWbtcPriceFeed.updateAnswer(WBTC_INITIAL_PRICE * 5);
+        }
+
+        _refreshExchangeRates();
+    }
+
+    // =========================================================================
+    //  Helpers — mint / redeem via router
+    // =========================================================================
+
+    /// @dev Mints shares for `_minter` on the initialized index through the router.
+    function _mintSharesViaRouter(address _minter, uint256 _amount) internal {
+        vm.startPrank(_minter);
+        mockUsdc.approve(address(initializedIndex), _amount);
+        vm.stopPrank();
+
+        vm.prank(address(router));
+        initializedIndex.mintShares(_minter, _amount, VALID_TOLERANCE);
+    }
+
+    /// @dev Redeems shares for `_redeemer` on the initialized index through the router.
+    function _redeemSharesViaRouter(
+        address _redeemer,
+        uint256 _shares
+    ) internal {
+        vm.prank(address(router));
+        initializedIndex.redeem(_redeemer, _shares, VALID_TOLERANCE);
+    }
 }

@@ -187,11 +187,16 @@ library UnderlyingMath {
             token0DepositAmountUsd = 0;
             token1DepositAmountUsd = _depositAmountUsd;
         } else {
-            // asset1 overweight or weights are balanced, buy only asset0
-            token0DepositAmountUsd =
-                targetToken0UsdValue -
-                currentToken0UsdValue;
-            token1DepositAmountUsd = _depositAmountUsd - token0DepositAmountUsd;
+            // asset1 overweight or weights are balanced, buy asset0 first
+            uint256 gap = targetToken0UsdValue - currentToken0UsdValue;
+            // Cap: if the gap exceeds the deposit, allocate everything to asset0.
+            if (gap >= _depositAmountUsd) {
+                token0DepositAmountUsd = _depositAmountUsd;
+                token1DepositAmountUsd = 0;
+            } else {
+                token0DepositAmountUsd = gap;
+                token1DepositAmountUsd = _depositAmountUsd - gap;
+            }
         }
     }
 
@@ -223,13 +228,16 @@ library UnderlyingMath {
             token0WithdrawAmountUsd = 0;
             token1WithdrawAmountUsd = _withdrawAmountUsd;
         } else {
-            // asset1 underweight or weights are balanced, sell only asset0
-            token0WithdrawAmountUsd =
-                currentToken0UsdValue -
-                targetToken0UsdValue;
-            token1WithdrawAmountUsd =
-                _withdrawAmountUsd -
-                token0WithdrawAmountUsd;
+            // asset1 underweight or weights are balanced, sell asset0 first
+            uint256 gap = currentToken0UsdValue - targetToken0UsdValue;
+            // Cap: if the gap exceeds the withdrawal, sell only asset0.
+            if (gap >= _withdrawAmountUsd) {
+                token0WithdrawAmountUsd = _withdrawAmountUsd;
+                token1WithdrawAmountUsd = 0;
+            } else {
+                token0WithdrawAmountUsd = gap;
+                token1WithdrawAmountUsd = _withdrawAmountUsd - gap;
+            }
         }
     }
 

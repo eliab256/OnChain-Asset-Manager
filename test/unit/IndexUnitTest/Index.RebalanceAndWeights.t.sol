@@ -30,10 +30,9 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         initializedIndex.proposeUpdateWeights(weight70);
     }
 
-        function test_proposeNewWeights_RevertIf_PreviousPendingUpdateNotExecuted()
+    function test_proposeNewWeights_RevertIf_PreviousPendingUpdateNotExecuted()
         public
     {
-
         vm.prank(address(indexManager));
         initializedIndex.proposeUpdateWeights(weight50);
 
@@ -62,17 +61,20 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         initializedIndex.proposeUpdateWeights(MIN_WEIGHT);
     }
 
-     function testProposeNewWeightsAcceptsLowerBoundaryWeight() public {
+    function testProposeNewWeightsAcceptsLowerBoundaryWeight() public {
         (uint128 currentWeight0, ) = initializedIndex.getAssetsWeights();
         vm.prank(address(indexManager));
-        initializedIndex.proposeUpdateWeights(currentWeight0 - REBALANCE_THRESHOLD - 1);
+        initializedIndex.proposeUpdateWeights(
+            currentWeight0 - REBALANCE_THRESHOLD - 1
+        );
     }
 
     function testProposeNewWeightsAcceptsUpperBoundaryWeight() public {
-       
         (uint128 currentWeight0, ) = initializedIndex.getAssetsWeights();
         vm.prank(address(indexManager));
-        initializedIndex.proposeUpdateWeights(currentWeight0 + REBALANCE_THRESHOLD + 1);
+        initializedIndex.proposeUpdateWeights(
+            currentWeight0 + REBALANCE_THRESHOLD + 1
+        );
     }
 
     function testProposeUpdateWeightRevertsIfThereIsAlreadyAProposal() public {
@@ -387,10 +389,8 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
     }
 
     function testRebalanceIndexRevertsIfSlippageIsTooHigh() public {
-
         _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
 
-      
         mockUniRouter.setExchangeRate(
             initializedToken1, // WBTC (the overweight asset being sold)
             initializedToken0, // WETH (the target asset to buy)
@@ -452,7 +452,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
                     uint256 logPrevR0,
                     uint256 logPrevR1,
                     uint256 logNewR0,
-                    uint256 logNewR1  
+                    uint256 logNewR1
                 ) = abi.decode(
                         logs[i].data,
                         (uint256, uint256, uint256, uint256)
@@ -484,4 +484,5 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         }
         assertTrue(found, "IndexRebalanced event not emitted");
     }
+
 }

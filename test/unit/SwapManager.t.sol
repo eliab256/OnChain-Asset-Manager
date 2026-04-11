@@ -9,6 +9,9 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 contract SwapManagerTest is BaseTest {
+
+    SwapManagerHarness harness;
+
     // =========================================================================
     //  Constants
     // =========================================================================
@@ -45,6 +48,7 @@ contract SwapManagerTest is BaseTest {
         super.setUp();
         // initializedIndex already has V4 routes registered via Base.setUp().
         // nonInitializedIndex has NO routes in SwapManager.
+        harness = new SwapManagerHarness(address(this));
     }
 
     // =========================================================================
@@ -1146,5 +1150,87 @@ contract SwapManagerTest is BaseTest {
             keccak256(inputs1[0]),
             "inputs[1] of double must match single swap 1"
         );
+    }
+
+    // =========================================================================
+    //  _checkIfRegisteredIndex — V4 route with zero currencies
+    // =========================================================================
+
+    /// @dev Builds a minimal valid V4 SwapRoute for harness-based tests.
+    function _validV4Route() internal view returns (SwapRoute memory) {
+        return
+            SwapRoute({
+                version: PoolVersion.V4,
+                poolKey: PoolKey({
+                    currency0: Currency.wrap(address(mockWeth)),
+                    currency1: Currency.wrap(address(mockWbtc)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                v3Path: bytes("")
+            });
+    }
+
+    function testCheckIfRegisteredIndexRevertsOnV4WithZeroCurrencies() public {
+        SwapRoute memory validRoute = _validV4Route();
+
+        harness.registerIndex(
+            address(0xBEEF),
+            validRoute,
+            validRoute,
+            validRoute
+        );
+
+        // Corrupt the ASSET0_ASSET1 route: version is V4 but both
+        // currencies are zero → should revert.
+        SwapRoute memory corruptRoute = SwapRoute({
+            version: PoolVersion.V4,
+            poolKey: PoolKey({
+                currency0: Currency.wrap(address(0)),
+                currency1: Currency.wrap(address(0)),
+                fee: 3000,
+                tickSpacing: 60,
+                hooks: IHooks(address(0))
+            }),
+            v3Path: bytes("")
+        });
+
+        harness.forceSetRoute(
+            address(0xBEEF),
+            SwapType.ASSET0_ASSET1,
+            abi.encode(corruptRoute)
+        );
+
+        vm.expectRevert(SwapManager.SwapManager__IndexNotRegistered.selector);
+        harness.exposed_checkIfRegisteredIndex(address(0xBEEF));
+    }
+}
+
+// =============================================================================
+//  Harness 
+// =============================================================================
+
+contract SwapManagerHarness is SwapManager {
+    constructor(address im) SwapManager(im) {}
+
+    function exposed_validateRoute(SwapRoute memory _route) external pure {
+        _validateRoute(_route);
+    }
+
+    function exposed_checkIfRegisteredIndex(
+        address _indexAddress
+    ) external view {
+        _checkIfRegisteredIndex(_indexAddress);
+    }
+
+    /// @dev Directly writes a route into storage, bypassing validation.
+    function forceSetRoute(
+        address _indexAddress,
+        SwapType _swapType,
+        bytes memory _rawRoute
+    ) external {
+        SwapRoute memory route = abi.decode(_rawRoute, (SwapRoute));
+        s_routes[_indexAddress][_swapType] = route;
     }
 }

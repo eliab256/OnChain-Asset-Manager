@@ -202,7 +202,7 @@ contract IndexMintTest is BaseTest {
         );
     }
 
-     function testRedeemUsdcReceivedIsLessThanDepositedDueToFees() public {
+    function testRedeemUsdcReceivedIsLessThanDepositedDueToFees() public {
         uint256 usdcBalanceBeforeMint = mockUsdc.balanceOf(user1);
 
         _mintSharesHelper(user1);
@@ -251,7 +251,11 @@ contract IndexMintTest is BaseTest {
                 address fromInEvent = address(
                     uint160(uint256(logs[i].topics[1]))
                 );
-                assertEq(fromInEvent, user1, "event must log user1 as redeemer");
+                assertEq(
+                    fromInEvent,
+                    user1,
+                    "event must log user1 as redeemer"
+                );
 
                 (
                     uint256 logShares,
@@ -259,18 +263,30 @@ contract IndexMintTest is BaseTest {
                     uint256 logToken1,
                     uint256 logUsdcOut
                 ) = abi.decode(
-                    logs[i].data,
-                    (uint256, uint256, uint256, uint256)
-                );
+                        logs[i].data,
+                        (uint256, uint256, uint256, uint256)
+                    );
 
                 assertEq(
                     logShares,
                     sharesToRedeem,
                     "event must log the correct shares amount burned"
                 );
-                assertGt(logToken0, 0, "event must log non-zero token0 removed");
-                assertGt(logToken1, 0, "event must log non-zero token1 removed");
-                assertGt(logUsdcOut, 0, "event must log non-zero USDC sent to user");
+                assertGt(
+                    logToken0,
+                    0,
+                    "event must log non-zero token0 removed"
+                );
+                assertGt(
+                    logToken1,
+                    0,
+                    "event must log non-zero token1 removed"
+                );
+                assertGt(
+                    logUsdcOut,
+                    0,
+                    "event must log non-zero USDC sent to user"
+                );
                 break;
             }
         }
@@ -299,7 +315,11 @@ contract IndexMintTest is BaseTest {
         vm.prank(address(router));
         initializedIndex.redeem(user1, shares1, VALID_TOLERANCE);
 
-        assertEq(initializedIndex.balanceOf(user1), 0, "user1 shares must be 0 after redeem");
+        assertEq(
+            initializedIndex.balanceOf(user1),
+            0,
+            "user1 shares must be 0 after redeem"
+        );
         assertEq(
             initializedIndex.balanceOf(user2),
             shares2,
@@ -310,16 +330,23 @@ contract IndexMintTest is BaseTest {
         vm.prank(address(router));
         initializedIndex.redeem(user2, shares2, VALID_TOLERANCE);
 
-        assertEq(initializedIndex.balanceOf(user2), 0, "user2 shares must be 0 after redeem");
+        assertEq(
+            initializedIndex.balanceOf(user2),
+            0,
+            "user2 shares must be 0 after redeem"
+        );
     }
 
     // =========================================================================
-    //  minRedeemPreview 
+    //  minRedeemPreview
     // =========================================================================
 
     function testMinRedeemPreviewRevertsIfNotInitialized() public {
         vm.expectRevert(abi.encodeWithSelector(Index__NotInitialized.selector));
-        nonInitializedIndex.minRedeemPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
+        nonInitializedIndex.minRedeemPreview(
+            VALID_USDC_AMOUNT,
+            VALID_TOLERANCE
+        );
     }
 
     function testMinRedeemPreviewRevertsIfPriceIsStale() public {
@@ -329,21 +356,33 @@ contract IndexMintTest is BaseTest {
         initializedIndex.minRedeemPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
 
-
     function testMinRedeemPreviewReturnsNonZeroForValidInput() public view {
         uint256 sharesAmount = initializedIndex.totalSupply() / 10;
         uint256 result = initializedIndex.minRedeemPreview(
             sharesAmount,
             VALID_TOLERANCE
         );
-        assertGt(result, 0, "minimum USDC must be > 0 for a positive shares input");
+        assertGt(
+            result,
+            0,
+            "minimum USDC must be > 0 for a positive shares input"
+        );
     }
 
-    function testMinRedeemPreviewHigherToleranceLowersMinimumUsdc() public view {
+    function testMinRedeemPreviewHigherToleranceLowersMinimumUsdc()
+        public
+        view
+    {
         uint256 sharesAmount = initializedIndex.totalSupply() / 10;
 
-        uint256 resultLow  = initializedIndex.minRedeemPreview(sharesAmount, VALID_TOLERANCE);
-        uint256 resultHigh = initializedIndex.minRedeemPreview(sharesAmount, VALID_TOLERANCE * 2);
+        uint256 resultLow = initializedIndex.minRedeemPreview(
+            sharesAmount,
+            VALID_TOLERANCE
+        );
+        uint256 resultHigh = initializedIndex.minRedeemPreview(
+            sharesAmount,
+            VALID_TOLERANCE * 2
+        );
 
         assertGt(
             resultLow,
@@ -352,12 +391,17 @@ contract IndexMintTest is BaseTest {
         );
     }
 
-
-    function testMinRedeemPreviewZeroToleranceReturnsMaximumMinimum() public view {
+    function testMinRedeemPreviewZeroToleranceReturnsMaximumMinimum()
+        public
+        view
+    {
         uint256 sharesAmount = initializedIndex.totalSupply() / 10;
 
-        uint256 resultZero  = initializedIndex.minRedeemPreview(sharesAmount, 0);
-        uint256 resultValid = initializedIndex.minRedeemPreview(sharesAmount, VALID_TOLERANCE);
+        uint256 resultZero = initializedIndex.minRedeemPreview(sharesAmount, 0);
+        uint256 resultValid = initializedIndex.minRedeemPreview(
+            sharesAmount,
+            VALID_TOLERANCE
+        );
 
         assertGt(
             resultZero,
@@ -365,30 +409,36 @@ contract IndexMintTest is BaseTest {
             "zero tolerance must yield more minimum USDC than any positive tolerance"
         );
     }
-  
+
     function testMinRedeemPreviewMatchesManualCalculation() public view {
         uint256 sharesAmount = initializedIndex.totalSupply() / 10;
 
         // 1. Share USD value (18-dec standard)
         (, , uint256 totalAssetUsdValue) = initializedIndex.getAssetsUsdValue();
         uint256 totalSupply = initializedIndex.totalSupply();
-        uint256 shareValueStd = sharesAmount * totalAssetUsdValue / totalSupply;
+        uint256 shareValueStd = (sharesAmount * totalAssetUsdValue) /
+            totalSupply;
 
         // 2. Protocol fee deduction
         (uint32 feePercentage, ) = initializedIndex.getFeesInfo();
-        uint256 feeAmount   = shareValueStd * uint256(feePercentage) / uint256(MAX_PERCENTAGE);
-        uint256 netUsdcStd  = shareValueStd - feeAmount;
+        uint256 feeAmount = (shareValueStd * uint256(feePercentage)) /
+            uint256(MAX_PERCENTAGE);
+        uint256 netUsdcStd = shareValueStd - feeAmount;
 
         // 3. Tolerance deduction
-        uint256 minUsdcStd = netUsdcStd
-            * (uint256(MAX_PERCENTAGE) - VALID_TOLERANCE)
-            / uint256(MAX_PERCENTAGE);
+        uint256 minUsdcStd = (netUsdcStd *
+            (uint256(MAX_PERCENTAGE) - VALID_TOLERANCE)) /
+            uint256(MAX_PERCENTAGE);
 
         // 4. Convert std decimals → token decimals (18 → 6)
         (, , uint8 usdcDecimals) = initializedIndex.getAssetsAndUsdcDecimals();
-        uint256 expectedMinUsdc = minUsdcStd / (10 ** (DECIMALS_STANDARD - usdcDecimals));
+        uint256 expectedMinUsdc = minUsdcStd /
+            (10 ** (DECIMALS_STANDARD - usdcDecimals));
 
-        uint256 result = initializedIndex.minRedeemPreview(sharesAmount, VALID_TOLERANCE);
+        uint256 result = initializedIndex.minRedeemPreview(
+            sharesAmount,
+            VALID_TOLERANCE
+        );
 
         assertEq(
             result,
@@ -424,6 +474,62 @@ contract IndexMintTest is BaseTest {
             usdcReceived,
             minUsdcPreview,
             "actual USDC received must be >= the minimum previewed"
+        );
+    }
+
+    // =========================================================================
+    //  _swapAssetsForUsdc — single-swap branches
+    // =========================================================================
+
+    function testRedeemSingleSwapSellOnlyAsset1WhenAsset0Underweight()
+        public
+    {
+        // Mint some shares for user1 at balanced prices.
+        _mintSharesViaRouter(user1, 100e6);
+        uint256 shares = initializedIndex.balanceOf(user1);
+        assertGt(shares, 0, "User must have shares to redeem");
+
+        // Make asset1 severely overweight (= asset0 underweight).
+        // In calculateWithdrawUnderlyingAmountsInUsd the IF branch fires:
+        // targetToken0 >= currentToken0 → sell only asset1.
+        _makeAsset1Overweight();
+
+        uint256 usdcBefore = mockUsdc.balanceOf(user1);
+        _redeemSharesViaRouter(user1, shares);
+
+        assertGt(
+            mockUsdc.balanceOf(user1),
+            usdcBefore,
+            "User should receive USDC back"
+        );
+        assertEq(
+            initializedIndex.balanceOf(user1),
+            0,
+            "All shares should be burned"
+        );
+    }
+
+    function testRedeemSingleSwapSellOnlyAsset0WhenAsset1Underweight()
+        public
+    {
+        _mintSharesViaRouter(user1, 100e6);
+        uint256 shares = initializedIndex.balanceOf(user1);
+        assertGt(shares, 0, "User must have shares to redeem");
+
+        _makeAsset0Overweight();
+
+        uint256 usdcBefore = mockUsdc.balanceOf(user1);
+        _redeemSharesViaRouter(user1, shares);
+
+        assertGt(
+            mockUsdc.balanceOf(user1),
+            usdcBefore,
+            "User should receive USDC back"
+        );
+        assertEq(
+            initializedIndex.balanceOf(user1),
+            0,
+            "All shares should be burned"
         );
     }
 }
