@@ -14,3 +14,7 @@ docs/
 lib/
 # Dotenv file
 .env
+
+indexer/node_modules/
+indexer/dist/
+indexer/.env
