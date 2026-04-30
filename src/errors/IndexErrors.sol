@@ -19,3 +19,4 @@ error Index__NotPendingWeightUpdate();
 error Index__UnauthorizedCallback();
 error Index__RebalanceSlippageTooHigh();
 error Index__NoFeesToCollect();
+error Index__PriceMovedExcessively();
