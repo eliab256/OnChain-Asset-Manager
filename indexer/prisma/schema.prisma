@@ -1,0 +1,793 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// --- AUTO-GENERATED MODELS --- DO NOT EDIT BELOW THIS LINE ---
+
+model RoleAdminChanged {
+  id                   Int      @id @default(autoincrement())
+  role                 String
+  previousAdminRole    String
+  newAdminRole         String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([role, previousAdminRole, newAdminRole])
+}
+
+model RoleGranted {
+  id                   Int      @id @default(autoincrement())
+  role                 String
+  account              String
+  sender               String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([role, account, sender])
+}
+
+model RoleRevoked {
+  id                   Int      @id @default(autoincrement())
+  role                 String
+  account              String
+  sender               String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([role, account, sender])
+}
+
+model AnswerUpdated {
+  id                   Int      @id @default(autoincrement())
+  current              String
+  roundId              String
+  updatedAt            String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([current, roundId])
+}
+
+model NewRound {
+  id                   Int      @id @default(autoincrement())
+  roundId              String
+  startedBy            String
+  startedAt            String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([roundId, startedBy])
+}
+
+model Approval {
+  id                   Int      @id @default(autoincrement())
+  owner                String
+  spender              String
+  value                String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([owner, spender])
+}
+
+model Transfer {
+  id                   Int      @id @default(autoincrement())
+  from                 String
+  to                   String
+  value                String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([from, to])
+}
+
+model SlotFound {
+  id                   Int      @id @default(autoincrement())
+  who                  String
+  fsig                 String
+  keysHash             String
+  slot                 String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model WARNING_UninitedSlot {
+  id                   Int      @id @default(autoincrement())
+  who                  String
+  slot                 String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_address {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_array {
+  id                   Int      @id @default(autoincrement())
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_bytes {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_bytes32 {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_int {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_address {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_array {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_bytes {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_bytes32 {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_decimal_int {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  decimals             String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_decimal_uint {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  decimals             String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_int {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_string {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_named_uint {
+  id                   Int      @id @default(autoincrement())
+  key                  String
+  val                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_string {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model log_uint {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model logs {
+  id                   Int      @id @default(autoincrement())
+                       String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model EIP712DomainChanged {
+  id                   Int      @id @default(autoincrement())
+
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model OperatorSet {
+  id                   Int      @id @default(autoincrement())
+  owner                String
+  operator             String
+  approved             Boolean
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([owner, operator])
+}
+
+model Donate {
+  id                   Int      @id @default(autoincrement())
+  id                   String
+  sender               String
+  amount0              String
+  amount1              String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([id, sender])
+}
+
+model Initialize {
+  id                   Int      @id @default(autoincrement())
+  id                   String
+  currency0            String
+  currency1            String
+  fee                  String
+  tickSpacing          String
+  hooks                String
+  sqrtPriceX96         String
+  tick                 String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([id, currency0, currency1])
+}
+
+model ModifyLiquidity {
+  id                   Int      @id @default(autoincrement())
+  id                   String
+  sender               String
+  tickLower            String
+  tickUpper            String
+  liquidityDelta       String
+  salt                 String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([id, sender])
+}
+
+model ProtocolFeeControllerUpdated {
+  id                   Int      @id @default(autoincrement())
+  protocolFeeController String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([protocolFeeController])
+}
+
+model ProtocolFeeUpdated {
+  id                   Int      @id @default(autoincrement())
+  id                   String
+  protocolFee          String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([id])
+}
+
+model Swap {
+  id                   Int      @id @default(autoincrement())
+  id                   String
+  sender               String
+  amount0              String
+  amount1              String
+  sqrtPriceX96         String
+  liquidity            String
+  tick                 String
+  fee                  String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([id, sender])
+}
+
+model IndexInitialized {
+  id                   Int      @id @default(autoincrement())
+  underlyingAmount0    String
+  underlyingAmount1    String
+  underlying0UsdValue  String
+  underlying1UsdValue  String
+  initialShares        String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model WeightsUpdateProposed {
+  id                   Int      @id @default(autoincrement())
+  newWeightAsset0      String
+  newWeightAsset1      String
+  implementationTimestamp String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([implementationTimestamp])
+}
+
+model FeesCollected {
+  id                   Int      @id @default(autoincrement())
+  feeCollector         String
+  feeAmount            String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([feeCollector])
+}
+
+model IndexRebalanced {
+  id                   Int      @id @default(autoincrement())
+  initAsset0Reserve    String
+  initAsset1Reserve    String
+  newAsset0Reserve     String
+  newAsset1Reserve     String
+  rebalanceTimestamp   String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([rebalanceTimestamp])
+}
+
+model IndexWeightsUpdated {
+  id                   Int      @id @default(autoincrement())
+  newWeightAsset0      String
+  newWeightAsset1      String
+  updateTimestamp      String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([updateTimestamp])
+}
+
+model SharesBurned {
+  id                   Int      @id @default(autoincrement())
+  user                 String
+  sharesBurned         String
+  token0Removed        String
+  token1Removed        String
+  usdcAmountOut        String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([user])
+}
+
+model SharesMinted {
+  id                   Int      @id @default(autoincrement())
+  user                 String
+  usdcAmountIn         String
+  sharesMinted         String
+  token0Added          String
+  token1Added          String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([user])
+}
+
+model WeightUpdateRebalanceFailed {
+  id                   Int      @id @default(autoincrement())
+  reasonData           String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model RouterAddressSet {
+  id                   Int      @id @default(autoincrement())
+  newRouter            String
+  setter               String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([newRouter, setter])
+}
+
+model SwapManagerAddressSet {
+  id                   Int      @id @default(autoincrement())
+  newSwapManager       String
+  setter               String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([newSwapManager, setter])
+}
+
+model FeesCollectionFailed {
+  id                   Int      @id @default(autoincrement())
+  indexAddress         String
+  feeCollector         String
+  reasonData           String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([indexAddress, feeCollector])
+}
+
+model IndexCreated {
+  id                   Int      @id @default(autoincrement())
+  indexAddress         String
+  asset0               String
+  asset1               String
+  assetManager         String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([indexAddress, asset0, asset1])
+}
+
+model IndexRebalanceFailed {
+  id                   Int      @id @default(autoincrement())
+  indexAddress         String
+  reasonData           String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([indexAddress])
+}
+
+model NewIndexWeightsProposed {
+  id                   Int      @id @default(autoincrement())
+  indexAddress         String
+  assetManager         String
+  oldWeightAsset0      String
+  oldWeightAsset1      String
+  newWeightAsset0      String
+  newWeightAsset1      String
+  implementationTimestamp String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([indexAddress, assetManager])
+}
+
+model WeightUpdateExecuted {
+  id                   Int      @id @default(autoincrement())
+  indexAddress         String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([indexAddress])
+}
+
+model WeightUpdateFailed {
+  id                   Int      @id @default(autoincrement())
+  indexAddress         String
+  reasonData           String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([indexAddress])
+}
+
+model ConfirmationRevoked {
+  id                   Int      @id @default(autoincrement())
+  txId                 String
+  owner                String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([txId, owner])
+}
+
+model TransactionConfirmed {
+  id                   Int      @id @default(autoincrement())
+  txId                 String
+  owner                String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([txId, owner])
+}
+
+model TransactionExecuted {
+  id                   Int      @id @default(autoincrement())
+  txId                 String
+  executor             String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([txId, executor])
+}
+
+model TransactionSubmitted {
+  id                   Int      @id @default(autoincrement())
+  txId                 String
+  proposer             String
+  target               String
+  value                String
+  data                 String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([txId, proposer, target])
+}
+
+model OwnershipTransferred {
+  id                   Int      @id @default(autoincrement())
+  previousOwner        String
+  newOwner             String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([previousOwner, newOwner])
+}
+
+model RateSet {
+  id                   Int      @id @default(autoincrement())
+  tokenIn              String
+  tokenOut             String
+  rate                 String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([tokenIn, tokenOut])
+}
+
+model SwapExecuted {
+  id                   Int      @id @default(autoincrement())
+  tokenIn              String
+  tokenOut             String
+  amountIn             String
+  amountOut            String
+  recipient            String
+  blockNumber          BigInt
+  txHash               String
+  logIndex             Int
+  timestamp            DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([tokenIn, tokenOut])
+}
