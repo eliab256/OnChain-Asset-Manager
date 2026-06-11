@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {IIndex} from "./Interface/IIndex.sol";
 import "./events/IndexEvents.sol";
 import "./errors/IndexErrors.sol";
@@ -34,7 +35,7 @@ import {
  * (i.e. the native decimals of each underlying asset).
  *
  */
-contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
+contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;
@@ -113,7 +114,7 @@ contract Index is IIndex, ERC20, AccessControl, ContractCodeConstants {
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
         uint32 _feePercentage
-    ) ERC20(_name, _symbol) {
+    ) ERC20Permit(_name) ERC20(_name, _symbol) {
         i_asset0 = IERC20(_asset0.asset);
         i_asset1 = IERC20(_asset1.asset);
         i_usdc = IERC20(_usdcAddress);

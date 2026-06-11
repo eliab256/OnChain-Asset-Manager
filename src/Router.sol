@@ -8,6 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IRouter} from "./Interface/IRouter.sol";
 import "./errors/RouterErrors.sol";
 import {
@@ -68,6 +69,31 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         _buyShares(_indexAddress, _usdcAmount, _maxTolerance);
     }
 
+    function buyExactUsdcAmountOfSharesWithPermit(
+        address _indexAddress,
+        uint256 _usdcAmount,
+        uint256 _maxTolerance,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    )
+        public
+        validInputs(_indexAddress, _usdcAmount, _maxTolerance, true)
+        nonReentrant
+    {
+        IERC20Permit(address(i_usdc)).permit(
+            msg.sender,
+            _indexAddress,
+            _usdcAmount,
+            _deadline,
+            _v,
+            _r,
+            _s
+        );
+        _buyShares(_indexAddress, _usdcAmount, _maxTolerance);
+    }
+
     /**
      * @notice Set Allowance to the index contract to spend Shares
      * @notice MaxTolerance is used to revert the transaction if the tolerance is too high, protecting users from front-running and price manipulation.
@@ -88,6 +114,7 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
     {
         _sellShares(_indexAddress, _sharesAmount, _maxTolerance);
     }
+
     /**
      * @notice User set Allowance to the index contract to spend Usdc
      * @notice Buy exact amount of Usdc and receive shares, tolerance is used to protect users from front-running and price manipulation.

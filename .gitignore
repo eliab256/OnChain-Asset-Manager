@@ -18,3 +18,5 @@ lib/
 indexer/node_modules/
 indexer/dist/
 indexer/.env
+
+sdk/node_modules/
