@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "@metamask/providers": "^22.1.1"
+  }
+}

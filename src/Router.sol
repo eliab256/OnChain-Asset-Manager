@@ -69,6 +69,18 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         _buyShares(_indexAddress, _usdcAmount, _maxTolerance);
     }
 
+    /**
+     * @notice Set Allowance to the index contract to spend Usdc using permit
+     * @notice buy exact amount of Usdc and receive shares, tolerance is used to protect users from front-running and price manipulation.
+     * @notice If the amount of shares received is less than the minimum amount calculated with tolerance, the transaction will revert.
+     * @param _indexAddress The address of the index.
+     * @param _usdcAmount The amount of USDC to spend.
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
+     * @param _deadline The deadline for the permit signature.
+     * @param _v The v component of the permit signature.
+     * @param _r The r component of the permit signature.
+     * @param _s The s component of the permit signature.
+     */
     function buyExactUsdcAmountOfSharesWithPermit(
         address _indexAddress,
         uint256 _usdcAmount,
@@ -292,6 +304,7 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         _validTolerance(_tolerance);
         _validBalance(_indexAddress, _amount, isBuying);
     }
+
     /**
      * @notice Returns the address of the IndexManager contract used by the router.
      * @return The address of the IndexManager contract.
@@ -300,6 +313,10 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         return address(i_IndexManager);
     }
 
+    function getMaxTolerance() external pure returns (uint256) {
+        return MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION;
+    }
+    
     /**
      * @notice Returns the address of the USDC token used by the router.
      * @return The address of the USDC token.

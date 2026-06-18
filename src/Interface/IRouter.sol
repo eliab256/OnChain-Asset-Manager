@@ -31,5 +31,7 @@ interface IRouter {
     // Getter functions
     function getIndexManager() external view returns (address);
 
+    function getMaxTolerance() external pure returns (uint256);
+
     function getUsdc() external view returns (address);
 }

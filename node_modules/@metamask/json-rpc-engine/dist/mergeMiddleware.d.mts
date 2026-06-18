@@ -1,0 +1,11 @@
+import type { Json, JsonRpcParams } from "@metamask/utils";
+import type { JsonRpcMiddleware } from "./JsonRpcEngine.mjs";
+/**
+ * Takes a stack of middleware and joins them into a single middleware function.
+ *
+ * @deprecated Use `JsonRpcEngineV2` and its corresponding types instead.
+ * @param middlewareStack - The middleware stack to merge.
+ * @returns The merged middleware function.
+ */
+export declare function mergeMiddleware(middlewareStack: JsonRpcMiddleware<JsonRpcParams, Json>[]): JsonRpcMiddleware<JsonRpcParams, Json>;
+//# sourceMappingURL=mergeMiddleware.d.mts.map
