@@ -3,9 +3,10 @@ import IndexmanagerJson from "../../../out/IndexManager.sol/IndexManager.json" w
 import RouterJson from "../../../out/Router.sol/Router.json" with { type: "json" };
 import SwapManagerJson from "../../../out/SwapManager.sol/SwapManager.json" with { type: "json" };
 import MultiSigWalletJson from "../../../out/MultiSigWallet.sol/MultiSigWallet.json" with { type: "json" };
+import type { Abi } from "viem";
 
-export const IndexABI = IndexJson.abi;
-export const IndexmanagerABI = IndexmanagerJson.abi;
-export const RouterABI = RouterJson.abi;
-export const SwapManagerABI = SwapManagerJson.abi;
-export const MultiSigWalletABI = MultiSigWalletJson.abi;
+export const IndexABI = IndexJson.abi as Abi;
+export const IndexmanagerABI = IndexmanagerJson.abi as Abi;
+export const RouterABI = RouterJson.abi as Abi;
+export const SwapManagerABI = SwapManagerJson.abi as Abi;
+export const MultiSigWalletABI = MultiSigWalletJson.abi as Abi;

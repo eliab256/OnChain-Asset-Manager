@@ -2,7 +2,6 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  custom,
   type Chain,
   type PublicClient,
   type WalletClient,
