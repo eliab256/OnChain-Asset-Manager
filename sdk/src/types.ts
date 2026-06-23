@@ -8,6 +8,11 @@ export interface RouterConfig {
   usdcAddress: Address;
 }
 
+export interface IndexConfig {
+  publicClient: PublicClient;
+  indexAddress: Address;
+}
+
 /**
  * Struct: IndexAsset
  */
