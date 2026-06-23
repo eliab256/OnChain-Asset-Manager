@@ -1,7 +1,8 @@
-import type { PublicClient, Address, Hex } from "viem";
+import type { PublicClient, WalletClient, Address, Hex } from "viem";
 
 export interface RouterConfig {
   publicClient: PublicClient;
+  walletClient: WalletClient;
   routerAddress: Address;
   indexManagerAddress: Address;
   usdcAddress: Address;

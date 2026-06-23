@@ -65,7 +65,7 @@ export class RouterValidator {
     }
   }
 
-  private async validateRouterInputs(
+  async validateRouterInputs(
     callerAddress: Address,
     indexAddress: Address,
     amount: bigint,

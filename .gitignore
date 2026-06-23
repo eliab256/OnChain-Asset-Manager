@@ -20,3 +20,5 @@ indexer/dist/
 indexer/.env
 
 sdk/node_modules/
+sdk/.env
+node_modules
