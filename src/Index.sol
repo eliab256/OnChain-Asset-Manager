@@ -945,96 +945,109 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @return asset0ReceivedStd Received asset0 in 18-decimal standard.
      * @return asset1ReceivedStd Received asset1 in 18-decimal standard.
      */
-    function _swapUsdcForAssets(
-        uint256 _usdcAmountIn0,
-        uint256 _usdcAmountIn1
-    ) internal returns (uint256 asset0ReceivedStd, uint256 asset1ReceivedStd) {
-        // 1. Convert USDC amounts from std decimals to token decimals for the swap input.
-        uint256 usdcAmount0TokenDec;
-        uint256 usdcAmount1TokenDec;
-        if (_usdcAmountIn0 > 0)
-            usdcAmount0TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                _usdcAmountIn0,
-                i_decimalsUsdc
-            );
-        if (_usdcAmountIn1 > 0)
-            usdcAmount1TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                _usdcAmountIn1,
-                i_decimalsUsdc
-            );
-
-        bytes memory commands;
-        bytes[] memory inputs;
-        uint256 asset0BalanceBefore;
-        uint256 asset1BalanceBefore;
-
-        // 2. Build swap commands and snapshot balances before the swap.
-        // 2.1. Only asset1 needed single swap USDC to asset1
-        if (_usdcAmountIn0 == 0 && _usdcAmountIn1 > 0) {
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET1_USDC,
-                address(i_usdc),
-                usdcAmount1TokenDec.toUint128()
-            );
-            asset1BalanceBefore = i_asset1.balanceOf(address(this));
-        }
-        // 2.2. Only asset0 needed single swap USDC to asset0
-        else if (_usdcAmountIn0 > 0 && _usdcAmountIn1 == 0) {
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                address(i_usdc),
-                usdcAmount0TokenDec.toUint128()
-            );
-            asset0BalanceBefore = i_asset0.balanceOf(address(this));
-        }
-        // 2.3. Both needed  double swap USDC to asset0 + USDC to asset1
-        else {
-            (commands, inputs) = i_swapManager.buildDoubleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                SwapType.ASSET1_USDC,
-                address(i_usdc),
-                address(i_usdc),
-                usdcAmount0TokenDec.toUint128(),
-                usdcAmount1TokenDec.toUint128()
-            );
-            asset0BalanceBefore = i_asset0.balanceOf(address(this));
-            asset1BalanceBefore = i_asset1.balanceOf(address(this));
-        }
-
-        // 3. Transfer USDC to the Universal Router and execute the swap.
-        //    payerIsUser=false → the router pays from its own balance (no Permit2 needed).
-        i_usdc.safeTransfer(
-            address(i_universalRouter),
-            usdcAmount0TokenDec + usdcAmount1TokenDec
-        );
-        i_universalRouter.execute(
-            commands,
-            inputs,
-            block.timestamp + SWAP_DEADLINE
-        );
-
-        // 4. Measure received amounts (token decimals) and convert to std decimals.
-        if (_usdcAmountIn0 > 0) {
-            uint256 receivedTokenDec = i_asset0.balanceOf(address(this)) -
-                asset0BalanceBefore;
-            asset0ReceivedStd = _convertToDecimalStandard(
-                receivedTokenDec,
-                i_decimals0
-            );
-        }
-        if (_usdcAmountIn1 > 0) {
-            uint256 receivedTokenDec = i_asset1.balanceOf(address(this)) -
-                asset1BalanceBefore;
-            asset1ReceivedStd = _convertToDecimalStandard(
-                receivedTokenDec,
-                i_decimals1
-            );
-        }
-    }
-
+   function _swapUsdcForAssets(  
+    uint256 _usdcAmountIn0,  
+    uint256 _usdcAmountIn1  
+) internal returns (uint256 asset0ReceivedStd, uint256 asset1ReceivedStd) {  
+    // 1. Convert USDC amounts from std decimals to token decimals for the swap input.  
+    uint256 usdcAmount0TokenDec;  
+    uint256 usdcAmount1TokenDec;  
+    if (_usdcAmountIn0 > 0)  
+        usdcAmount0TokenDec = _convertFromStdDecimalsToTokenDecimals(  
+            _usdcAmountIn0,  
+            i_decimalsUsdc  
+        );  
+    if (_usdcAmountIn1 > 0)  
+        usdcAmount1TokenDec = _convertFromStdDecimalsToTokenDecimals(  
+            _usdcAmountIn1,  
+            i_decimalsUsdc  
+        );  
+  
+    // NEW: Price validation before swaps  
+    uint256 priceAsset0Before = getLatestPrice(address(i_asset0));  
+    uint256 priceAsset1Before = getLatestPrice(address(i_asset1));  
+  
+    bytes memory commands;  
+    bytes[] memory inputs;  
+    uint256 asset0BalanceBefore;  
+    uint256 asset1BalanceBefore;  
+  
+    // 2. Build swap commands and snapshot balances before the swap.  
+    // 2.1. Only asset1 needed single swap USDC to asset1  
+    if (_usdcAmountIn0 == 0 && _usdcAmountIn1 > 0) {  
+        (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(  
+            address(this),  
+            SwapType.ASSET1_USDC,  
+            address(i_usdc),  
+            usdcAmount1TokenDec.toUint128()  
+        );  
+        asset1BalanceBefore = i_asset1.balanceOf(address(this));  
+    }  
+    // 2.2. Only asset0 needed single swap USDC to asset0  
+    else if (_usdcAmountIn0 > 0 && _usdcAmountIn1 == 0) {  
+        (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(  
+            address(this),  
+            SwapType.ASSET0_USDC,  
+            address(i_usdc),  
+            usdcAmount0TokenDec.toUint128()  
+        );  
+        asset0BalanceBefore = i_asset0.balanceOf(address(this));  
+    }  
+    // 2.3. Both needed  double swap USDC to asset0 + USDC to asset1  
+    else {  
+        (commands, inputs) = i_swapManager.buildDoubleSwapParams(  
+            address(this),  
+            SwapType.ASSET0_USDC,  
+            SwapType.ASSET1_USDC,  
+            address(i_usdc),  
+            address(i_usdc),  
+            usdcAmount0TokenDec.toUint128(),  
+            usdcAmount1TokenDec.toUint128()  
+        );  
+        asset0BalanceBefore = i_asset0.balanceOf(address(this));  
+        asset1BalanceBefore = i_asset1.balanceOf(address(this));  
+    }  
+  
+    // 3. Transfer USDC to the Universal Router and execute the swap.  
+    //    payerIsUser=false → the router pays from its own balance (no Permit2 needed).  
+    i_usdc.safeTransfer(  
+        address(i_universalRouter),  
+        usdcAmount0TokenDec + usdcAmount1TokenDec  
+    );  
+    i_universalRouter.execute(  
+        commands,  
+        inputs,  
+        block.timestamp + SWAP_DEADLINE  
+    );  
+  
+    // NEW: Price validation after swaps  
+    uint256 priceAsset0After = getLatestPrice(address(i_asset0));  
+    uint256 priceAsset1After = getLatestPrice(address(i_asset1));  
+  
+    uint256 MAX_PRICE_MOVEMENT = 100; // 1% max movement (adjustable)  
+    if (_priceMovedTooMuch(priceAsset0Before, priceAsset0After, MAX_PRICE_MOVEMENT) ||  
+        _priceMovedTooMuch(priceAsset1Before, priceAsset1After, MAX_PRICE_MOVEMENT)) {  
+        revert Index__PriceMovedExcessively();  
+    }  
+  
+    // 4. Measure received amounts (token decimals) and convert to std decimals.  
+    if (_usdcAmountIn0 > 0) {  
+        uint256 receivedTokenDec = i_asset0.balanceOf(address(this)) -  
+            asset0BalanceBefore;  
+        asset0ReceivedStd = _convertToDecimalStandard(  
+            receivedTokenDec,  
+            i_decimals0  
+        );  
+    }  
+    if (_usdcAmountIn1 > 0) {  
+        uint256 receivedTokenDec = i_asset1.balanceOf(address(this)) -  
+            asset1BalanceBefore;  
+        asset1ReceivedStd = _convertToDecimalStandard(  
+            receivedTokenDec,  
+            i_decimals1  
+        );  
+    }  
+}  
     /**
      * @dev Swaps the underlying assets back to USDC.
      * @param _asset0UsdToSwap USD value of asset0 to sell, in std decimals.
@@ -1584,4 +1597,16 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     function getInitializationStatus() public view returns (bool) {
         return s_initialized;
     }
+
+    function _priceMovedTooMuch(  
+    uint256 _priceBefore,   
+    uint256 _priceAfter,   
+    uint256 _maxMovementBps  
+) internal pure returns (bool) {  
+    if (_priceBefore == 0) return true;  
+    uint256 movement = _priceAfter > _priceBefore ?   
+        ((_priceAfter - _priceBefore) * 10000) / _priceBefore :  
+        ((_priceBefore - _priceAfter) * 10000) / _priceBefore;  
+    return movement > _maxMovementBps;  
+}
 }
