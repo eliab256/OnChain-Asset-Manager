@@ -7,7 +7,7 @@ import {
 } from "@uniswap/universal-router/contracts/libraries/Commands.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
-import {SwapType, PoolKey, PoolVersion, SwapRoute} from "./types.sol";
+import {SwapType, PoolKey, PoolVersion, SwapRoute} from "../types.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 contract SwapManager is Ownable {
@@ -210,7 +210,7 @@ contract SwapManager is Ownable {
                 poolKey: _key,
                 zeroForOne: zeroForOne,
                 amountIn: _amountIn,
-                amountOutMinimum: 0, // @audit-info: slippage should be handled in Index.sol
+                amountOutMinimum: 0, // @audit-info: slippage is handled in Index.sol
                 hookData: ""
             });
 
@@ -275,7 +275,7 @@ contract SwapManager is Ownable {
         inputs[0] = abi.encode(
             address(1), // recipient: MSG_SENDER → maps to the Index (caller of execute)
             uint256(_amountIn),
-            uint256(0), // amountOutMinimum — @audit-info: slippage handling still needed
+            uint256(0), // amountOutMinimum — @audit-info: slippage is handled in Index.sol
             directionalPath,
             false // payerIsUser: false, tokens are pre-transferred to the Universal Router
         );

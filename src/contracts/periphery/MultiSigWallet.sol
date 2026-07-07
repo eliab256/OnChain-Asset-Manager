@@ -2,10 +2,10 @@
 pragma solidity ^0.8.0;
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {IMultiSigWallet} from "./Interface/IMultiSigWallet.sol";
-import "./events/MultiSigWalletEvents.sol";
-import "./errors/MultiSigWalletErrors.sol";
-import {Transaction} from "./types.sol";
+import {IMultiSigWallet} from "../../Interface/IMultiSigWallet.sol";
+import "../../events/MultiSigWalletEvents.sol";
+import "../../errors/MultiSigWalletErrors.sol";
+import {Transaction} from "../types.sol";
 
 contract MultiSigWallet is IMultiSigWallet,EIP712 {
     using ECDSA for bytes32;

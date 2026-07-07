@@ -2,13 +2,13 @@
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {ContractCodeConstants} from "./ContractCodeConstants.sol";
-import {Index} from "./Index.sol";
-import {IIndexManager} from "./Interface/IIndexManager.sol";
-import {ISwapManager} from "./Interface/ISwapManager.sol";
-import "./errors/IndexManagerErrors.sol";
-import "./events/IndexManagerEvents.sol";
-import {IndexAsset, SwapRoute} from "./types.sol";
+import {ContractCodeConstants} from "../ContractCodeConstants.sol";
+import {Index} from "../Index.sol";
+import {IIndexManager} from "../../Interface/IIndexManager.sol";
+import {ISwapManager} from "../../Interface/ISwapManager.sol";
+import "../../errors/IndexManagerErrors.sol";
+import "../../events/IndexManagerEvents.sol";
+import {IndexAsset, SwapRoute} from "../types.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -16,7 +16,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IIndex} from "./Interface/IIndex.sol";
+import {IIndex} from "../../Interface/IIndex.sol";
 import {console2} from "forge-std/console2.sol";
 
 contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {

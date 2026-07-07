@@ -14,6 +14,7 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {
     AggregatorV3Interface
@@ -35,7 +36,7 @@ import {
  * (i.e. the native decimals of each underlying asset).
  *
  */
-contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
+contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, ContractCodeConstants {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;
@@ -168,7 +169,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         );
 
         // 4. Get target weights to calculate underlying amount of asset1
-        (uint128 weight0, uint128 weight1) = getAssetsWeights();
+        (uint128 weight0, uint128 weight1) = _getAssetsWeights();
 
         // 5. Derive the required amount of asset1 from the provided amount of asset0 and the target weights.
         uint256 underlyingAmount0Std = _convertToDecimalStandard(
@@ -179,7 +180,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         uint256 underlying0UsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
                 underlyingAmount0Std,
-                getLatestPrice(address(i_asset0)),
+                _getLatestPrice(address(i_asset0)),
                 DECIMALS_STANDARD
             );
 
@@ -193,7 +194,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         uint256 underlyingAmount1Std = UnderlyingMath
             .calculateTokenAmountFromUsdValue(
                 underlying1UsdValue,
-                getLatestPrice(address(i_asset1)),
+                _getLatestPrice(address(i_asset1)),
                 DECIMALS_STANDARD
             );
 
@@ -240,7 +241,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         address _to,
         uint256 _usdcAmountIn,
         uint256 _maxTolerance
-    ) public isInitialized onlyRole(ROUTER_ROLE) {
+    ) public isInitialized onlyRole(ROUTER_ROLE) nonReentrant {
         i_usdc.safeTransferFrom(_to, address(this), _usdcAmountIn);
 
         // 1. Cache initial state.
@@ -286,7 +287,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         uint256 asset1ReceivedUsdValue;
         {
             // 3.1 get effective and target weights
-            (uint128 targetWeight0, uint128 targetWeight1) = getAssetsWeights();
+            (uint128 targetWeight0, uint128 targetWeight1) = _getAssetsWeights();
             (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
                 initState.asset0UsdValue,
                 initState.totalAssetUsdValue
@@ -383,7 +384,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         address _from,
         uint256 _sharesAmount,
         uint256 _maxTolerance
-    ) public isInitialized onlyRole(ROUTER_ROLE) {
+    ) public isInitialized onlyRole(ROUTER_ROLE) nonReentrant{
         // 1. Cache initial state.
         InitStateCache memory initState;
         (
@@ -410,7 +411,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         uint128 asset1AmountRedeemedTokenDec;
         {
             //3.1. Get target weights
-            (uint128 weight0, uint128 weight1) = getAssetsWeights();
+            (uint128 weight0, uint128 weight1) = _getAssetsWeights();
 
             //3.2. Get Effective weights at the moment
             (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
@@ -655,7 +656,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function collectFees(
         address _collector
-    ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
+    ) external onlyRole(INDEX_MANAGER_ROLE) nonReentrant returns (uint256 feesCollected) {
         // 1. Cache totalFees in a local variable to avoid multiple storage reads
         uint128 cacheTotalFees = s_totalFees;
 
@@ -679,7 +680,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @dev Reverts if there are no fees to collect.
      * @dev Reverts if swap slippage is higher than the defined threshold.
      */
-    function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) {
+    function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) nonReentrant{
         // 1. Cache initial state.
         InitStateCache memory initState;
         (
@@ -702,7 +703,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         ) revert Index__RebalanceNotNeeded();
 
         // 3. Calculate amounts to swap (returned in std decimals).
-        (uint128 weight0, uint128 weight1) = getAssetsWeights();
+        (uint128 weight0, uint128 weight1) = _getAssetsWeights();
         (uint256 amount0ToSwapStd, uint256 amount1ToSwapStd) = UnderlyingMath
             .calculateRebalanceAmounts(
                 initState.totalAssetUsdValue,
@@ -774,7 +775,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         s_asset1Reserve = updatedReserv1;
 
         // 6. Slippage check (works on USD values, unaffected by decimal format).
-        (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
+        (,,,, , , , uint256 totalAssetUsdValueAfter) = _initFunctionValues();
         if (
             totalAssetUsdValueAfter <
             initState.totalAssetUsdValue.calculateNetAmountFromTolerance(
@@ -906,16 +907,24 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             uint256 totalAssetUsdValue
         )
     {
-        priceAsset0 = getLatestPrice(address(i_asset0));
-        priceAsset1 = getLatestPrice(address(i_asset1));
-        priceUsdc = getLatestPrice(address(i_usdc));
+        priceAsset0 = _getLatestPrice(address(i_asset0));
+        priceAsset1 = _getLatestPrice(address(i_asset1));
+        priceUsdc = _getLatestPrice(address(i_usdc));
+
+        uint128 rawReserve0;
+        uint128 rawReserve1;
+        assembly {
+            let value := sload(s_asset0Reserve.slot)
+            rawReserve0 := and(value, sub(shl(128, 1), 1))
+            rawReserve1 := shr(128, value)
+        }
 
         initialAsset0Reserve = _convertToDecimalStandard(
-            s_asset0Reserve,
+            rawReserve0,
             i_decimals0
         ).toUint128();
         initialAsset1Reserve = _convertToDecimalStandard(
-            s_asset1Reserve,
+            rawReserve1,
             i_decimals1
         ).toUint128();
 
@@ -1054,7 +1063,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 uint256 amountStd = UnderlyingMath
                     .calculateTokenAmountFromUsdValue(
                         _asset0UsdToSwap,
-                        getLatestPrice(address(i_asset0)),
+                        _getLatestPrice(address(i_asset0)),
                         DECIMALS_STANDARD
                     );
                 asset0AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
@@ -1067,7 +1076,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 uint256 amountStd = UnderlyingMath
                     .calculateTokenAmountFromUsdValue(
                         _asset1UsdToSwap,
-                        getLatestPrice(address(i_asset1)),
+                        _getLatestPrice(address(i_asset1)),
                         DECIMALS_STANDARD
                     );
                 asset1AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
@@ -1386,7 +1395,11 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @param _asset The address of the asset to get the price for. Must be either asset0, asset1, or USDC.
      * @return price USD price with 18 decimals.
      */
-    function getLatestPrice(address _asset) public view returns (uint256) {
+    function getLatestPrice(address _asset) public view nonReentrantView returns (uint256) {
+        return _getLatestPrice(_asset);
+    }
+
+    function _getLatestPrice(address _asset) internal view returns (uint256) {
         AggregatorV3Interface feed;
         if (_asset == address(i_asset0)) feed = i_asset0PriceFeed;
         else if (_asset == address(i_asset1)) feed = i_asset1PriceFeed;
@@ -1422,7 +1435,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function getAssetsUsdValue()
         public
-        view
+        view nonReentrantView
         returns (
             uint256 asset0TotalUsdValue,
             uint256 asset1TotalUsdValue,
@@ -1448,12 +1461,12 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function getAssetsEffectiveWeights()
         public
-        view
+        view nonReentrantView
         returns (uint128 effectiveWeight0, uint128 effectiveWeight1)
     {
-        (uint256 a0usd, , uint256 total) = getAssetsUsdValue();
+        (,,,,,uint256 asset0usd, , uint256 total) = _initFunctionValues();
         (effectiveWeight0, effectiveWeight1) = _getAssetsEffectiveWights(
-            a0usd,
+            asset0usd,
             total
         );
     }
@@ -1476,9 +1489,17 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @notice Returns the current weights of asset0 and asset1.
      * @return The current weights of asset0 and asset1.
      */
-    function getAssetsWeights() public view returns (uint128, uint128) {
-        return (s_weight0, s_weight1);
+    function getAssetsWeights() public view nonReentrantView returns (uint128, uint128) {
+        _getAssetsWeights();
     }
+
+    function _getAssetsWeights() internal view returns (uint128 weight0, uint128 weight1) {
+        assembly {
+            let value := sload(s_weight0.slot)
+            weight0 := and(value, sub(shl(128, 1), 1))
+            weight1 := shr(128, value)
+        }
+    } 
 
     /**
      * @notice Returns the pending weights and the timestamp when the weight update can be executed.
@@ -1486,7 +1507,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function getAssetsPendingWeights()
         public
-        view
+        view nonReentrantView
         returns (uint128, uint128, uint256)
     {
         return (s_pendingWeight0, s_pendingWeight1, s_weightUpdateExecutableAt);
@@ -1496,7 +1517,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @notice Returns the raw reserves in **token decimals** as stored in contract state.
      * @return The reserves of asset0 and asset1 in token decimals. These are the actual amounts used for swaps and stored in state, not normalised to 18 decimals.
      */
-    function getAssetsReserves() public view returns (uint128, uint128) {
+    function getAssetsReserves() public view nonReentrantView returns (uint128, uint128) {
         return (s_asset0Reserve, s_asset1Reserve);
     }
 
@@ -1507,7 +1528,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function getAssetsReservesStdDecimals()
         public
-        view
+        view nonReentrantView
         returns (uint256, uint256)
     {
         return (
