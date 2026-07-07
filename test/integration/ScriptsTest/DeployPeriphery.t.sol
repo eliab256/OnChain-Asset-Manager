@@ -4,11 +4,11 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
-import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
-import {Router} from "../../../src/Router.sol";
-import {IndexManager} from "../../../src/IndexManager.sol";
-import {Index} from "../../../src/Index.sol";
-import {SwapManager} from "../../../src/SwapManager.sol";
+import {MultiSigWallet} from "../../../src/contracts/periphery/MultiSigWallet.sol";
+import {Router} from "../../../src/contracts/periphery/Router.sol";
+import {IndexManager} from "../../../src/contracts/periphery/IndexManager.sol";
+import {Index} from "../../../src/contracts/core/Index.sol";
+import {SwapManager} from "../../../src/contracts/periphery/SwapManager.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 
 contract DeployPeripheryTest is Test, CodeConstants {

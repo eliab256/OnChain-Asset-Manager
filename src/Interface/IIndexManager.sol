@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IndexAsset, SwapRoute} from "../types.sol";
+import {IndexAsset, SwapRoute} from "../contracts/types.sol";
 
 interface IIndexManager {
     function setRouterAddress(address _newRouter) external;

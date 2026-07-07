@@ -9,19 +9,19 @@ import {
     RunParams
 } from "../../script/DeployAndInitNewIndex.s.sol";
 import {HelperConfig, AssetConfig} from "../../script/HelperConfig.s.sol";
-import {MultiSigWallet} from "../../src/MultiSigWallet.sol";
-import {Router} from "../../src/Router.sol";
-import {IndexManager} from "../../src/IndexManager.sol";
-import {Index} from "../../src/Index.sol";
-import {SwapManager} from "../../src/SwapManager.sol";
+import {MultiSigWallet} from "../../src/contracts/periphery/MultiSigWallet.sol";
+import {Router} from "../../src/contracts/periphery/Router.sol";
+import {IndexManager} from "../../src/contracts/periphery/IndexManager.sol";
+import {Index} from "../../src/contracts/core/Index.sol";
+import {SwapManager} from "../../src/contracts/periphery/SwapManager.sol";
 import {MockUSDC} from "../mocks/USDCMock.sol";
 import {AssetTokenMock} from "../mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {UniversalRouterMock} from "../mocks/UniversalRouterMock.sol";
-import {IndexAsset, AssetAvailable} from "../../src/types.sol";
-import {ContractCodeConstants} from "../../src/ContractCodeConstants.sol";
+import {IndexAsset, AssetAvailable} from "../../src/contracts/types.sol";
+import {ContractCodeConstants} from "../../src/contracts/ContractCodeConstants.sol";
 
 abstract contract BaseTest is Test, ContractCodeConstants {
     MultiSigWallet public multiSigWallet;

@@ -3,10 +3,10 @@ pragma solidity ^0.8.0;
 
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
-import {MultiSigWallet} from "../src/MultiSigWallet.sol";
-import {IndexManager} from "../src/IndexManager.sol";
-import {Router} from "../src/Router.sol";
-import {SwapManager} from "../src/SwapManager.sol";
+import {MultiSigWallet} from "../src/contracts/periphery/MultiSigWallet.sol";
+import {IndexManager} from "../src/contracts/periphery/IndexManager.sol";
+import {Router} from "../src/contracts/periphery/Router.sol";
+import {SwapManager} from "../src/contracts/periphery/SwapManager.sol";
 import {HelperConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {CodeConstants} from "../script/CodeConstants.sol";
 

@@ -8,7 +8,7 @@ import {
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {UnderlyingMath} from "../../libraries/UnderlyingMath.sol";
 import {SwapType} from "../types.sol";
-import {ContractCodeConstants} from "../ContractCodeConstants.sol";
+import {ContractCodeConstants as C} from "../ContractCodeConstants.sol";
 import "../../errors/IndexErrors.sol";
 import {IndexConfigStorage} from "./IndexConfigStorage.sol";
 
@@ -22,7 +22,7 @@ import {IndexConfigStorage} from "./IndexConfigStorage.sol";
  *      ONLY inheritance relationship this contract has — storage access is via the
  *      IndexConfigStorage library, no inheritance needed for that.
  */
-abstract contract IndexSwapper is ContractCodeConstants {
+abstract contract IndexSwapper {
     using UnderlyingMath for uint256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
@@ -34,53 +34,90 @@ abstract contract IndexSwapper is ContractCodeConstants {
     //  Decimal conversion helpers
     // =========================================================================
 
+    /**
+     * @dev Converts an amount from the token decimals to the 18-decimal standard.
+     * @param _amount Amount in token decimals.
+     * @param _currentDecimals Decimals of the token.
+     * @return convertedAmount Amount converted to the 18-decimal standard.
+     */
     function _convertToDecimalStandard(
         uint256 _amount,
         uint8 _currentDecimals
     ) internal pure returns (uint256) {
-        if (_currentDecimals <= DECIMALS_STANDARD) {
+        if (_currentDecimals <= C.DECIMALS_STANDARD) {
             (uint256 converted, ) = UnderlyingMath.convertToSpecificDecimal(
                 _amount,
                 _currentDecimals,
-                DECIMALS_STANDARD
+                C.DECIMALS_STANDARD
             );
             return converted;
         }
         revert Index__DecimalsStandardLowerThanCurrent();
     }
 
+
+    /**
+     * @dev Converts an amount from the 18-decimal standard to the token decimals.
+     * @param _amount Amount in 18-decimal standard.
+     * @param _tokenDecimals Decimals of the token to convert to.
+     * @return convertedAmount Amount converted to the token decimals.
+     * @notice If the token decimals are the same as the standard, returns the original amount. If the token decimals are lower than the standard, converts down. If the token decimals are higher
+     */
     function _convertFromStdDecimalsToTokenDecimals(
         uint256 _amount,
         uint8 _tokenDecimals
     ) internal pure returns (uint256 convertedAmount) {
-        if (_tokenDecimals == DECIMALS_STANDARD) return _amount;
-        if (_tokenDecimals < DECIMALS_STANDARD) {
+        if (_tokenDecimals == C.DECIMALS_STANDARD) return _amount;
+        if (_tokenDecimals < C.DECIMALS_STANDARD) {
             (convertedAmount, ) = UnderlyingMath.convertToSpecificDecimal(
                 _amount,
-                DECIMALS_STANDARD,
+                C.DECIMALS_STANDARD,
                 _tokenDecimals
             );
         }
     }
 
+    /**
+     * @dev Converts a USDC amount (18-decimal std) to its real USD value
+     *      using the USDC/USD Chainlink price feed.
+     *      usdValue = (usdcAmountStd * priceUsdc) / 1e18
+     * @param _usdcAmountStd USDC amount in 18-decimal standard.
+     * @param _priceUsdc     USDC/USD price in 18-decimal standard.
+     * @return usdValue      The real USD value in 18-decimal standard.
+     */
     function _usdcToUsd(
         uint256 _usdcAmountStd,
         uint256 _priceUsdc
     ) internal pure returns (uint256 usdValue) {
-        usdValue = (_usdcAmountStd * _priceUsdc) / (10 ** DECIMALS_STANDARD);
+        usdValue = (_usdcAmountStd * _priceUsdc) / (10 ** C.DECIMALS_STANDARD);
     }
 
+    /**
+     * @dev Converts a USD value (18-decimal std) to the equivalent USDC amount
+     *      using the USDC/USD Chainlink price feed.
+     *      usdcAmount = (usdValue * 1e18) / priceUsdc
+     * @param _usdValue  USD value in 18-decimal standard.
+     * @param _priceUsdc USDC/USD price in 18-decimal standard.
+     * @return usdcAmountStd The USDC amount in 18-decimal standard.
+     */
     function _usdToUsdc(
         uint256 _usdValue,
         uint256 _priceUsdc
     ) internal pure returns (uint256 usdcAmountStd) {
-        usdcAmountStd = (_usdValue * (10 ** DECIMALS_STANDARD)) / _priceUsdc;
+        usdcAmountStd = (_usdValue * (10 ** C.DECIMALS_STANDARD)) / _priceUsdc;
     }
 
     // =========================================================================
     //  Swap wrappers
     // =========================================================================
 
+    /**
+     * @dev Swaps USDC into the underlying assets.
+     * @param _usdcAmountIn0 USDC for asset0, in 18-decimal standard.
+     * @param _usdcAmountIn1 USDC for asset1, in 18-decimal standard.
+     * @return asset0ReceivedStd Received asset0 in 18-decimal standard.
+     * @return asset1ReceivedStd Received asset1 in 18-decimal standard.
+     */
     function _swapUsdcForAssets(
         uint256 _usdcAmountIn0,
         uint256 _usdcAmountIn1
@@ -142,7 +179,7 @@ abstract contract IndexSwapper is ContractCodeConstants {
         $.universalRouter.execute(
             commands,
             inputs,
-            block.timestamp + SWAP_DEADLINE
+            block.timestamp + C.SWAP_DEADLINE
         );
 
         if (_usdcAmountIn0 > 0) {
@@ -163,6 +200,12 @@ abstract contract IndexSwapper is ContractCodeConstants {
         }
     }
 
+    /**
+     * @dev Swaps the underlying assets back to USDC.
+     * @param _asset0UsdToSwap USD value of asset0 to sell, in std decimals.
+     * @param _asset1UsdToSwap USD value of asset1 to sell, in std decimals.
+     * @return usdcReceived Received USDC amount in std decimals (NOT USD value).
+     */
     function _swapAssetsForUsdc(
         uint256 _asset0UsdToSwap,
         uint256 _asset1UsdToSwap
@@ -177,7 +220,7 @@ abstract contract IndexSwapper is ContractCodeConstants {
                     .calculateTokenAmountFromUsdValue(
                         _asset0UsdToSwap,
                         _getLatestPrice(address($.asset0)),
-                        DECIMALS_STANDARD
+                        C.DECIMALS_STANDARD
                     );
                 asset0AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
                     amountStd,
@@ -189,7 +232,7 @@ abstract contract IndexSwapper is ContractCodeConstants {
                     .calculateTokenAmountFromUsdValue(
                         _asset1UsdToSwap,
                         _getLatestPrice(address($.asset1)),
-                        DECIMALS_STANDARD
+                        C.DECIMALS_STANDARD
                     );
                 asset1AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
                     amountStd,
@@ -248,7 +291,7 @@ abstract contract IndexSwapper is ContractCodeConstants {
         $.universalRouter.execute(
             commands,
             inputs,
-            block.timestamp + SWAP_DEADLINE
+            block.timestamp + C.SWAP_DEADLINE
         );
 
         uint256 usdcReceivedTokenDec = $.usdc.balanceOf(address(this)) -
@@ -260,6 +303,12 @@ abstract contract IndexSwapper is ContractCodeConstants {
         );
     }
 
+    /**
+     * @dev Swaps one underlying asset for the other during rebalancing.
+     * @param _swapFrom     Asset address to sell.
+     * @param _amountToSwap Amount in std decimals (18).
+     * @return amountReceived Amount received in std decimals (18).
+     */
     function _swapAssetForAsset(
         address _swapFrom,
         uint256 _amountToSwap
@@ -304,7 +353,7 @@ abstract contract IndexSwapper is ContractCodeConstants {
             $.universalRouter.execute(
                 commands,
                 inputs,
-                block.timestamp + SWAP_DEADLINE
+                block.timestamp + C.SWAP_DEADLINE
             );
 
             amountReceivedTokenDec =

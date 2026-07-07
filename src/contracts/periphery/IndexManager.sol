@@ -2,8 +2,8 @@
 pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {ContractCodeConstants} from "../ContractCodeConstants.sol";
-import {Index} from "../Index.sol";
+import {ContractCodeConstants as C} from "../ContractCodeConstants.sol";
+import {Index} from "../core/Index.sol";
 import {IIndexManager} from "../../Interface/IIndexManager.sol";
 import {ISwapManager} from "../../Interface/ISwapManager.sol";
 import "../../errors/IndexManagerErrors.sol";
@@ -19,7 +19,7 @@ import {
 import {IIndex} from "../../Interface/IIndex.sol";
 import {console2} from "forge-std/console2.sol";
 
-contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
+contract IndexManager is IIndexManager, AccessControl {
     using SafeERC20 for IERC20;
 
     struct IndexAssets {
@@ -33,9 +33,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         keccak256("FEE_COLLECTOR_ROLE");
     bytes32 public constant REBALANCER_ROLE = keccak256("REBALANCER_ROLE");
 
-    uint32 public constant MAX_FEES_PERCENTAGE = 10 * PERCENTAGE_FEE_PRECISION; // 10%
+    uint32 public constant MAX_FEES_PERCENTAGE = 10 * C.PERCENTAGE_FEE_PRECISION; // 10%
     uint32 public constant MIN_FEES_PERCENTAGE =
-        (1 * PERCENTAGE_FEE_PRECISION) / 10; // 0.1%
+        (1 * C.PERCENTAGE_FEE_PRECISION) / 10; // 0.1%
 
     address internal immutable i_usdc;
     address internal immutable i_usdcPriceFeed;
@@ -166,7 +166,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         }
 
         // 3. Check that the weights sum to 100%.
-        if (asset0.weightPercentage + asset1.weightPercentage != MAX_WEIGHT) {
+        if (asset0.weightPercentage + asset1.weightPercentage != C.MAX_WEIGHT) {
             revert IndexManager__InvalidIndexAssetsPercentages();
         }
 
@@ -367,7 +367,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         IIndex index = IIndex(_indexAddress);
         (uint128 oldWeightAsset0, uint128 oldWeightAsset1) = index
             .getAssetsWeights();
-        uint128 newWeightAsset1 = MAX_PERCENTAGE - _newWeightAsset0;
+        uint128 newWeightAsset1 = C.MAX_PERCENTAGE - _newWeightAsset0;
 
         uint256 implementationTimestamp = index.proposeUpdateWeights(
             _newWeightAsset0

@@ -13,12 +13,12 @@ import {
     AssetConfig,
     NetworkConfig
 } from "../../../script/HelperConfig.s.sol";
-import {AssetAvailable} from "../../../src/types.sol";
-import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
-import {Router} from "../../../src/Router.sol";
-import {IndexManager} from "../../../src/IndexManager.sol";
-import {Index} from "../../../src/Index.sol";
-import {SwapManager} from "../../../src/SwapManager.sol";
+import {AssetAvailable} from "../../../src/contracts/types.sol";
+import {MultiSigWallet} from "../../../src/contracts/periphery/MultiSigWallet.sol";
+import {Router} from "../../../src/contracts/periphery/Router.sol";
+import {IndexManager} from "../../../src/contracts/periphery/IndexManager.sol";
+import {Index} from "../../../src/contracts/core/Index.sol";
+import {SwapManager} from "../../../src/contracts/periphery/SwapManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     AggregatorV3Interface

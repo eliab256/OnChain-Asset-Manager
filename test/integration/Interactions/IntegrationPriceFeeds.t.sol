@@ -3,12 +3,12 @@ pragma solidity ^0.8.13;
 
 import {IntegrationBase} from "./IntegrationBase.t.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {Index} from "../../../src/Index.sol";
+import {Index} from "../../../src/contracts/core/Index.sol";
 import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "../../../src/errors/IndexErrors.sol";
-import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
+import {ContractCodeConstants} from "../../../src/contracts/ContractCodeConstants.sol";
 
 contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
     function setUp() public override {

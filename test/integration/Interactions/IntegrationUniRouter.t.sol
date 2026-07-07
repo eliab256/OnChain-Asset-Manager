@@ -2,9 +2,9 @@
 pragma solidity ^0.8.13;
 
 import {IntegrationBase} from "./IntegrationBase.t.sol";
-import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
+import {ContractCodeConstants} from "../../../src/contracts/ContractCodeConstants.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {Index} from "../../../src/Index.sol";
+import {Index} from "../../../src/contracts/core/Index.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     AggregatorV3Interface

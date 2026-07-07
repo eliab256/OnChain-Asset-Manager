@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {SwapType, SwapRoute} from "../types.sol";
+import {SwapType, SwapRoute} from "../contracts/types.sol";
 
 interface ISwapManager {
     function registerIndex(

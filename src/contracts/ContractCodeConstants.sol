@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-abstract contract ContractCodeConstants {
+library ContractCodeConstants {
     /**
      * @dev The maximum delay to rethreive a price from the price feed, in seconds.
      * @dev This is used to ensure that the price data used for calculations is recent and not stale.

@@ -3,9 +3,9 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute} from "../../../src/types.sol";
+import {IndexAsset, SwapRoute} from "../../../src/contracts/types.sol";
 import {IRouter} from "../../../src/Interface/IRouter.sol";
-import {Router} from "../../../src/Router.sol";
+import {Router} from "../../../src/contracts/periphery/Router.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";

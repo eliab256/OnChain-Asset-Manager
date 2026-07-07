@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {IIndex} from "../../Interface/IIndex.sol";
-import {ContractCodeConstants} from "../ContractCodeConstants.sol";
+import {ContractCodeConstants as C} from "../ContractCodeConstants.sol";
 import {IIndexManager} from "../../Interface/IIndexManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
@@ -15,7 +15,7 @@ import {
     ReentrancyGuard
 } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
+contract Router is IRouter, ReentrancyGuard {
     IIndexManager private immutable i_IndexManager;
     IERC20 private immutable i_usdc;
 
@@ -278,7 +278,7 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
      */
     function _validTolerance(uint256 _tolerance) internal pure {
         if (
-            _tolerance >= MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION ||
+            _tolerance >= C.MAX_TOLERANCE * C.PERCENTAGE_FEE_PRECISION ||
             _tolerance == 0
         ) {
             revert Router__InvalidTolerance();
@@ -314,7 +314,7 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
     }
 
     function getMaxTolerance() external pure returns (uint256) {
-        return MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION;
+        return C.MAX_TOLERANCE * C.PERCENTAGE_FEE_PRECISION;
     }
     
     /**

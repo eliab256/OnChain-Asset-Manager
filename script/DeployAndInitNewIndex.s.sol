@@ -3,11 +3,11 @@ pragma solidity ^0.8.0;
 
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
-import {Index} from "../src/Index.sol";
-import {IndexManager} from "../src/IndexManager.sol";
-import {MultiSigWallet} from "../src/MultiSigWallet.sol";
+import {Index} from "../src/contracts/core/Index.sol";
+import {IndexManager} from "../src/contracts/periphery/IndexManager.sol";
+import {MultiSigWallet} from "../src/contracts/periphery/MultiSigWallet.sol";
 import {HelperConfig, AssetConfig, NetworkConfig} from "./HelperConfig.s.sol";
-import {IndexAsset, AssetAvailable, SwapRoute} from "../src/types.sol";
+import {IndexAsset, AssetAvailable, SwapRoute} from "../src/contracts/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     SafeERC20

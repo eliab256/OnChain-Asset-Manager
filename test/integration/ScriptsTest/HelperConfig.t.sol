@@ -9,7 +9,7 @@ import {
     NetworkConfig
 } from "../../../script/HelperConfig.s.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
-import {AssetAvailable, SwapRoute, PoolVersion} from "../../../src/types.sol";
+import {AssetAvailable, SwapRoute, PoolVersion} from "../../../src/contracts/types.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";

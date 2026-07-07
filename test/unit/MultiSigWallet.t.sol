@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "./Base.t.sol";
 import {CodeConstants} from "../../script/CodeConstants.sol";
-import {MultiSigWallet} from "../../src/MultiSigWallet.sol";
+import {MultiSigWallet} from "../../src/contracts/periphery/MultiSigWallet.sol";
 
 import "../../src/errors/MultiSigWalletErrors.sol";
 import "../../src/events/MultiSigWalletEvents.sol";

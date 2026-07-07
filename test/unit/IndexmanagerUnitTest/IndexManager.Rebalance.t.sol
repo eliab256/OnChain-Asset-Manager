@@ -2,10 +2,10 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
-import {IndexManager} from "../../../src/IndexManager.sol";
+import {IndexManager} from "../../../src/contracts/periphery/IndexManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {Index} from "../../../src/Index.sol";
-import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
+import {Index} from "../../../src/contracts/core/Index.sol";
+import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/contracts/types.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
 import {

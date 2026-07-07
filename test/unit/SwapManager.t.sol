@@ -2,8 +2,8 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "./Base.t.sol";
-import {SwapManager} from "../../src/SwapManager.sol";
-import {SwapType, SwapRoute, PoolVersion} from "../../src/types.sol";
+import {SwapManager} from "../../src/contracts/periphery/SwapManager.sol";
+import {SwapType, SwapRoute, PoolVersion} from "../../src/contracts/types.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";

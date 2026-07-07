@@ -6,8 +6,8 @@ import {Vm} from "forge-std/Vm.sol";
 import {IIndexManager} from "../../../src/Interface/IIndexManager.sol";
 import {ISwapManager} from "../../../src/Interface/ISwapManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
-import {Index} from "../../../src/Index.sol";
+import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/contracts/types.sol";
+import {Index} from "../../../src/contracts/core/Index.sol";
 import {
     IAccessControl
 } from "@openzeppelin/contracts/access/IAccessControl.sol";

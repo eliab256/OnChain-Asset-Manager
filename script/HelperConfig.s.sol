@@ -9,7 +9,7 @@ import {AssetTokenMock} from "../test/mocks/AssetTokenMock.sol";
 import {
     MockV3Aggregator
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
-import {AssetAvailable, PoolVersion, SwapRoute} from "../src/types.sol";
+import {AssetAvailable, PoolVersion, SwapRoute} from "../src/contracts/types.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";

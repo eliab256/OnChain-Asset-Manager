@@ -4,9 +4,9 @@ pragma solidity ^0.8.0;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import {IIndex} from "./Interface/IIndex.sol";
-import "./events/IndexEvents.sol";
-import "./errors/IndexErrors.sol";
+import {IIndex} from "../../Interface/IIndex.sol";
+import "../../events/IndexEvents.sol";
+import "../../errors/IndexErrors.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -19,14 +19,18 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
-import {SharesMath} from "./libraries/SharesMath.sol";
-import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
-import {ContractCodeConstants} from "./ContractCodeConstants.sol";
-import {ISwapManager} from "./Interface/ISwapManager.sol";
+import {UnderlyingMath} from "../../libraries/UnderlyingMath.sol";
+import {SharesMath} from "../../libraries/SharesMath.sol";
+import {IndexAsset, InitStateCache, SwapType} from "../types.sol";
+import {ContractCodeConstants as C} from "../ContractCodeConstants.sol";
+import {ISwapManager} from "../../Interface/ISwapManager.sol";
 import {
     IUniversalRouter
 } from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
+
+import {IndexPricing} from "./IndexPricing.sol";
+import {IndexConfigStorage} from "./IndexConfigStorage.sol";
+import {IndexAccountingStorage} from "./IndexAccountingStorage.sol";
 
 /**
  * @title Index
@@ -36,7 +40,14 @@ import {
  * (i.e. the native decimals of each underlying asset).
  *
  */
-contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, ContractCodeConstants {
+contract Index is 
+    IndexConfigStorage, 
+    IndexAccountingStorage, 
+    IndexPricing, 
+    IIndex, 
+    ERC20Permit, 
+    AccessControl, 
+    ReentrancyGuardTransient {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;
@@ -54,42 +65,42 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
     //  Immutables
     // =========================================================================
 
-    IERC20 internal immutable i_asset0;
-    IERC20 internal immutable i_asset1;
-    IERC20 internal immutable i_usdc;
+    // IERC20 internal immutable i_asset0;
+    // IERC20 internal immutable i_asset1;
+    // IERC20 internal immutable i_usdc;
 
-    uint8 internal immutable i_decimals0;
-    uint8 internal immutable i_decimals1;
-    uint8 internal immutable i_decimalsUsdc;
+    // uint8 internal immutable i_decimals0;
+    // uint8 internal immutable i_decimals1;
+    // uint8 internal immutable i_decimalsUsdc;
 
-    AggregatorV3Interface internal immutable i_asset0PriceFeed;
-    AggregatorV3Interface internal immutable i_asset1PriceFeed;
-    AggregatorV3Interface internal immutable i_usdcPriceFeed;
+    // AggregatorV3Interface internal immutable i_asset0PriceFeed;
+    // AggregatorV3Interface internal immutable i_asset1PriceFeed;
+    // AggregatorV3Interface internal immutable i_usdcPriceFeed;
 
-    ISwapManager internal immutable i_swapManager;
-    IUniversalRouter internal immutable i_universalRouter;
+    // ISwapManager internal immutable i_swapManager;
+    // IUniversalRouter internal immutable i_universalRouter;
 
-    // =========================================================================
-    //  Storage
-    // =========================================================================
+    // // =========================================================================
+    // //  Storage
+    // // =========================================================================
 
-    uint128 internal s_weight0;
-    uint128 internal s_weight1;
-    uint128 internal s_pendingWeight0;
-    uint128 internal s_pendingWeight1;
-    uint256 internal s_weightUpdateExecutableAt;
+    // uint128 internal s_weight0;
+    // uint128 internal s_weight1;
+    // uint128 internal s_pendingWeight0;
+    // uint128 internal s_pendingWeight1;
+    // uint256 internal s_weightUpdateExecutableAt;
 
-    /**
-     * @dev Reserves are stored in **token decimals** (native decimals of each asset).
-     *      They are converted to the 18-decimal standard only when USD values are needed.
-     */
-    uint128 internal s_asset0Reserve; // token decimals of i_asset0
-    uint128 internal s_asset1Reserve; // token decimals of i_asset1
+    // /**
+    //  * @dev Reserves are stored in **token decimals** (native decimals of each asset).
+    //  *      They are converted to the 18-decimal standard only when USD values are needed.
+    //  */
+    // uint128 internal s_asset0Reserve; // token decimals of i_asset0
+    // uint128 internal s_asset1Reserve; // token decimals of i_asset1
 
-    uint128 internal s_totalFees; // usdc-decimals
+    // uint128 internal s_totalFees; // usdc-decimals
 
-    uint32 internal s_feePercentage;
-    bool internal s_initialized;
+    // uint32 internal s_feePercentage;
+    // bool internal s_initialized;
 
     // =========================================================================
     //  Modifier
@@ -181,7 +192,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
             .calculateUSDValueOfTokenAmountStdDecimals(
                 underlyingAmount0Std,
                 _getLatestPrice(address(i_asset0)),
-                DECIMALS_STANDARD
+                C.DECIMALS_STANDARD
             );
 
         uint256 underlying1UsdValue = UnderlyingMath
@@ -195,7 +206,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
             .calculateTokenAmountFromUsdValue(
                 underlying1UsdValue,
                 _getLatestPrice(address(i_asset1)),
-                DECIMALS_STANDARD
+                C.DECIMALS_STANDARD
             );
 
         // 6. Convert asset1 std amount to token decimals for the actual transfer
@@ -326,13 +337,13 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
                 .calculateUSDValueOfTokenAmountStdDecimals(
                     asset0ReceivedStd,
                     initState.priceAsset0,
-                    DECIMALS_STANDARD
+                    C.DECIMALS_STANDARD
                 );
             asset1ReceivedUsdValue = UnderlyingMath
                 .calculateUSDValueOfTokenAmountStdDecimals(
                     asset1ReceivedStd,
                     initState.priceAsset1,
-                    DECIMALS_STANDARD
+                    C.DECIMALS_STANDARD
                 );
         }
 
@@ -599,13 +610,13 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
         ) revert Index__PendingWeightUpdate();
 
         // 2. Check if the new proposed weight is valid (not equal to current, not above max or below min).
-        bool invalidWeight0 = _newWeightAsset0 >= MAX_WEIGHT ||
-            _newWeightAsset0 <= MIN_WEIGHT ||
+        bool invalidWeight0 = _newWeightAsset0 >= C.MAX_WEIGHT ||
+            _newWeightAsset0 <= C.MIN_WEIGHT ||
             _newWeightAsset0 == s_weight0;
         if (invalidWeight0) revert Index__InvalidWeight();
 
         // 3. Update implementationTimestamp with new timestamp for when the weight update can be executed,
-        implementationTimestamp = block.timestamp + WEIGHT_UPDATE_DELAY;
+        implementationTimestamp = block.timestamp + C.WEIGHT_UPDATE_DELAY;
 
         // 4. Store the proposed weights in storage.
         s_pendingWeight0 = _newWeightAsset0;
@@ -713,7 +724,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
                 weight1,
                 initState.priceAsset0,
                 initState.priceAsset1,
-                DECIMALS_STANDARD
+                C.DECIMALS_STANDARD
             );
 
         // 4. Scope: execute swap and compute updated reserves in token decimals.
@@ -779,8 +790,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
         if (
             totalAssetUsdValueAfter <
             initState.totalAssetUsdValue.calculateNetAmountFromTolerance(
-                MAX_SLIPPAGE_TOLERANCE,
-                MAX_PERCENTAGE
+                C.MAX_SLIPPAGE_TOLERANCE,
+                C.MAX_PERCENTAGE
             )
         ) revert Index__RebalanceSlippageTooHigh();
 
@@ -877,354 +888,6 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
         netUsdcAmount = _usdcAmountIn - feeAmount;
     }
 
-    // =========================================================================
-    //  Internal — state initialisation
-    // =========================================================================
-
-    /**
-     * @notice Returns values are stored in the InitStateCache struct to avoid stack too deep errors.
-     * @dev Reads storage and price feeds to cache all the necessary values for the mint and redeem functions in a struct to avoid multiple storage reads and external calls throughout the functions, which would increase gas and create more points of failure (e.g. price feed calls).
-     * @return priceAsset0 Price of asset0 from the price feed, in 18-decimal standard.
-     * @return priceAsset1 Price of asset1 from the price feed, in 18-decimal standard.
-     * @return priceUsdc Price of USDC from the price feed, in 18-decimal standard.
-     * @return initialAsset0Reserve Initial reserve of asset0 in token decimals.
-     * @return initialAsset1Reserve Initial reserve of asset1 in token decimals.
-     * @return asset0UsdValue USD value of the initial reserve of asset0, calculated using the price feed and converted to 18-decimal standard.
-     * @return asset1UsdValue USD value of the initial reserve of asset1, calculated using the price feed and converted to 18-decimal standard.
-     * @return totalAssetUsdValue Total USD value of the initial reserves of both assets, calculated using the price feed and converted to 18-decimal standard.
-     */
-    function _initFunctionValues()
-        internal
-        view
-        returns (
-            uint256 priceAsset0,
-            uint256 priceAsset1,
-            uint256 priceUsdc,
-            uint128 initialAsset0Reserve, // STD DECIMALS (18)
-            uint128 initialAsset1Reserve, // STD DECIMALS (18)
-            uint256 asset0UsdValue,
-            uint256 asset1UsdValue,
-            uint256 totalAssetUsdValue
-        )
-    {
-        priceAsset0 = _getLatestPrice(address(i_asset0));
-        priceAsset1 = _getLatestPrice(address(i_asset1));
-        priceUsdc = _getLatestPrice(address(i_usdc));
-
-        uint128 rawReserve0;
-        uint128 rawReserve1;
-        assembly {
-            let value := sload(s_asset0Reserve.slot)
-            rawReserve0 := and(value, sub(shl(128, 1), 1))
-            rawReserve1 := shr(128, value)
-        }
-
-        initialAsset0Reserve = _convertToDecimalStandard(
-            rawReserve0,
-            i_decimals0
-        ).toUint128();
-        initialAsset1Reserve = _convertToDecimalStandard(
-            rawReserve1,
-            i_decimals1
-        ).toUint128();
-
-        asset0UsdValue = UnderlyingMath
-            .calculateUSDValueOfTokenAmountStdDecimals(
-                initialAsset0Reserve,
-                priceAsset0,
-                DECIMALS_STANDARD
-            );
-        asset1UsdValue = UnderlyingMath
-            .calculateUSDValueOfTokenAmountStdDecimals(
-                initialAsset1Reserve,
-                priceAsset1,
-                DECIMALS_STANDARD
-            );
-        totalAssetUsdValue = asset0UsdValue + asset1UsdValue;
-    }
-
-    // =========================================================================
-    //  Internal — swap wrappers
-    // =========================================================================
-
-    /**
-     * @dev Swaps USDC into the underlying assets.
-     * @param _usdcAmountIn0 USDC for asset0, in 18-decimal standard.
-     * @param _usdcAmountIn1 USDC for asset1, in 18-decimal standard.
-     * @return asset0ReceivedStd Received asset0 in 18-decimal standard.
-     * @return asset1ReceivedStd Received asset1 in 18-decimal standard.
-     */
-    function _swapUsdcForAssets(
-        uint256 _usdcAmountIn0,
-        uint256 _usdcAmountIn1
-    ) internal returns (uint256 asset0ReceivedStd, uint256 asset1ReceivedStd) {
-        // 1. Convert USDC amounts from std decimals to token decimals for the swap input.
-        uint256 usdcAmount0TokenDec;
-        uint256 usdcAmount1TokenDec;
-        if (_usdcAmountIn0 > 0)
-            usdcAmount0TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                _usdcAmountIn0,
-                i_decimalsUsdc
-            );
-        if (_usdcAmountIn1 > 0)
-            usdcAmount1TokenDec = _convertFromStdDecimalsToTokenDecimals(
-                _usdcAmountIn1,
-                i_decimalsUsdc
-            );
-
-        bytes memory commands;
-        bytes[] memory inputs;
-        uint256 asset0BalanceBefore;
-        uint256 asset1BalanceBefore;
-
-        // 2. Build swap commands and snapshot balances before the swap.
-        // 2.1. Only asset1 needed single swap USDC to asset1
-        if (_usdcAmountIn0 == 0 && _usdcAmountIn1 > 0) {
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET1_USDC,
-                address(i_usdc),
-                usdcAmount1TokenDec.toUint128()
-            );
-            asset1BalanceBefore = i_asset1.balanceOf(address(this));
-        }
-        // 2.2. Only asset0 needed single swap USDC to asset0
-        else if (_usdcAmountIn0 > 0 && _usdcAmountIn1 == 0) {
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                address(i_usdc),
-                usdcAmount0TokenDec.toUint128()
-            );
-            asset0BalanceBefore = i_asset0.balanceOf(address(this));
-        }
-        // 2.3. Both needed  double swap USDC to asset0 + USDC to asset1
-        else {
-            (commands, inputs) = i_swapManager.buildDoubleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                SwapType.ASSET1_USDC,
-                address(i_usdc),
-                address(i_usdc),
-                usdcAmount0TokenDec.toUint128(),
-                usdcAmount1TokenDec.toUint128()
-            );
-            asset0BalanceBefore = i_asset0.balanceOf(address(this));
-            asset1BalanceBefore = i_asset1.balanceOf(address(this));
-        }
-
-        // 3. Transfer USDC to the Universal Router and execute the swap.
-        //    payerIsUser=false → the router pays from its own balance (no Permit2 needed).
-        i_usdc.safeTransfer(
-            address(i_universalRouter),
-            usdcAmount0TokenDec + usdcAmount1TokenDec
-        );
-        i_universalRouter.execute(
-            commands,
-            inputs,
-            block.timestamp + SWAP_DEADLINE
-        );
-
-        // 4. Measure received amounts (token decimals) and convert to std decimals.
-        if (_usdcAmountIn0 > 0) {
-            uint256 receivedTokenDec = i_asset0.balanceOf(address(this)) -
-                asset0BalanceBefore;
-            asset0ReceivedStd = _convertToDecimalStandard(
-                receivedTokenDec,
-                i_decimals0
-            );
-        }
-        if (_usdcAmountIn1 > 0) {
-            uint256 receivedTokenDec = i_asset1.balanceOf(address(this)) -
-                asset1BalanceBefore;
-            asset1ReceivedStd = _convertToDecimalStandard(
-                receivedTokenDec,
-                i_decimals1
-            );
-        }
-    }
-
-    /**
-     * @dev Swaps the underlying assets back to USDC.
-     * @param _asset0UsdToSwap USD value of asset0 to sell, in std decimals.
-     * @param _asset1UsdToSwap USD value of asset1 to sell, in std decimals.
-     * @return usdcReceived Received USDC amount in std decimals (NOT USD value).
-     */
-    function _swapAssetsForUsdc(
-        uint256 _asset0UsdToSwap,
-        uint256 _asset1UsdToSwap
-    ) internal returns (uint256 usdcReceived) {
-        // 1. Derive token amounts from USD values using Chainlink prices.
-        uint256 asset0AmountTokenDec;
-        uint256 asset1AmountTokenDec;
-        {
-            // 1.1 Calculate asset0 token amount from its USD value.
-            if (_asset0UsdToSwap > 0) {
-                uint256 amountStd = UnderlyingMath
-                    .calculateTokenAmountFromUsdValue(
-                        _asset0UsdToSwap,
-                        _getLatestPrice(address(i_asset0)),
-                        DECIMALS_STANDARD
-                    );
-                asset0AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
-                    amountStd,
-                    i_decimals0
-                );
-            }
-            // 1.2 Calculate asset1 token amount from its USD value.
-            if (_asset1UsdToSwap > 0) {
-                uint256 amountStd = UnderlyingMath
-                    .calculateTokenAmountFromUsdValue(
-                        _asset1UsdToSwap,
-                        _getLatestPrice(address(i_asset1)),
-                        DECIMALS_STANDARD
-                    );
-                asset1AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
-                    amountStd,
-                    i_decimals1
-                );
-            }
-        }
-
-        bytes memory commands;
-        bytes[] memory inputs;
-
-        // 2. Build swap commands and transfer input tokens to the Universal Router.
-        if (_asset0UsdToSwap > 0 && _asset1UsdToSwap == 0) {
-            // 2.1 Only asset0 to sell; single swap asset0 to USDC.
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                address(i_asset0),
-                asset0AmountTokenDec.toUint128()
-            );
-            i_asset0.safeTransfer(
-                address(i_universalRouter),
-                asset0AmountTokenDec
-            );
-        } else if (_asset0UsdToSwap == 0 && _asset1UsdToSwap > 0) {
-            // 2.2 Only asset1 to sell; single swap asset1 to USDC.
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET1_USDC,
-                address(i_asset1),
-                asset1AmountTokenDec.toUint128()
-            );
-            i_asset1.safeTransfer(
-                address(i_universalRouter),
-                asset1AmountTokenDec
-            );
-        } else {
-            // 2.3 Both to sell; double swap asset0 to USDC + asset1 to USDC.
-            (commands, inputs) = i_swapManager.buildDoubleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                SwapType.ASSET1_USDC,
-                address(i_asset0),
-                address(i_asset1),
-                asset0AmountTokenDec.toUint128(),
-                asset1AmountTokenDec.toUint128()
-            );
-            i_asset0.safeTransfer(
-                address(i_universalRouter),
-                asset0AmountTokenDec
-            );
-            i_asset1.safeTransfer(
-                address(i_universalRouter),
-   
-                asset1AmountTokenDec
-            );
-        }
-
-        // 3. Snapshot USDC balance before swap.
-        uint256 usdcBalanceBefore = i_usdc.balanceOf(address(this));
-
-        // 4.  Execute the swap via the Universal Router.
-        i_universalRouter.execute(
-            commands,
-            inputs,
-            block.timestamp + SWAP_DEADLINE
-        );
-
-        // 5. Calculate USDC received as the delta between balances.
-        uint256 usdcReceivedTokenDec = i_usdc.balanceOf(address(this)) -
-            usdcBalanceBefore;
-
-        // 6. Convert received USDC from token decimals to std decimals.
-        usdcReceived = _convertToDecimalStandard(
-            usdcReceivedTokenDec,
-            i_decimalsUsdc
-        );
-    }
-
-    /**
-     * @dev Swaps one underlying asset for the other during rebalancing.
-     * @param _swapFrom     Asset address to sell.
-     * @param _amountToSwap Amount in std decimals (18).
-     * @return amountReceived Amount received in std decimals (18).
-     */
-    function _swapAssetForAsset(
-        address _swapFrom,
-        uint256 _amountToSwap
-    ) internal returns (uint128 amountReceived) {
-        // 1. Convert the std-decimal amount to token decimals for the actual ERC20 operations.
-        uint256 amountToSwapTokenDec;
-        if (_swapFrom == address(i_asset0)) {
-            amountToSwapTokenDec = _convertFromStdDecimalsToTokenDecimals(
-                _amountToSwap,
-                i_decimals0
-            );
-        } else {
-            amountToSwapTokenDec = _convertFromStdDecimalsToTokenDecimals(
-                _amountToSwap,
-                i_decimals1
-            );
-        }
-
-        // 2. Build swap command for the asset0 ↔ asset1 route.
-        (
-            bytes memory commands,
-            bytes[] memory inputs,
-            address tokenToSwap,
-            address tokenToReceive
-        ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET0_ASSET1,
-                _swapFrom,
-                amountToSwapTokenDec.toUint128()
-            );
-
-        // 3. Snapshot balance, transfer tokens to the Universal Router, and execute the swap.
-        uint256 amountReceivedTokenDec;
-        {
-            uint256 balanceBefore = IERC20(tokenToReceive).balanceOf(
-                address(this)
-            );
-
-            IERC20(tokenToSwap).safeTransfer(
-                address(i_universalRouter),
-                amountToSwapTokenDec
-            );
-            i_universalRouter.execute(
-                commands,
-                inputs,
-                block.timestamp + SWAP_DEADLINE
-            );
-
-            amountReceivedTokenDec =
-                IERC20(tokenToReceive).balanceOf(address(this)) -
-                balanceBefore;
-        }
-
-        // 4. Convert received amount from token decimals to std decimals.
-        uint8 receivedAssetDecimals = (_swapFrom == address(i_asset0))
-            ? i_decimals1
-            : i_decimals0;
-        amountReceived = _convertToDecimalStandard(
-            amountReceivedTokenDec,
-            receivedAssetDecimals
-        ).toUint128();
-    }
 
     // =========================================================================
     //  Internal — rebalance helpers
@@ -1273,85 +936,11 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
             _totalAssetUsdValue
         );
         return
-            weight0 < s_weight0 - REBALANCE_THRESHOLD ||
-            weight0 > s_weight0 + REBALANCE_THRESHOLD;
+            weight0 < s_weight0 - C.REBALANCE_THRESHOLD ||
+            weight0 > s_weight0 + C.REBALANCE_THRESHOLD;
     }
 
-    // =========================================================================
-    //  Internal — decimal helpers
-    // =========================================================================
 
-    /**
-     * @dev Converts an amount from the token decimals to the 18-decimal standard.
-     * @param _amount Amount in token decimals.
-     * @param _currentDecimals Decimals of the token.
-     * @return convertedAmount Amount converted to the 18-decimal standard.
-     */
-    function _convertToDecimalStandard(
-        uint256 _amount,
-        uint8 _currentDecimals
-    ) internal pure returns (uint256) {
-        if (_currentDecimals <= DECIMALS_STANDARD) {
-            (uint256 converted, ) = UnderlyingMath.convertToSpecificDecimal(
-                _amount,
-                _currentDecimals,
-                DECIMALS_STANDARD
-            );
-            return converted;
-        }
-        revert Index__DecimalsStandardLowerThanCurrent();
-    }
-
-    /**
-     * @dev Converts an amount from the 18-decimal standard to the token decimals.
-     * @param _amount Amount in 18-decimal standard.
-     * @param _tokenDecimals Decimals of the token to convert to.
-     * @return convertedAmount Amount converted to the token decimals.
-     * @notice If the token decimals are the same as the standard, returns the original amount. If the token decimals are lower than the standard, converts down. If the token decimals are higher
-     */
-    function _convertFromStdDecimalsToTokenDecimals(
-        uint256 _amount,
-        uint8 _tokenDecimals
-    ) internal pure returns (uint256 convertedAmount) {
-        if (_tokenDecimals == DECIMALS_STANDARD) return _amount;
-        if (_tokenDecimals < DECIMALS_STANDARD) {
-            (convertedAmount, ) = UnderlyingMath.convertToSpecificDecimal(
-                _amount,
-                DECIMALS_STANDARD,
-                _tokenDecimals
-            );
-        }
-    }
-
-    /**
-     * @dev Converts a USDC amount (18-decimal std) to its real USD value
-     *      using the USDC/USD Chainlink price feed.
-     *      usdValue = (usdcAmountStd * priceUsdc) / 1e18
-     * @param _usdcAmountStd USDC amount in 18-decimal standard.
-     * @param _priceUsdc     USDC/USD price in 18-decimal standard.
-     * @return usdValue      The real USD value in 18-decimal standard.
-     */
-    function _usdcToUsd(
-        uint256 _usdcAmountStd,
-        uint256 _priceUsdc
-    ) internal pure returns (uint256 usdValue) {
-        usdValue = (_usdcAmountStd * _priceUsdc) / (10 ** DECIMALS_STANDARD);
-    }
-
-    /**
-     * @dev Converts a USD value (18-decimal std) to the equivalent USDC amount
-     *      using the USDC/USD Chainlink price feed.
-     *      usdcAmount = (usdValue * 1e18) / priceUsdc
-     * @param _usdValue  USD value in 18-decimal standard.
-     * @param _priceUsdc USDC/USD price in 18-decimal standard.
-     * @return usdcAmountStd The USDC amount in 18-decimal standard.
-     */
-    function _usdToUsdc(
-        uint256 _usdValue,
-        uint256 _priceUsdc
-    ) internal pure returns (uint256 usdcAmountStd) {
-        usdcAmountStd = (_usdValue * (10 ** DECIMALS_STANDARD)) / _priceUsdc;
-    }
 
     /**
      * @dev Checks if the contract is initialized.
@@ -1397,33 +986,6 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
      */
     function getLatestPrice(address _asset) public view nonReentrantView returns (uint256) {
         return _getLatestPrice(_asset);
-    }
-
-    function _getLatestPrice(address _asset) internal view returns (uint256) {
-        AggregatorV3Interface feed;
-        if (_asset == address(i_asset0)) feed = i_asset0PriceFeed;
-        else if (_asset == address(i_asset1)) feed = i_asset1PriceFeed;
-        else if (_asset == address(i_usdc)) feed = i_usdcPriceFeed;
-        else revert Index__AssetNotSupported();
-
-        (
-            uint80 roundId,
-            int256 answer,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = feed.latestRoundData();
-
-        if (answer <= 0) revert Index__PriceFeedNotAvailable();
-        if (answeredInRound < roundId) revert Index__PriceFeedRoundStale();
-        if (_asset == address(i_usdc)) {
-            if (block.timestamp - updatedAt > MAX_USDC_DELAY)
-                revert Index__PriceIsStale();
-        } else {
-            if (block.timestamp - updatedAt > MAX_DELAY)
-                revert Index__PriceIsStale();
-        }
-        return _convertToDecimalStandard(uint256(answer), feed.decimals());
     }
 
     /**
@@ -1518,7 +1080,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ReentrancyGuardTransient, 
      * @return The reserves of asset0 and asset1 in token decimals. These are the actual amounts used for swaps and stored in state, not normalised to 18 decimals.
      */
     function getAssetsReserves() public view nonReentrantView returns (uint128, uint128) {
-        return (s_asset0Reserve, s_asset1Reserve);
+        _getAssetsReserves();
     }
 
     /**

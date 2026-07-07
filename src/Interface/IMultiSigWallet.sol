@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {Transaction} from "../types.sol";
+import {Transaction} from "../contracts/types.sol";
 
 interface IMultiSigWallet {
     // =========================================================================

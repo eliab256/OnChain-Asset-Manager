@@ -10,6 +10,7 @@ import "../../errors/IndexErrors.sol";
 import {IndexSwapper} from "./IndexSwapper.sol";
 import {IndexConfigStorage} from "./IndexConfigStorage.sol";
 import {IndexAccountingStorage} from "./IndexAccountingStorage.sol";
+import {ContractCodeConstants as C} from "../ContractCodeConstants.sol";
 
 /**
  * @title IndexPricing
@@ -44,14 +45,16 @@ abstract contract IndexPricing is IndexSwapper {
         if (answer <= 0) revert Index__PriceFeedNotAvailable();
         if (answeredInRound < roundId) revert Index__PriceFeedRoundStale();
         if (_asset == address($.usdc)) {
-            if (block.timestamp - updatedAt > MAX_USDC_DELAY)
+            if (block.timestamp - updatedAt > C.MAX_USDC_DELAY)
                 revert Index__PriceIsStale();
         } else {
-            if (block.timestamp - updatedAt > MAX_DELAY)
+            if (block.timestamp - updatedAt > C.MAX_DELAY)
                 revert Index__PriceIsStale();
         }
         return _convertToDecimalStandard(uint256(answer), feed.decimals());
     }
+
+    // @audit-issue implement shock filter and circuitbreaker for price feeds.
 
     function _getAssetsReserves()
         internal
@@ -66,6 +69,18 @@ abstract contract IndexPricing is IndexSwapper {
         }
     }
 
+    /**
+     * @notice Returns values are stored in the InitStateCache struct to avoid stack too deep errors.
+     * @dev Reads storage and price feeds to cache all the necessary values for the mint and redeem functions in a struct to avoid multiple storage reads and external calls throughout the functions, which would increase gas and create more points of failure (e.g. price feed calls).
+     * @return priceAsset0 Price of asset0 from the price feed, in 18-decimal standard.
+     * @return priceAsset1 Price of asset1 from the price feed, in 18-decimal standard.
+     * @return priceUsdc Price of USDC from the price feed, in 18-decimal standard.
+     * @return initialAsset0Reserve Initial reserve of asset0 in token decimals.
+     * @return initialAsset1Reserve Initial reserve of asset1 in token decimals.
+     * @return asset0UsdValue USD value of the initial reserve of asset0, calculated using the price feed and converted to 18-decimal standard.
+     * @return asset1UsdValue USD value of the initial reserve of asset1, calculated using the price feed and converted to 18-decimal standard.
+     * @return totalAssetUsdValue Total USD value of the initial reserves of both assets, calculated using the price feed and converted to 18-decimal standard.
+     */
     function _initFunctionValues()
         internal
         view
@@ -101,13 +116,13 @@ abstract contract IndexPricing is IndexSwapper {
             .calculateUSDValueOfTokenAmountStdDecimals(
                 initialAsset0Reserve,
                 priceAsset0,
-                DECIMALS_STANDARD
+                C.DECIMALS_STANDARD
             );
         asset1UsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
                 initialAsset1Reserve,
                 priceAsset1,
-                DECIMALS_STANDARD
+                C.DECIMALS_STANDARD
             );
         totalAssetUsdValue = asset0UsdValue + asset1UsdValue;
     }
