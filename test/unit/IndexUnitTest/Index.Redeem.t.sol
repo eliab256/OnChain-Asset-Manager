@@ -23,6 +23,9 @@ import {
 } from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import "../../../src/errors/IndexErrors.sol";
+import {
+    PriceFeedManager__PriceIsStale
+} from "../../../src/errors/PriceFeedManagerErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 
 contract IndexMintTest is BaseTest {
@@ -74,7 +77,7 @@ contract IndexMintTest is BaseTest {
         uint256 sharesToRedeem = initializedIndex.balanceOf(user1);
         vm.warp(block.timestamp + 1 days);
 
-        vm.expectRevert(Index__PriceIsStale.selector);
+        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
         vm.prank(address(router));
         initializedIndex.redeem(user1, sharesToRedeem, VALID_TOLERANCE);
     }
@@ -352,7 +355,7 @@ contract IndexMintTest is BaseTest {
     function testMinRedeemPreviewRevertsIfPriceIsStale() public {
         vm.warp(block.timestamp + 1 days);
 
-        vm.expectRevert(abi.encodeWithSelector(Index__PriceIsStale.selector));
+        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager__PriceIsStale.selector));
         initializedIndex.minRedeemPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
 

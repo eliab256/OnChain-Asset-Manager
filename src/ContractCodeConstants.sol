@@ -3,16 +3,21 @@ pragma solidity ^0.8.0;
 
 abstract contract ContractCodeConstants {
     /**
-     * @dev The maximum delay to rethreive a price from the price feed, in seconds.
-     * @dev This is used to ensure that the price data used for calculations is recent and not stale.
+     * @dev The upper bound for the per-feed maxDelay accepted by the PriceFeedManager, in seconds.
+     * @dev Prevents registering a feed whose staleness check would be effectively disabled.
      */
-    uint256 public constant MAX_DELAY = 1 hours;
+    uint32 internal constant MAX_FEED_DELAY_LIMIT = 2 days;
 
     /**
-     * @dev The maximum delay for USDC price feed updates, in seconds.
-     * @dev USDC pricefeed can be updated less frequently than the assets in the index, so we allow a longer delay for it.
+     * @dev The delay between a price feed replacement proposal and its execution.
+     * @dev Gives users time to react to a feed change, which affects the pricing of every index using the asset.
      */
-    uint256 public constant MAX_USDC_DELAY = 25 hours;
+    uint256 internal constant PRICE_FEED_UPDATE_DELAY = 2 days;
+
+    /**
+     * @dev The window after PRICE_FEED_UPDATE_DELAY during which a proposed feed replacement can be executed.
+     */
+    uint256 internal constant PRICE_FEED_UPDATE_EXECUTION_WINDOW = 3 days;
 
     /**
      * @dev The standard number of decimals for tokens.
@@ -44,15 +49,27 @@ abstract contract ContractCodeConstants {
     uint256 internal constant WEIGHT_UPDATE_DELAY = 2 days;
 
     /**
-     * @dev The delay between a SwapManager upgrade proposal and its execution.
-     * @dev Gives users time to review the new implementation, which affects the swaps of every index.
+     * @dev The delay between an upgrade proposal of a proxy owned by the IndexManager
+     *      (SwapManager, PriceFeedManager) and its execution.
+     * @dev Gives users time to review the new implementation, which affects every index.
      */
-    uint256 internal constant SWAP_MANAGER_UPGRADE_DELAY = 2 days;
+    uint256 internal constant PROXY_UPGRADE_DELAY = 2 days;
 
     /**
-     * @dev The window after SWAP_MANAGER_UPGRADE_DELAY during which a proposed upgrade can be executed.
+     * @dev The window after PROXY_UPGRADE_DELAY during which a proposed proxy upgrade can be executed.
      */
-    uint256 internal constant SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW = 3 days;
+    uint256 internal constant PROXY_UPGRADE_EXECUTION_WINDOW = 3 days;
+
+    /**
+     * @dev Alias of PROXY_UPGRADE_DELAY, kept for backward compatibility.
+     */
+    uint256 internal constant SWAP_MANAGER_UPGRADE_DELAY = PROXY_UPGRADE_DELAY;
+
+    /**
+     * @dev Alias of PROXY_UPGRADE_EXECUTION_WINDOW, kept for backward compatibility.
+     */
+    uint256 internal constant SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW =
+        PROXY_UPGRADE_EXECUTION_WINDOW;
 
     /**
      * @dev The window after WEIGHT_UPDATE_DELAY during which a proposed weight update can be executed.

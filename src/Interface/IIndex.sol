@@ -100,6 +100,8 @@ interface IIndex is IERC20, IERC20Metadata {
 
     function getUsdcPriceFeed() external view returns (address);
 
+    function getPriceFeedManager() external view returns (address);
+
     function getFeesInfo()
         external
         view

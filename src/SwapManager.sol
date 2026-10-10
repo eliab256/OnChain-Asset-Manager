@@ -20,6 +20,7 @@ import {
 import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 import {SwapType, PoolKey, PoolVersion, SwapRoute} from "./types.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {IIndex} from "./Interface/IIndex.sol";
 
 /**
  * @title SwapManager
@@ -32,9 +33,13 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     // Errors
     error SwapManager__IndexNotRegistered();
     error SwapManager__RouteNotRegistered();
-    error SwapManager__InvalidPoolVersion();
     error SwapManager__InvalidV3Path();
     error SwapManager__InvalidV4PoolKey();
+    error SwapManager__RouteTokensMismatch(
+        address expectedTokenA,
+        address expectedTokenB
+    );
+    error SwapManager__NotAnIndex(address indexAddress);
 
     /// @custom:storage-location erc7201:onchainassetmanager.storage.SwapManager
     struct SwapManagerStorage {
@@ -67,6 +72,10 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /**
      * @notice Registers the swap routes for an index.
      * @dev Each route can independently use either Uniswap V3 or Uniswap V4.
+     *      Each route must connect the expected tokens of the index, read from the index itself:
+     *      ASSET0_USDC ↔ {asset0, usdc}, ASSET1_USDC ↔ {asset1, usdc}, ASSET0_ASSET1 ↔ {asset0, asset1}.
+     *      Reverts with `SwapManager__NotAnIndex` before any route is validated if `_indexAddress`
+     *      has no code or does not expose `getAsset0`, `getAsset1` and `getUsdc`.
      * @param _indexAddress The index contract address.
      * @param _routeAsset0Usdc The route used for Asset0 ↔ USDC swaps.
      * @param _routeAsset1Usdc The route used for Asset1 ↔ USDC swaps.
@@ -78,9 +87,19 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         SwapRoute memory _routeAsset1Usdc,
         SwapRoute memory _routeAsset0Asset1
     ) external onlyOwner {
-        _validateRoute(_routeAsset0Usdc);
-        _validateRoute(_routeAsset1Usdc);
-        _validateRoute(_routeAsset0Asset1);
+        address asset0 = _readIndexToken(
+            _indexAddress,
+            IIndex.getAsset0.selector
+        );
+        address asset1 = _readIndexToken(
+            _indexAddress,
+            IIndex.getAsset1.selector
+        );
+        address usdc = _readIndexToken(_indexAddress, IIndex.getUsdc.selector);
+
+        _validateRoute(_routeAsset0Usdc, asset0, usdc);
+        _validateRoute(_routeAsset1Usdc, asset1, usdc);
+        _validateRoute(_routeAsset0Asset1, asset0, asset1);
 
         SwapManagerStorage storage $ = _getSwapManagerStorage();
         $.routes[_indexAddress][SwapType.ASSET0_USDC] = _routeAsset0Usdc;
@@ -90,6 +109,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /**
      * @notice Updates a single route for a registered index.
+     * @dev The new route must connect the expected tokens of the index for `_swapType`.
      * @param _indexAddress The index contract address.
      * @param _swapType The swap type to update.
      * @param _newRoute The new route definition, either V3 or V4.
@@ -99,7 +119,11 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         SwapType _swapType,
         SwapRoute memory _newRoute
     ) external onlyOwner onlyRegisteredIndex(_indexAddress) {
-        _validateRoute(_newRoute);
+        (address tokenA, address tokenB) = _getExpectedRouteTokens(
+            _indexAddress,
+            _swapType
+        );
+        _validateRoute(_newRoute, tokenA, tokenB);
         _getSwapManagerStorage().routes[_indexAddress][_swapType] = _newRoute;
     }
 
@@ -144,7 +168,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
                     _amountIn,
                     _amountOutMinimum
                 );
-        } else if (route.version == PoolVersion.V3) {
+        } else {
             return
                 _buildV3Params(
                     route.v3Path,
@@ -152,8 +176,6 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
                     _amountIn,
                     _amountOutMinimum
                 );
-        } else {
-            revert SwapManager__InvalidPoolVersion();
         }
     }
 
@@ -340,36 +362,114 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     }
 
     /**
-     * @dev Validates a swap route before registration.
-     *      For V4 routes, ensures that at least one of the two pool currencies is non-zero.
-     *      For V3 routes, ensures the encoded path is at least 43 bytes long
-     *      (the minimum for a single-hop path: 20 bytes tokenIn + 3 bytes fee + 20 bytes tokenOut).
-     *      Reverts if the pool version is unrecognised.
+     * @dev Validates a swap route before registration, checking that it connects `_tokenA` and `_tokenB`.
+     *      For V4 routes, the pool currencies must be exactly {`_tokenA`, `_tokenB`} in any order.
+     *      Since index tokens are ERC20, this also rejects native ETH (currency = address(0)).
+     *      For V3 routes, the path must be well-formed (20 bytes token + n * (3 bytes fee + 20 bytes token),
+     *      n >= 1) and its first and last tokens must be {`_tokenA`, `_tokenB`} in either direction.
+     *      Intermediate hops are allowed.
      * @param _route The swap route struct to validate.
+     * @param _tokenA One of the two tokens the route must connect.
+     * @param _tokenB The other token the route must connect.
      */
-    function _validateRoute(SwapRoute memory _route) internal pure {
+    function _validateRoute(
+        SwapRoute memory _route,
+        address _tokenA,
+        address _tokenB
+    ) internal pure {
+        address firstToken;
+        address lastToken;
+
         if (_route.version == PoolVersion.V4) {
+            firstToken = Currency.unwrap(_route.poolKey.currency0);
+            lastToken = Currency.unwrap(_route.poolKey.currency1);
             // For V4, currency0 and currency1 cannot both be address(0).
-            if (
-                Currency.unwrap(_route.poolKey.currency0) == address(0) &&
-                Currency.unwrap(_route.poolKey.currency1) == address(0)
-            ) {
+            if (firstToken == address(0) && lastToken == address(0)) {
                 revert SwapManager__InvalidV4PoolKey();
             }
-        } else if (_route.version == PoolVersion.V3) {
-            if (_route.v3Path.length < 43) {
+        } else {
+            bytes memory path = _route.v3Path;
+            if (path.length < 43 || (path.length - 20) % 23 != 0) {
                 revert SwapManager__InvalidV3Path();
             }
-        } else {
-            revert SwapManager__InvalidPoolVersion();
+            assembly {
+                firstToken := shr(96, mload(add(path, 0x20)))
+            }
+            lastToken = _extractTokenOutFromV3Path(path);
         }
+
+        if (
+            !((firstToken == _tokenA && lastToken == _tokenB) ||
+                (firstToken == _tokenB && lastToken == _tokenA))
+        ) {
+            revert SwapManager__RouteTokensMismatch(_tokenA, _tokenB);
+        }
+    }
+
+    /**
+     * @dev Returns the pair of tokens a route of `_swapType` must connect for the given index,
+     *      reading the index assets and USDC from the index contract through `_readIndexToken`.
+     *      Reverts with `SwapManager__NotAnIndex` if `_indexAddress` is not an index.
+     * @param _indexAddress The index contract address.
+     * @param _swapType The swap type of the route.
+     * @return The first expected token (asset0 for ASSET0_USDC / ASSET0_ASSET1, asset1 for ASSET1_USDC).
+     * @return The second expected token (USDC for *_USDC routes, asset1 for ASSET0_ASSET1).
+     */
+    function _getExpectedRouteTokens(
+        address _indexAddress,
+        SwapType _swapType
+    ) internal view returns (address, address) {
+        if (_swapType == SwapType.ASSET0_USDC) {
+            return (
+                _readIndexToken(_indexAddress, IIndex.getAsset0.selector),
+                _readIndexToken(_indexAddress, IIndex.getUsdc.selector)
+            );
+        }
+        if (_swapType == SwapType.ASSET1_USDC) {
+            return (
+                _readIndexToken(_indexAddress, IIndex.getAsset1.selector),
+                _readIndexToken(_indexAddress, IIndex.getUsdc.selector)
+            );
+        }
+        return (
+            _readIndexToken(_indexAddress, IIndex.getAsset0.selector),
+            _readIndexToken(_indexAddress, IIndex.getAsset1.selector)
+        );
+    }
+
+    /**
+     * @notice Reads a token address from an index through one of its zero-argument getters.
+     * @dev Uses a low-level staticcall so that every non-index target fails with the same custom error
+     *      instead of an empty revert or an ABI decoding panic. Reverts with `SwapManager__NotAnIndex` if
+     *      the call reverts, returns less than 32 bytes (this also covers addresses without code, whose
+     *      calls succeed with empty return data), or returns a word that is not a valid address.
+     * @param _indexAddress The index contract address.
+     * @param _selector The selector of the getter to call (`getAsset0`, `getAsset1` or `getUsdc`).
+     * @return The token address returned by the getter.
+     */
+    function _readIndexToken(
+        address _indexAddress,
+        bytes4 _selector
+    ) internal view returns (address) {
+        (bool success, bytes memory data) = _indexAddress.staticcall(
+            abi.encodeWithSelector(_selector)
+        );
+        if (!success || data.length < 32) {
+            revert SwapManager__NotAnIndex(_indexAddress);
+        }
+        uint256 word = abi.decode(data, (uint256));
+        if (word > type(uint160).max) {
+            revert SwapManager__NotAnIndex(_indexAddress);
+        }
+        return address(uint160(word));
     }
 
     /**
      * @dev Checks whether an index has been registered in the SwapManager by verifying
      *      that its ASSET0_ASSET1 route contains a valid, non-default configuration.
      *      For V4 routes this means at least one currency must be non-zero; for V3 routes
-     *      the encoded path must be at least 43 bytes. Reverts with
+     *      the encoded path must be at least 43 bytes. An unregistered index holds the struct
+     *      default (version V3, empty path), so it is caught by the V3 branch. Reverts with
      *      `SwapManager__IndexNotRegistered` if the index is not registered.
      * @param _indexAddress The index contract address to check.
      */
@@ -386,12 +486,10 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             ) {
                 revert SwapManager__IndexNotRegistered();
             }
-        } else if (route.version == PoolVersion.V3) {
+        } else {
             if (route.v3Path.length < 43) {
                 revert SwapManager__IndexNotRegistered();
             }
-        } else {
-            revert SwapManager__IndexNotRegistered();
         }
     }
 

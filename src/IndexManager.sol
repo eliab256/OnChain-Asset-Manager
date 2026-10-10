@@ -7,6 +7,7 @@ import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {SwapManager} from "./SwapManager.sol";
+import {IPriceFeedManager} from "./Interface/IPriceFeedManager.sol";
 import {
     ERC1967Proxy
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -21,7 +22,7 @@ import {
 } from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./errors/IndexManagerErrors.sol";
 import "./events/IndexManagerEvents.sol";
-import {IndexAsset, SwapRoute} from "./types.sol";
+import {IndexAsset, SwapRoute, PendingUpgrade} from "./types.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -30,7 +31,6 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIndex} from "./Interface/IIndex.sol";
-import {console2} from "forge-std/console2.sol";
 
 contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     using SafeERC20 for IERC20;
@@ -51,10 +51,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         (1 * PERCENTAGE_FEE_PRECISION) / 10; // 0.1%
 
     address internal immutable i_usdc;
-    address internal immutable i_usdcPriceFeed;
     address internal immutable i_uniswapUniversalRouter;
     // SwapManager ERC1967 proxy, deployed in the constructor. Same address for every index.
     address internal immutable i_swapManager;
+    // PriceFeedManager ERC1967 proxy, deployed in the constructor. Same address for every index.
+    address internal immutable i_priceFeedManager;
 
     address[] private s_deployedIndexes;
     address[] private s_initializedIndexes;
@@ -68,10 +69,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     address internal s_router;
     uint256 private s_totalFeesCollected;
 
-    // Pending SwapManager upgrade (timelocked).
-    address private s_pendingSwapManagerImplementation;
-    bytes private s_pendingSwapManagerUpgradeData;
-    uint256 private s_swapManagerUpgradeExecutableAt;
+    /// @dev Mapping from an owned UUPS proxy (SwapManager, PriceFeedManager) to its pending timelocked upgrade
+    mapping(address => PendingUpgrade) private s_proxyToPendingUpgrade;
 
     modifier isIndexInitialized(address indexAddress) {
         _isIndexInitialized(indexAddress);
@@ -85,26 +84,34 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
 
     /**
      * @param _usdcAddress The USDC token address.
-     * @param _usdcPriceFeed The USDC/USD Chainlink price feed.
      * @param _uniswapUniversalRouter The Uniswap Universal Router address.
      * @param _swapManagerImplementation The SwapManager implementation; the constructor deploys its proxy, owned by this contract.
+     * @param _priceFeedManagerImplementation The PriceFeedManager implementation; the constructor deploys its proxy, owned by this contract.
      */
     constructor(
         address _usdcAddress,
-        address _usdcPriceFeed,
         address _uniswapUniversalRouter,
-        address _swapManagerImplementation
+        address _swapManagerImplementation,
+        address _priceFeedManagerImplementation
     ) {
         if (_swapManagerImplementation.code.length == 0) {
             revert IndexManager__InvalidSwapManagerImplementation();
         }
+        if (_priceFeedManagerImplementation.code.length == 0) {
+            revert IndexManager__InvalidPriceFeedManagerImplementation();
+        }
         i_usdc = _usdcAddress;
-        i_usdcPriceFeed = _usdcPriceFeed;
         i_uniswapUniversalRouter = _uniswapUniversalRouter;
         i_swapManager = address(
             new ERC1967Proxy(
                 _swapManagerImplementation,
                 abi.encodeCall(SwapManager.initialize, (address(this)))
+            )
+        );
+        i_priceFeedManager = address(
+            new ERC1967Proxy(
+                _priceFeedManagerImplementation,
+                abi.encodeCall(IPriceFeedManager.initialize, (address(this)))
             )
         );
 
@@ -127,7 +134,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @notice Proposes an upgrade of the SwapManager implementation, executable after SWAP_MANAGER_UPGRADE_DELAY.
+     * @notice Proposes an upgrade of the SwapManager implementation, executable after PROXY_UPGRADE_DELAY.
      * @param _newImplementation The new UUPS-compatible SwapManager implementation.
      * @param _data Optional calldata executed on the proxy after the upgrade (e.g. a reinitializer). Empty for none.
      * @return executableAt Timestamp from which the upgrade can be executed.
@@ -136,32 +143,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         address _newImplementation,
         bytes calldata _data
     ) public onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256 executableAt) {
-        // 1. Check there is no proposal still within its delay.
-        if (
-            s_swapManagerUpgradeExecutableAt != 0 &&
-            block.timestamp < s_swapManagerUpgradeExecutableAt
-        ) revert IndexManager__SwapManagerUpgradePending();
-
-        // 2. Check the implementation is a different UUPS contract.
-        if (
-            _newImplementation.code.length == 0 ||
-            _newImplementation ==
-            ISwapManager(i_swapManager).getImplementation()
-        ) revert IndexManager__InvalidSwapManagerImplementation();
-        try IERC1822Proxiable(_newImplementation).proxiableUUID() returns (
-            bytes32 slot
-        ) {
-            if (slot != ERC1967Utils.IMPLEMENTATION_SLOT)
-                revert IndexManager__InvalidSwapManagerImplementation();
-        } catch {
-            revert IndexManager__InvalidSwapManagerImplementation();
-        }
-
-        // 3. Store the pending upgrade.
-        executableAt = block.timestamp + SWAP_MANAGER_UPGRADE_DELAY;
-        s_pendingSwapManagerImplementation = _newImplementation;
-        s_pendingSwapManagerUpgradeData = _data;
-        s_swapManagerUpgradeExecutableAt = executableAt;
+        executableAt = _proposeUpgrade(i_swapManager, _newImplementation, _data);
 
         emit SwapManagerUpgradeProposed(
             _newImplementation,
@@ -172,26 +154,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
 
     /**
      * @notice Executes the pending SwapManager upgrade.
-     * @dev Executable only within SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW after the delay; after that the proposal is expired.
+     * @dev Executable only within PROXY_UPGRADE_EXECUTION_WINDOW after the delay; after that the proposal is expired.
      */
     function executeSwapManagerUpgrade() public onlyRole(DEFAULT_ADMIN_ROLE) {
-        uint256 executableAt = s_swapManagerUpgradeExecutableAt;
-
-        // 1. Check there is a pending upgrade past its delay and not expired.
-        if (executableAt == 0 || block.timestamp < executableAt)
-            revert IndexManager__NoPendingSwapManagerUpgrade();
-        if (
-            block.timestamp >
-            executableAt + SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW
-        ) revert IndexManager__SwapManagerUpgradeExpired();
-
-        // 2. Cache and reset the pending upgrade before the external call.
-        address newImplementation = s_pendingSwapManagerImplementation;
-        bytes memory data = s_pendingSwapManagerUpgradeData;
-        _resetPendingSwapManagerUpgrade();
-
-        // 3. Upgrade the proxy. Only this contract (owner) is authorized.
-        UUPSUpgradeable(i_swapManager).upgradeToAndCall(newImplementation, data);
+        address newImplementation = _executeUpgrade(i_swapManager);
 
         emit SwapManagerUpgraded(newImplementation, msg.sender);
     }
@@ -200,13 +166,50 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @notice Cancels the pending SwapManager upgrade, whether it is still in its delay, executable or expired.
      */
     function cancelSwapManagerUpgrade() public onlyRole(DEFAULT_ADMIN_ROLE) {
-        address pendingImplementation = s_pendingSwapManagerImplementation;
-        if (s_swapManagerUpgradeExecutableAt == 0)
-            revert IndexManager__NoPendingSwapManagerUpgrade();
-
-        _resetPendingSwapManagerUpgrade();
+        address pendingImplementation = _cancelUpgrade(i_swapManager);
 
         emit SwapManagerUpgradeCancelled(pendingImplementation, msg.sender);
+    }
+
+    /// @dev Inherit from IIndexManager. See interface for details.
+    function proposePriceFeedManagerUpgrade(
+        address _newImplementation,
+        bytes calldata _data
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256 executableAt) {
+        executableAt = _proposeUpgrade(
+            i_priceFeedManager,
+            _newImplementation,
+            _data
+        );
+
+        emit PriceFeedManagerUpgradeProposed(
+            _newImplementation,
+            executableAt,
+            msg.sender
+        );
+    }
+
+    /// @dev Inherit from IIndexManager. See interface for details.
+    function executePriceFeedManagerUpgrade()
+        public
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        address newImplementation = _executeUpgrade(i_priceFeedManager);
+
+        emit PriceFeedManagerUpgraded(newImplementation, msg.sender);
+    }
+
+    /// @dev Inherit from IIndexManager. See interface for details.
+    function cancelPriceFeedManagerUpgrade()
+        public
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        address pendingImplementation = _cancelUpgrade(i_priceFeedManager);
+
+        emit PriceFeedManagerUpgradeCancelled(
+            pendingImplementation,
+            msg.sender
+        );
     }
 
     /**
@@ -214,8 +217,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @notice The caller must have the ASSET_MANAGER_ROLE to call this function.
      * @notice All percentages are expressed with 4 decimals, so 100% = 1000000, 1% = 10000, etc.
      * @param _feePercentage The fee percentage for the index.
-     * @param _assetA The first underlying asset of the index. The struct includes the asset address, its weight percentage in the index, and its Chainlink price feed address.
-     * @param _assetB The second underlying asset of the index. The struct includes the asset address, its weight percentage in the index, and its Chainlink price feed address.
+     * @notice asset0, asset1 and USDC must already have a price feed registered in the PriceFeedManager.
+     * @param _assetA The first underlying asset of the index. The struct includes the asset address and its weight percentage in the index.
+     * @param _assetB The second underlying asset of the index. The struct includes the asset address and its weight percentage in the index.
      */
     function createIndex(
         uint32 _feePercentage,
@@ -279,9 +283,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         _validateAssetIsERC20(asset0.asset);
         _validateAssetIsERC20(asset1.asset);
 
-        // 5. Check that the underlying assets have valid Chainlink price feeds.
-        _validatePriceFeed(asset0.priceFeed);
-        _validatePriceFeed(asset1.priceFeed);
+        // 5. Check that the underlying assets and USDC have a price feed registered in the PriceFeedManager.
+        _checkPriceFeedRegistered(asset0.asset);
+        _checkPriceFeedRegistered(asset1.asset);
+        _checkPriceFeedRegistered(i_usdc);
 
         // 6. Deploy the index contract
         index = _deployIndex(asset0, asset1, _feePercentage);
@@ -693,12 +698,152 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @dev Clears the pending SwapManager upgrade.
+     * @notice Stores a timelocked upgrade proposal for an owned UUPS proxy.
+     * @dev Reverts with the proxy-specific "UpgradePending" error if a proposal is still within its delay,
+     *      and with the proxy-specific "InvalidImplementation" error if the implementation has no code,
+     *      equals the current one or does not return the ERC-1967 slot from proxiableUUID().
+     *      An executable or expired proposal is overwritten.
+     * @param _proxy The proxy to upgrade (i_swapManager or i_priceFeedManager).
+     * @param _newImplementation The new UUPS-compatible implementation.
+     * @param _data Optional calldata executed on the proxy after the upgrade.
+     * @return executableAt Timestamp from which the upgrade can be executed.
      */
-    function _resetPendingSwapManagerUpgrade() internal {
-        s_pendingSwapManagerImplementation = address(0);
-        delete s_pendingSwapManagerUpgradeData;
-        s_swapManagerUpgradeExecutableAt = 0;
+    function _proposeUpgrade(
+        address _proxy,
+        address _newImplementation,
+        bytes calldata _data
+    ) internal returns (uint256 executableAt) {
+        PendingUpgrade storage pending = s_proxyToPendingUpgrade[_proxy];
+
+        // 1. Check there is no proposal still within its delay.
+        if (
+            pending.executableAt != 0 && block.timestamp < pending.executableAt
+        )
+            _revertForProxy(
+                _proxy,
+                IndexManager__SwapManagerUpgradePending.selector,
+                IndexManager__PriceFeedManagerUpgradePending.selector
+            );
+
+        // 2. Check the implementation is a different UUPS contract.
+        // SwapManager and PriceFeedManager expose the same getImplementation() selector.
+        bool invalidImplementation = _newImplementation.code.length == 0 ||
+            _newImplementation == ISwapManager(_proxy).getImplementation();
+        if (!invalidImplementation) {
+            try
+                IERC1822Proxiable(_newImplementation).proxiableUUID()
+            returns (bytes32 slot) {
+                invalidImplementation = slot != ERC1967Utils.IMPLEMENTATION_SLOT;
+            } catch {
+                invalidImplementation = true;
+            }
+        }
+        if (invalidImplementation)
+            _revertForProxy(
+                _proxy,
+                IndexManager__InvalidSwapManagerImplementation.selector,
+                IndexManager__InvalidPriceFeedManagerImplementation.selector
+            );
+
+        // 3. Store the pending upgrade.
+        executableAt = block.timestamp + PROXY_UPGRADE_DELAY;
+        pending.implementation = _newImplementation;
+        pending.data = _data;
+        pending.executableAt = executableAt;
+    }
+
+    /**
+     * @notice Executes the pending timelocked upgrade of an owned UUPS proxy.
+     * @dev Reverts with the proxy-specific "NoPending" error if there is no proposal or its delay has not elapsed,
+     *      and with the proxy-specific "Expired" error after PROXY_UPGRADE_EXECUTION_WINDOW.
+     *      The pending upgrade is cleared before the external call.
+     * @param _proxy The proxy to upgrade (i_swapManager or i_priceFeedManager).
+     * @return newImplementation The implementation the proxy was upgraded to.
+     */
+    function _executeUpgrade(
+        address _proxy
+    ) internal returns (address newImplementation) {
+        PendingUpgrade memory pending = s_proxyToPendingUpgrade[_proxy];
+
+        // 1. Check there is a pending upgrade past its delay and not expired.
+        if (pending.executableAt == 0 || block.timestamp < pending.executableAt)
+            _revertForProxy(
+                _proxy,
+                IndexManager__NoPendingSwapManagerUpgrade.selector,
+                IndexManager__NoPendingPriceFeedManagerUpgrade.selector
+            );
+        if (
+            block.timestamp >
+            pending.executableAt + PROXY_UPGRADE_EXECUTION_WINDOW
+        )
+            _revertForProxy(
+                _proxy,
+                IndexManager__SwapManagerUpgradeExpired.selector,
+                IndexManager__PriceFeedManagerUpgradeExpired.selector
+            );
+
+        // 2. Reset the pending upgrade before the external call.
+        delete s_proxyToPendingUpgrade[_proxy];
+
+        // 3. Upgrade the proxy. Only this contract (owner) is authorized.
+        newImplementation = pending.implementation;
+        UUPSUpgradeable(_proxy).upgradeToAndCall(
+            newImplementation,
+            pending.data
+        );
+    }
+
+    /**
+     * @notice Cancels the pending timelocked upgrade of an owned UUPS proxy, in any state (delay, executable, expired).
+     * @dev Reverts with the proxy-specific "NoPending" error if there is no proposal.
+     * @param _proxy The proxy whose pending upgrade is cancelled.
+     * @return cancelledImplementation The implementation of the cancelled proposal.
+     */
+    function _cancelUpgrade(
+        address _proxy
+    ) internal returns (address cancelledImplementation) {
+        PendingUpgrade storage pending = s_proxyToPendingUpgrade[_proxy];
+        if (pending.executableAt == 0)
+            _revertForProxy(
+                _proxy,
+                IndexManager__NoPendingSwapManagerUpgrade.selector,
+                IndexManager__NoPendingPriceFeedManagerUpgrade.selector
+            );
+
+        cancelledImplementation = pending.implementation;
+        delete s_proxyToPendingUpgrade[_proxy];
+    }
+
+    /**
+     * @notice Reverts with the parameterless custom error matching the proxy.
+     * @dev Keeps the SwapManager errors unchanged while sharing the upgrade logic with the PriceFeedManager.
+     * @param _proxy The proxy the error refers to.
+     * @param _swapManagerError Selector used when `_proxy` is the SwapManager.
+     * @param _priceFeedManagerError Selector used otherwise (PriceFeedManager).
+     */
+    function _revertForProxy(
+        address _proxy,
+        bytes4 _swapManagerError,
+        bytes4 _priceFeedManagerError
+    ) internal view {
+        bytes4 selector = _proxy == i_swapManager
+            ? _swapManagerError
+            : _priceFeedManagerError;
+        assembly {
+            mstore(0x00, selector)
+            revert(0x00, 0x04)
+        }
+    }
+
+    /**
+     * @notice Checks that an asset has a price feed registered in the PriceFeedManager.
+     * @dev Reverts with IndexManager__PriceFeedNotRegistered otherwise.
+     * @param _asset The asset to check.
+     */
+    function _checkPriceFeedRegistered(address _asset) internal view {
+        if (!IPriceFeedManager(i_priceFeedManager).hasPriceFeed(_asset)) {
+            revert IndexManager__PriceFeedNotRegistered(_asset);
+        }
     }
 
     /**
@@ -730,7 +875,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
                 symbol,
                 s_router,
                 i_usdc,
-                i_usdcPriceFeed,
+                i_priceFeedManager,
                 i_swapManager,
                 i_uniswapUniversalRouter,
                 _asset0,
@@ -744,10 +889,16 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         assembly {
             index := create2(0, add(bytecode, 32), mload(bytecode), salt)
         }
+        if (index == address(0)) {
+            revert IndexManager__IndexDeployFailed();
+        }
     }
 
     /**
-     * @dev Validates if an address is a valid ERC20 token
+     * @dev Validates if an address is a valid ERC20 token usable by an index.
+     *      Reverts with `IndexManager__InvalidIndexAssetsAddress` if the asset is address(0) or
+     *      `symbol()` is missing/reverts, and with `IndexManager__InvalidAssetDecimals` if
+     *      `decimals()` is missing/reverts or returns a value above DECIMALS_STANDARD.
      * @param _asset Address to validate
      */
     function _validateAssetIsERC20(address _asset) internal view {
@@ -762,23 +913,18 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         if (!(success && result.length > 0)) {
             revert IndexManager__InvalidIndexAssetsAddress();
         }
-    }
 
-    /**
-     * @dev Validates if an address is a valid Chainlink Price Feed
-     * @param _priceFeed Address to validate
-     */
-    function _validatePriceFeed(address _priceFeed) internal view {
-        if (_priceFeed == address(0)) {
-            revert IndexManager__InvalidPriceFeedAddress();
-        }
-
-        // Check if contract has latestRoundData() function (Chainlink standard)
-        (bool success, bytes memory result) = _priceFeed.staticcall(
-            abi.encodeWithSignature("latestRoundData()")
+        // Check that decimals() exists and does not exceed DECIMALS_STANDARD,
+        // otherwise decimal conversions in the Index would revert or truncate to 0.
+        (success, result) = _asset.staticcall(
+            abi.encodeWithSignature("decimals()")
         );
-        if (!(success && result.length > 0)) {
-            revert IndexManager__InvalidPriceFeedAddress();
+        if (
+            !success ||
+            result.length < 32 ||
+            abi.decode(result, (uint256)) > DECIMALS_STANDARD
+        ) {
+            revert IndexManager__InvalidAssetDecimals(_asset);
         }
     }
 
@@ -970,11 +1116,25 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         view
         returns (address implementation, bytes memory data, uint256 executableAt)
     {
-        return (
-            s_pendingSwapManagerImplementation,
-            s_pendingSwapManagerUpgradeData,
-            s_swapManagerUpgradeExecutableAt
-        );
+        PendingUpgrade memory pending = s_proxyToPendingUpgrade[i_swapManager];
+        return (pending.implementation, pending.data, pending.executableAt);
+    }
+
+    /// @dev Inherit from IIndexManager. See interface for details.
+    function getPriceFeedManagerAddress() public view returns (address) {
+        return i_priceFeedManager;
+    }
+
+    /// @dev Inherit from IIndexManager. See interface for details.
+    function getPendingPriceFeedManagerUpgrade()
+        public
+        view
+        returns (address implementation, bytes memory data, uint256 executableAt)
+    {
+        PendingUpgrade memory pending = s_proxyToPendingUpgrade[
+            i_priceFeedManager
+        ];
+        return (pending.implementation, pending.data, pending.executableAt);
     }
 
     /**
@@ -1010,11 +1170,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @dev Returns the address of the USDC Chainlink price feed used by the index manager
-     * @return address The address of the USDC Chainlink price feed
+     * @dev Returns the address of the USDC Chainlink price feed registered in the PriceFeedManager
+     * @return address The address of the USDC Chainlink price feed (address(0) if not registered)
      */
     function getUsdcPriceFeed() public view returns (address) {
-        return i_usdcPriceFeed;
+        return IPriceFeedManager(i_priceFeedManager).getPriceFeedConfig(i_usdc).feed;
     }
 
     /**

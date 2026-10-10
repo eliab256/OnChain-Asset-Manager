@@ -17,11 +17,13 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 struct AssetConfig {
     address token;
     address priceFeed;
+    uint32 priceFeedMaxDelay;
 }
 
 struct NetworkConfig {
     address usdcAddress;
     address usdcPriceFeedAddress;
+    uint32 usdcPriceFeedMaxDelay;
     address uniswapUniversalRouter;
     address deployerAccount;
     address feeCollector;
@@ -86,33 +88,38 @@ contract HelperConfig is CodeConstants, Script {
             MAINNET_CHAIN_ID
         ] = AssetConfig({
             token: WETH_MAINNET,
-            priceFeed: WETH_USD_PRICEFEED_MAINNET
+            priceFeed: WETH_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         assetConfigByChainId[AssetAvailable.WBTC][
             MAINNET_CHAIN_ID
         ] = AssetConfig({
             token: WBTC_MAINNET,
-            priceFeed: WBTC_USD_PRICEFEED_MAINNET
+            priceFeed: WBTC_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         assetConfigByChainId[AssetAvailable.LINK][
             MAINNET_CHAIN_ID
         ] = AssetConfig({
             token: LINK_MAINNET,
-            priceFeed: LINK_USD_PRICEFEED_MAINNET
+            priceFeed: LINK_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         assetConfigByChainId[AssetAvailable.COMP][
             MAINNET_CHAIN_ID
         ] = AssetConfig({
             token: COMP_MAINNET,
-            priceFeed: COMP_USD_PRICEFEED_MAINNET
+            priceFeed: COMP_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
         return
             NetworkConfig({
                 usdcAddress: USDC_MAINNET,
                 usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
+                usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
                 uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
                 deployerAccount: mainnetDeployer,
                 feeCollector: mainnetDeployer,
@@ -169,28 +176,32 @@ contract HelperConfig is CodeConstants, Script {
             ANVIL_CHAIN_ID
         ] = AssetConfig({
             token: address(mockWeth),
-            priceFeed: address(mockWethPriceFeed)
+            priceFeed: address(mockWethPriceFeed),
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         assetConfigByChainId[AssetAvailable.WBTC][
             ANVIL_CHAIN_ID
         ] = AssetConfig({
             token: address(mockWbtc),
-            priceFeed: address(mockWbtcPriceFeed)
+            priceFeed: address(mockWbtcPriceFeed),
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         assetConfigByChainId[AssetAvailable.LINK][
             ANVIL_CHAIN_ID
         ] = AssetConfig({
             token: address(mockLink),
-            priceFeed: address(mockLinkPriceFeed)
+            priceFeed: address(mockLinkPriceFeed),
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         assetConfigByChainId[AssetAvailable.COMP][
             ANVIL_CHAIN_ID
         ] = AssetConfig({
             token: address(mockComp),
-            priceFeed: address(mockCompPriceFeed)
+            priceFeed: address(mockCompPriceFeed),
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
 
         UniversalRouterMock mockUniRouter = new UniversalRouterMock();
@@ -207,6 +218,7 @@ contract HelperConfig is CodeConstants, Script {
             NetworkConfig({
                 usdcAddress: address(mockUsdc),
                 usdcPriceFeedAddress: address(mockUsdcPriceFeed),
+                usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
                 uniswapUniversalRouter: address(mockUniRouter),
                 deployerAccount: ANVIL_DEPLOYER,
                 feeCollector: anvilFeeCollector,

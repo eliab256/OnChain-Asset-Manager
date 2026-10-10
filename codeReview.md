@@ -39,27 +39,20 @@
 
 | Severità | Numero |
 |---|---|
-| Critical | 1 |
-| High | 1 |
-| Medium | 4 |
-| Low | 6 |
+| Critical | 0 |
+| High | 0 |
+| Medium | 2 |
+| Low | 3 |
 | Informational | 5 |
 | Gas | 4 |
 
 | ID | Titolo | Severità |
 |---|---|---|
-| C-01 | Le fee di redeem sono contabilizzate a 18 decimali in un accumulatore a 6 decimali: tutte le fee restano bloccate per sempre | Critical |
-| H-01 | Rebalance sandwichabile: `amountOutMinimum = 0` e controllo di slippage sul 2% del TVL invece che sul nozionale scambiato | High |
-| M-01 | `initializeIndex` registra le route sullo SwapManager corrente, non su quello immutabile dell'Index | Medium |
 | M-02 | Configurazione degli index non modificabile e nessuna uscita senza swap: `updateRoute` irraggiungibile, feed e router immutabili | Medium |
-| M-03 | Limiti sui pesi incoerenti: underflow in `_checkIfRebalanceNeeded` con `weight0 < 3%`; `createIndex` non valida i pesi | Medium |
 | M-04 | NAV calcolato con l'oracolo ma esecuzione su un solo asset: arbitraggio sul ritardo dell'oracolo (da verificare) | Medium |
 | L-01 | Il redeem del 100% della supply reverta per arrotondamento (da verificare) | Low |
 | L-02 | Griefing tramite front-run della firma permit | Low |
 | L-03 | `MAX_DELAY` uguale all'heartbeat dei feed: DoS transitorio (da verificare per ogni feed) | Low |
-| L-04 | Validazioni mancanti in `createIndex` / `registerIndex` (esito di CREATE2, decimali, token delle route) | Low |
-| L-05 | Proposte di peso senza scadenza né cancellazione | Low |
-| L-06 | La firma EIP-712 del MultiSig non vincola il contenuto della transazione; nonce sequenziale per owner | Low |
 | I-01 | Discrepanze fra specifica/NatSpec e codice | Info |
 | I-02 | `forge-std/console2` importato in codice di produzione | Info |
 | I-03 | Codifica incoerente dei motivi di errore nei try/catch | Info |
@@ -70,144 +63,6 @@
 ---
 
 ## 3. Findings
-
-### [C-01] Le fee di redeem sono contabilizzate a 18 decimali in un accumulatore a 6 decimali: tutte le fee restano bloccate per sempre
-
-**Severità:** Critical
-**File:** `src/Index.sol:446-448`, `src/Index.sol:473`, `src/Index.sol:656-674`, `src/Index.sol:871-877`
-
-**Descrizione**
-`s_totalFees` è dichiarato in decimali USDC (`uint128 internal s_totalFees; // usdc-decimals`, riga 88), e `collectFees` lo trasferisce come quantità di token USDC (riga 670).
-
-- In `mintShares`, `_calculateFees` riceve `_usdcAmountIn` in decimali token (6). Questo è corretto.
-- In `redeem`, `_calculateFees` riceve `usdcReceived`, che `_swapAssetsForUsdc` restituisce **in 18 decimali** (righe 1144-1148). La fee risultante, in 18 decimali, viene sommata a `s_totalFees` (riga 473).
-
-```solidity
-// Index.sol:446-448
-(uint128 feeAmount, uint256 netUsdcAmount) = _calculateFees(
-    usdcReceived            // 18 decimali
-);
-...
-// Index.sol:473
-s_totalFees += feeAmount;   // accumulatore in 6 decimali
-```
-
-Dopo il primo redeem, `s_totalFees` vale circa 10¹² volte la fee reale. Da quel momento `collectFees` tenta di trasferire una quantità di USDC che l'Index non possiede, e reverta. `s_totalFees` può essere azzerato solo da `collectFees`, quindi il blocco è irreversibile. Restano congelate anche tutte le fee di mint già accumulate e quelle future. Le funzioni batch di `IndexManager` intercettano il revert ed emettono solo `FeesCollectionFailed`, quindi il problema passa inosservato.
-
-Viola l'invariante 18 di `invariant.md` ("collectFees drains exactly s_totalFees"). Tutti i test di fee collection (`Indexmanager.CollectFees.t.sol::_generateFees`) generano fee solo tramite buy. I test di redeem (`Index.Redeem.t.sol:171`, `Router.SellShares.t.sol:254`) verificano soltanto che `s_totalFees` aumenti. La combinazione redeem → collect non è mai testata.
-
-**Scenario**
-1. L'utente vende shares per 4.000 USDC con fee all'1%. La fee reale è 40 USDC (`40e6`).
-2. `s_totalFees += 40e18`, cioè 40.000.000.000.000 USDC contabili.
-3. `collectFeesFromSingleIndex` → `safeTransfer(collector, 40e18 + ...)` → revert per saldo insufficiente.
-4. Tutti gli USDC di fee (mint e redeem) restano nell'Index senza alcun modo per prelevarli. L'unica soluzione è un nuovo deploy, perché non esiste uno sweep.
-
-I fondi degli utenti non sono coinvolti: il NAV si basa sulle riserve, non sul saldo USDC. Il danno riguarda le entrate del protocollo, è certo e si attiva al primo uso normale.
-
-**Raccomandazione**
-Calcolare la fee di redeem in decimali token. Per evitare polvere di arrotondamento, ricavare il netto per sottrazione dalla quantità effettivamente ricevuta:
-
-```solidity
-// _swapAssetsForUsdc restituisce anche usdcReceivedTokenDec
-uint256 usdcReceivedTokenDec = _convertFromStdDecimalsToTokenDecimals(usdcReceived, i_decimalsUsdc);
-(uint128 feeAmount, uint256 netUsdcTokenDec) = _calculateFees(usdcReceivedTokenDec); // 6 dec
-uint256 netUsdcAmount = _convertToDecimalStandard(netUsdcTokenDec, i_decimalsUsdc);  // per il check di tolleranza
-...
-s_totalFees += feeAmount;                    // ora coerente (6 dec)
-i_usdc.safeTransfer(_from, netUsdcTokenDec);
-```
-
-Aggiornare anche la NatSpec di `_calculateFees`, che dichiara di lavorare in 18 decimali, e aggiungere un test mint → redeem → `collectFees` che verifichi l'importo trasferito.
-
----
-
-### [H-01] Rebalance sandwichabile: `amountOutMinimum = 0` e controllo di slippage sul 2% del TVL invece che sul nozionale scambiato
-
-**Severità:** High
-**File:** `src/SwapManager.sol:213`, `src/SwapManager.sol:278`, `src/Index.sol:776-784`, `src/Index.sol:1199-1203`, `src/ContractCodeConstants.sol:71-77`
-
-**Descrizione**
-Tutti gli swap usano `amountOutMinimum = 0`. L'unica protezione nel rebalance è un controllo a posteriori:
-
-```solidity
-// Index.sol:777-784
-(, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
-if (
-    totalAssetUsdValueAfter <
-    initState.totalAssetUsdValue.calculateNetAmountFromTolerance(
-        MAX_SLIPPAGE_TOLERANCE,   // 20_000 / 1_000_000 = 2%
-        MAX_PERCENTAGE
-    )
-) revert Index__RebalanceSlippageTooHigh();
-```
-
-Il 2% è calcolato sul **TVL totale**, non sulla quantità scambiata. Il rebalance scatta con una deriva superiore al 3%, quindi il nozionale minimo è circa il 3% del TVL. Su uno swap del 3% del TVL, una perdita del 2% del TVL corrisponde a circa il **66% del nozionale**. Con un cambio pesi 60/40 → 40/60 (swap di circa il 20% del TVL) la perdita tollerata è circa il 10% del nozionale.
-
-Anche la deadline `block.timestamp + SWAP_DEADLINE` (righe 1016, 1137, 1202) viene calcolata on-chain al momento dell'esecuzione, quindi è sempre soddisfatta e non protegge da nulla.
-
-**Scenario**
-1. L'index WETH/WBTC da 10M$ deriva a 63/37. Il keeper chiama `rebalanceSingleIndex` dal mempool pubblico. Secondo `DeployPeriphery.s.sol` il keeper è l'EOA del deployer, che conserva `REBALANCER_ROLE`.
-2. Un searcher vede la transazione, compra WBTC nel pool scelto e ne sposta il prezzo.
-3. L'Index vende circa 300k$ di WETH con `amountOutMinimum = 0` e riceve WBTC a prezzo gonfiato.
-4. Il controllo passa finché la perdita resta sotto i 200k$ (2% del TVL). Il searcher rivende e cattura la differenza al netto delle fee del pool.
-5. Lo stesso vale per `executeWeightUpdate` → `_tryRebalanceIndex`. Il momento è persino prevedibile, perché `s_weightUpdateExecutableAt` è pubblico.
-
-Su mint e redeem la tolleranza dell'utente (< 10%) si applica all'intero importo scambiato, quindi il rischio è limitato e scelto dall'utente.
-
-**Raccomandazione**
-- Passare un `amountOutMinimum` derivato dall'oracolo a `buildSingleSwapParams` e `buildDoubleSwapParams`:
-
-```solidity
-uint256 expectedOutStd = amountInStd * priceIn / priceOut;
-uint256 minOutStd = expectedOutStd * (MAX_PERCENTAGE - REBALANCE_SWAP_SLIPPAGE) / MAX_PERCENTAGE; // es. 0,5–1%
-```
-
-- Riformulare il controllo a posteriori rispetto al nozionale scambiato:
-
-```solidity
-uint256 lost = totalBefore > totalAfter ? totalBefore - totalAfter : 0;
-if (lost > swappedUsd * REBALANCE_SWAP_SLIPPAGE / MAX_PERCENTAGE) revert Index__RebalanceSlippageTooHigh();
-```
-
-- Il keeper dovrebbe usare un RPC privato (Flashbots Protect o simili) e spezzare i rebalance grandi. Il trade-off è un rischio maggiore di revert in mercati volatili, che è comunque preferibile a una perdita silenziosa.
-
----
-
-### [M-01] `initializeIndex` registra le route sullo SwapManager corrente, non su quello immutabile dell'Index
-
-**Severità:** Medium
-**File:** `src/IndexManager.sol:229-234`, `src/IndexManager.sol:103-109`, `src/Index.sol:68`, `src/Index.sol:122`
-
-**Descrizione**
-Alla creazione, l'Index memorizza `s_swapManager` come immutabile (`i_swapManager`). `initializeIndex` però registra le route su `s_swapManager` **letto al momento dell'inizializzazione**:
-
-```solidity
-// IndexManager.sol:229
-ISwapManager(s_swapManager).registerIndex(_indexAddress, ...);
-```
-
-Se `setSwapManagerAddress` viene chiamato fra `createIndex` e `initializeIndex`, le route finiscono nel nuovo SwapManager mentre l'Index interroga quello vecchio. `initialize` non esegue swap e quindi va a buon fine, ma ogni `mintShares`, `redeem` e `rebalanceIndex` successivo reverta con `SwapManager__IndexNotRegistered`.
-
-**Scenario**
-1. La multisig crea l'index A con lo SwapManager S1.
-2. Decide di migrare a S2 (`setSwapManagerAddress(S2)`).
-3. Inizializza l'index A: le route vanno su S2, mentre l'Index A usa S1.
-4. Il depositante iniziale (la multisig) riceve le shares, ma `redeem` reverta sempre e gli asset del seed restano bloccati. Non esiste rimedio (vedi M-02).
-
-**Raccomandazione**
-Salvare lo SwapManager di ogni index alla creazione e usarlo in `initializeIndex`:
-
-```solidity
-mapping(address => address) private s_indexSwapManager;
-// in createIndex
-s_indexSwapManager[index] = s_swapManager;
-// in initializeIndex
-ISwapManager(s_indexSwapManager[_indexAddress]).registerIndex(...);
-```
-
-In alternativa, esporre `getSwapManager()` sull'Index e usare quello.
-
----
 
 ### [M-02] Configurazione degli index non modificabile e nessuna uscita senza swap: `updateRoute` irraggiungibile, feed e router immutabili
 
@@ -232,44 +87,6 @@ La radice comune è che, per un index già deployato, nessuna dipendenza esterna
 - Valutare se rendere i feed sostituibili con timelock.
 
 Il trade-off è una maggiore superficie di fiducia verso l'asset manager. Va mitigata con un timelock sulle modifiche di route e feed.
-
----
-
-### [M-03] Limiti sui pesi incoerenti: underflow in `_checkIfRebalanceNeeded` con `weight0 < 3%`; `createIndex` non valida i pesi
-
-**Severità:** Medium
-**File:** `src/Index.sol:1266-1268`, `src/Index.sol:601-604`, `src/IndexManager.sol:168-171`, `src/libraries/UnderlyingMath.sol:12`
-
-**Descrizione**
-
-```solidity
-// Index.sol:1266-1268
-return
-    weight0 < s_weight0 - REBALANCE_THRESHOLD ||   // underflow se s_weight0 < 30_000
-    weight0 > s_weight0 + REBALANCE_THRESHOLD;
-```
-
-`proposeUpdateWeights` accetta `MIN_WEIGHT < w0 < MAX_WEIGHT`, cioè l'intervallo da 1% a 99% esclusi gli estremi. Con `10_000 < s_weight0 < 30_000` la sottrazione va in underflow (panic 0x11), e `rebalanceIndex` reverta sempre. Il controllo è asimmetrico: un `weight1` basso non crea problemi.
-
-`createIndex` controlla solo che la somma sia `MAX_WEIGHT`, senza limiti per singolo peso, e viola l'invariante 5:
-- con `weight0 = 0`, `initialize` reverta per divisione per zero (`UnderlyingMath.sol:12`);
-- con `weight1 = 0` si crea un index mono-asset;
-- con `weight0` fra 1 e 29.999 l'index non può mai essere ribilanciato.
-
-**Scenario**
-La multisig propone `w0 = 20_000` (2%). Dopo 2 giorni, `executeWeightUpdate` aggiorna i pesi. Il `try this.rebalanceIndex()` fallisce e il fallimento viene registrato solo nell'evento `WeightUpdateRebalanceFailed`. Ogni `rebalanceSingleIndex` successivo fallisce. L'index resta lontano dai pesi target finché non arriva un'altra proposta, che richiede altri 2 giorni.
-
-**Raccomandazione**
-
-```solidity
-function _checkIfRebalanceNeeded(uint256 v0, uint256 tot) internal view returns (bool) {
-    (uint128 w0, ) = _getAssetsEffectiveWights(v0, tot);
-    uint128 diff = w0 > s_weight0 ? w0 - s_weight0 : s_weight0 - w0;
-    return diff > REBALANCE_THRESHOLD;
-}
-```
-
-In `createIndex`, aggiungere lo stesso controllo di `proposeUpdateWeights`, cioè `MIN_WEIGHT < w < MAX_WEIGHT` per entrambi gli asset.
 
 ---
 
@@ -348,60 +165,9 @@ Usare un limite per feed, pari all'heartbeat più un margine (per esempio `heart
 
 ---
 
-### [L-04] Validazioni mancanti in `createIndex` / `registerIndex` (esito di CREATE2, decimali, token delle route)
-
-**Severità:** Low
-**File:** `src/IndexManager.sol:635-637`, `src/IndexManager.sol:185-191`, `src/Index.sol:1303-1315`, `src/SwapManager.sol:292-308`
-
-**Descrizione**
-Ci sono tre istanze:
-1. L'indirizzo restituito da `create2` non viene controllato. Se il costruttore reverta (token senza `decimals()` ma con `symbol()`, oppure feed senza `decimals()`), `index == address(0)` viene salvato con `s_isIndex[address(0)] = true` e `address(0)` viene inserito in `s_deployedIndexes`.
-2. I token con più di 18 decimali non vengono rifiutati. `_convertFromStdDecimalsToTokenDecimals` restituisce silenziosamente 0 e `_convertToDecimalStandard` reverta: l'index risulta creato ma inutilizzabile.
-3. `_validateRoute` controlla solo lunghezza e valori non zero. Non verifica che il path V3 o la `PoolKey` V4 colleghino davvero `asset0`, `asset1` e `USDC` (né che non usi ETH nativo con `currency0 = 0` al posto di WETH). Dato M-02, un errore commesso in fase di init è permanente.
-
-**Raccomandazione**
-
-```solidity
-assembly { index := create2(0, add(bytecode, 32), mload(bytecode), salt) }
-if (index == address(0)) revert IndexManager__DeployFailed();
-```
-
-Inoltre: verificare che `decimals() <= 18` per entrambi gli asset, e in `registerIndex` verificare che il primo e l'ultimo token di ogni route corrispondano alla coppia attesa.
-
----
-
-### [L-05] Proposte di peso senza scadenza né cancellazione
-
-**Severità:** Low
-**File:** `src/Index.sol:587-648`, `src/IndexManager.sol:362-385`
-
-**Descrizione**
-Una proposta resta eseguibile per un tempo illimitato dopo `s_weightUpdateExecutableAt`. Non esiste nemmeno una funzione di cancellazione: si può solo sovrascrivere la proposta dopo la scadenza del delay. La finestra di 2 giorni "per reagire" dichiarata nel README si riduce a un evento che gli utenti devono monitorare per sempre. Una proposta dimenticata può essere eseguita mesi dopo, in condizioni di mercato diverse.
-
-**Raccomandazione**
-Aggiungere una finestra di validità, per esempio `executableAt <= now <= executableAt + 3 days`, e una funzione `cancelWeightUpdate()`.
-
----
-
-### [L-06] La firma EIP-712 del MultiSig non vincola il contenuto della transazione; nonce sequenziale per owner
-
-**Severità:** Low
-**File:** `src/MultiSigWallet.sol:13-14`, `src/MultiSigWallet.sol:187-194`
-
-**Descrizione**
-`Confirm(uint256 txId,address wallet,uint256 nonce)` firma solo l'ID, non `target`, `value` e `data`. Chiunque sia owner può fare `submitTransaction`, e gli ID sono sequenziali. Se il flusso off-chain prevede di firmare una conferma prima che la transazione sia on-chain (per esempio l'SDK in `sdk/`), un owner malevolo può occupare quell'ID con una transazione diversa.
-
-Il nonce è unico per owner, quindi due firme preparate in parallelo per due tx diverse usano lo stesso nonce e solo una delle due sarà valida.
-
-**Raccomandazione**
-Includere `keccak256(abi.encode(target, value, keccak256(data)))` nella struct firmata. Per le tx parallele, usare nonce per-`txId` o una bitmap.
-
----
-
 ### [I-01] Discrepanze fra specifica/NatSpec e codice
 
 - `invariant.md` (SwapManager #13) parla di `SETTLE_ALL`, mentre il codice usa `SETTLE` (`SwapManager.sol:219`). Il codice è corretto per `payerIsUser = false`; la documentazione no.
-- `invariant.md` Index #18 e IndexManager #15 sono violati da C-01. Index #5 e IndexManager #11 sono violati da M-03.
 - `_calculateFees` (`Index.sol:866-870`) dichiara input a 18 decimali, ma in `mintShares` riceve 6 decimali.
 - `_initFunctionValues` (`Index.sol:889-890`) documenta le riserve "in token decimals", ma restituisce valori in 18 decimali.
 - `ContractCodeConstants.sol:24, 68` descrive `PERCENTAGE_FEE_PRECISION` e `MAX_SLIPPAGE_TOLERANCE` "in basis points". In realtà 10.000 unità corrispondono all'1%, quindi l'unità è 0,0001%.

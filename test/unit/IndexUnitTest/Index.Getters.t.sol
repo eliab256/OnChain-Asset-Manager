@@ -3,6 +3,10 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import "../../../src/errors/IndexErrors.sol";
+import {
+    PriceFeedManager__PriceIsStale,
+    PriceFeedManager__PriceFeedNotAvailable
+} from "../../../src/errors/PriceFeedManagerErrors.sol";
 
 contract IndexGettersTest is BaseTest {
     function setUp() public override {
@@ -36,21 +40,21 @@ contract IndexGettersTest is BaseTest {
     function testGetLatestPriceRevertIfPriceIsStale() public {
         vm.warp(block.timestamp + 2 hours);
 
-        vm.expectRevert(Index__PriceIsStale.selector);
+        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
         initializedIndex.getLatestPrice(address(mockWeth));
     }
 
     function testGetLatestPriceRevertIfAnswerIsZero() public {
         mockWethPriceFeed.updateAnswer(0);
 
-        vm.expectRevert(Index__PriceFeedNotAvailable.selector);
+        vm.expectRevert(PriceFeedManager__PriceFeedNotAvailable.selector);
         initializedIndex.getLatestPrice(address(mockWeth));
     }
 
     function testGetLatestPriceRevertIfAnswerIsNegative() public {
         mockWethPriceFeed.updateAnswer(-1);
 
-        vm.expectRevert(Index__PriceFeedNotAvailable.selector);
+        vm.expectRevert(PriceFeedManager__PriceFeedNotAvailable.selector);
         initializedIndex.getLatestPrice(address(mockWeth));
     }
 

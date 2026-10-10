@@ -10,13 +10,47 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
  *                        Uses 4 decimal places of precision where
  *                        MAX_WEIGHT (= 100 * WEIGHT_PRECISION = 1_000_000) represents 100%.
  *                        Example: 600_000 = 60%.
- * @param priceFeed       Chainlink AggregatorV3Interface price feed address
- *                        used to obtain the USD price of this asset.
+ * @dev The Chainlink price feed of the asset is not part of this struct: it must be
+ *      registered beforehand in the PriceFeedManager.
  */
 struct IndexAsset {
     address asset;
     uint128 weightPercentage;
-    address priceFeed;
+}
+
+/**
+ * @notice Active Chainlink price feed configuration of an asset in the PriceFeedManager.
+ * @param feed     Chainlink AggregatorV3Interface price feed address (asset/USD).
+ * @param maxDelay Maximum age, in seconds, of the latest answer before it is considered stale.
+ *                 Set per feed as heartbeat + safety margin.
+ */
+struct FeedConfig {
+    address feed;
+    uint32 maxDelay;
+}
+
+/**
+ * @notice Timelocked replacement of an asset price feed configuration.
+ * @param feed         Proposed Chainlink price feed address.
+ * @param maxDelay     Proposed maximum age, in seconds, of the latest answer.
+ * @param executableAt Timestamp from which the update can be executed (0 if no pending update).
+ */
+struct PendingFeed {
+    address feed;
+    uint32 maxDelay;
+    uint64 executableAt;
+}
+
+/**
+ * @notice Timelocked upgrade of a UUPS proxy owned by the IndexManager.
+ * @param implementation The proposed implementation address.
+ * @param data           Calldata executed on the proxy after the upgrade (empty for none).
+ * @param executableAt   Timestamp from which the upgrade can be executed (0 if no pending upgrade).
+ */
+struct PendingUpgrade {
+    address implementation;
+    bytes data;
+    uint256 executableAt;
 }
 
 /**

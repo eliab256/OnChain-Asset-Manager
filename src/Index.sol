@@ -15,14 +15,12 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {
-    AggregatorV3Interface
-} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
 import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
+import {IPriceFeedManager} from "./Interface/IPriceFeedManager.sol";
 import {
     IUniversalRouter
 } from "@uniswap/universal-router/contracts/interfaces/IUniversalRouter.sol";
@@ -61,9 +59,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     uint8 internal immutable i_decimals1;
     uint8 internal immutable i_decimalsUsdc;
 
-    AggregatorV3Interface internal immutable i_asset0PriceFeed;
-    AggregatorV3Interface internal immutable i_asset1PriceFeed;
-    AggregatorV3Interface internal immutable i_usdcPriceFeed;
+    // Shared PriceFeedManager proxy, owned by the IndexManager. Same address for every index.
+    IPriceFeedManager internal immutable i_priceFeedManager;
 
     ISwapManager internal immutable i_swapManager;
     IUniversalRouter internal immutable i_universalRouter;
@@ -108,7 +105,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         string memory _symbol,
         address _router,
         address _usdcAddress,
-        address _usdcPricefeed,
+        address _priceFeedManager,
         address _swapManager,
         address _uniswapUniversalRouter,
         IndexAsset memory _asset0,
@@ -126,9 +123,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         s_weight1 = _asset1.weightPercentage;
         s_feePercentage = _feePercentage;
 
-        i_asset0PriceFeed = AggregatorV3Interface(_asset0.priceFeed);
-        i_asset1PriceFeed = AggregatorV3Interface(_asset1.priceFeed);
-        i_usdcPriceFeed = AggregatorV3Interface(_usdcPricefeed);
+        i_priceFeedManager = IPriceFeedManager(_priceFeedManager);
 
         i_decimals0 = IERC20Metadata(_asset0.asset).decimals();
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
@@ -1472,34 +1467,18 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     /**
      * @notice Returns the latest normalised Chainlink price for a supported asset.
      * @notice Normalised means that the price is converted to the 18-decimal standard regardless of the decimals of the price feed, to have a consistent decimal format across all prices used in the contract.
+     * @dev Feeds and staleness checks (per-feed maxDelay) live in the shared PriceFeedManager.
      * @param _asset The address of the asset to get the price for. Must be either asset0, asset1, or USDC.
      * @return price USD price with 18 decimals.
      */
     function getLatestPrice(address _asset) public view returns (uint256) {
-        AggregatorV3Interface feed;
-        if (_asset == address(i_asset0)) feed = i_asset0PriceFeed;
-        else if (_asset == address(i_asset1)) feed = i_asset1PriceFeed;
-        else if (_asset == address(i_usdc)) feed = i_usdcPriceFeed;
-        else revert Index__AssetNotSupported();
+        if (
+            _asset != address(i_asset0) &&
+            _asset != address(i_asset1) &&
+            _asset != address(i_usdc)
+        ) revert Index__AssetNotSupported();
 
-        (
-            uint80 roundId,
-            int256 answer,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = feed.latestRoundData();
-
-        if (answer <= 0) revert Index__PriceFeedNotAvailable();
-        if (answeredInRound < roundId) revert Index__PriceFeedRoundStale();
-        if (_asset == address(i_usdc)) {
-            if (block.timestamp - updatedAt > MAX_USDC_DELAY)
-                revert Index__PriceIsStale();
-        } else {
-            if (block.timestamp - updatedAt > MAX_DELAY)
-                revert Index__PriceIsStale();
-        }
-        return _convertToDecimalStandard(uint256(answer), feed.decimals());
+        return i_priceFeedManager.getPrice(_asset);
     }
 
     /**
@@ -1634,7 +1613,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @return The address of the asset0 price feed.
      */
     function getAsset0PriceFeed() public view returns (address) {
-        return address(i_asset0PriceFeed);
+        return i_priceFeedManager.getPriceFeedConfig(address(i_asset0)).feed;
     }
 
     /**
@@ -1642,7 +1621,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @return The address of the asset1 price feed.
      */
     function getAsset1PriceFeed() public view returns (address) {
-        return address(i_asset1PriceFeed);
+        return i_priceFeedManager.getPriceFeedConfig(address(i_asset1)).feed;
     }
 
     /**
@@ -1650,7 +1629,15 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @return The address of the USDC price feed.
      */
     function getUsdcPriceFeed() public view returns (address) {
-        return address(i_usdcPriceFeed);
+        return i_priceFeedManager.getPriceFeedConfig(address(i_usdc)).feed;
+    }
+
+    /**
+     * @notice Returns the address of the shared PriceFeedManager used to price the index assets.
+     * @return The address of the PriceFeedManager proxy.
+     */
+    function getPriceFeedManager() public view returns (address) {
+        return address(i_priceFeedManager);
     }
 
     /**

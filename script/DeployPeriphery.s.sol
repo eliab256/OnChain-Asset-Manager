@@ -7,6 +7,7 @@ import {MultiSigWallet} from "../src/MultiSigWallet.sol";
 import {IndexManager} from "../src/IndexManager.sol";
 import {Router} from "../src/Router.sol";
 import {SwapManager} from "../src/SwapManager.sol";
+import {PriceFeedManager} from "../src/PriceFeedManager.sol";
 import {HelperConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {CodeConstants} from "../script/CodeConstants.sol";
 
@@ -16,6 +17,7 @@ contract DeployPeriphery is Script, CodeConstants {
     Router public router;
     HelperConfig public helperConfig;
     SwapManager public swapManager;
+    PriceFeedManager public priceFeedManager;
 
     function run()
         external
@@ -48,14 +50,27 @@ contract DeployPeriphery is Script, CodeConstants {
         // 2. Deploy the SwapManager implementation (initializers disabled)
         SwapManager swapManagerImplementation = new SwapManager();
 
-        // 3. Deploy IndexManager; its constructor deploys and initializes the SwapManager proxy
+        // 2.1 Deploy the PriceFeedManager implementation (initializers disabled)
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+
+        // 3. Deploy IndexManager; its constructor deploys and initializes the SwapManager and PriceFeedManager proxies
         indexManager = new IndexManager(
             config.usdcAddress,
-            config.usdcPriceFeedAddress,
             config.uniswapUniversalRouter,
-            address(swapManagerImplementation)
+            address(swapManagerImplementation),
+            address(priceFeedManagerImplementation)
         );
         swapManager = SwapManager(indexManager.getSwapManagerAddress());
+        priceFeedManager = PriceFeedManager(
+            indexManager.getPriceFeedManagerAddress()
+        );
+
+        // 3.1 Register the USDC/USD feed while the deployer still holds ASSET_MANAGER_ROLE
+        priceFeedManager.registerPriceFeed(
+            config.usdcAddress,
+            config.usdcPriceFeedAddress,
+            config.usdcPriceFeedMaxDelay
+        );
 
         // 4. Deploy Router with the address of the deployed IndexManager
         router = new Router(address(indexManager));
@@ -87,6 +102,14 @@ contract DeployPeriphery is Script, CodeConstants {
             console.log(
                 "SwapManager Implementation Address:",
                 address(swapManagerImplementation)
+            );
+            console.log(
+                "PriceFeedManager Proxy Address:",
+                address(priceFeedManager)
+            );
+            console.log(
+                "PriceFeedManager Implementation Address:",
+                address(priceFeedManagerImplementation)
             );
             console.log("Router Address:", address(router));
             console.log(

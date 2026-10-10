@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
+import {SwapManager} from "../../../src/SwapManager.sol";
+import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {IndexAsset, SwapRoute} from "../../../src/types.sol";
 import {HelperConfig} from "../../../script/HelperConfig.s.sol";
@@ -15,6 +17,12 @@ import "../../../src/events/IndexManagerEvents.sol";
 import "../../../src/errors/IndexErrors.sol";
 
 contract IndexManagerTest is BaseTest {
+    // Fixed addresses below / above every deployed token, so the sorted position
+    // (asset0 or asset1) of an unregistered asset is deterministic.
+    address internal constant LOW_UNREGISTERED_ASSET = address(0x1000);
+    address internal constant HIGH_UNREGISTERED_ASSET =
+        address(type(uint160).max - 0x1000);
+
     IndexAsset wethAsset60;
     IndexAsset linkAsset40;
 
@@ -23,32 +31,54 @@ contract IndexManagerTest is BaseTest {
 
         wethAsset60 = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: weight60,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight60
         });
 
         linkAsset40 = IndexAsset({
             asset: address(mockLink),
-            weightPercentage: weight40,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: weight40
         });
+    }
+
+    /// @dev Deploys an ERC20 mock with no price feed registered at a fixed address.
+    function _deployUnregisteredAssetAt(
+        address _target
+    ) internal returns (address) {
+        deployCodeTo(
+            "AssetTokenMock.sol:AssetTokenMock",
+            abi.encode("Unregistered", "UNREG", uint8(18)),
+            _target
+        );
+        return _target;
+    }
+
+    /// @dev Deploys a fresh IndexManager (deployer as admin) whose PriceFeedManager has no USDC feed.
+    function _deployIndexManagerWithoutUsdcFeed()
+        internal
+        returns (IndexManager freshIndexManager)
+    {
+        SwapManager swapManagerImplementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        vm.prank(deployer);
+        freshIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
+            address(priceFeedManagerImplementation)
+        );
     }
 
     function _createDefaultIndex(
         address _assetA,
-        address _assetB,
-        address _priceFeedA,
-        address _priceFeedB
+        address _assetB
     ) internal returns (address indexAddress, address token0, address token1) {
         IndexAsset memory assetA = IndexAsset({
             asset: _assetA,
-            weightPercentage: weight60,
-            priceFeed: _priceFeedA
+            weightPercentage: weight60
         });
         IndexAsset memory assetB = IndexAsset({
             asset: _assetB,
-            weightPercentage: weight40,
-            priceFeed: _priceFeedB
+            weightPercentage: weight40
         });
 
         vm.prank(deployer);
@@ -91,9 +121,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexIndexNotMarkedInitializedAfterCreate() public {
         (address indexAddress, , ) = _createDefaultIndex(
             address(mockWeth),
-            address(mockLink),
-            address(mockWethPriceFeed),
-            address(mockLinkPriceFeed)
+            address(mockLink)
         );
 
         assertTrue(indexManager.isIndexAddress(indexAddress));
@@ -103,9 +131,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexIndexLookupIsOrderIndependent() public {
         (address indexAddress, , ) = _createDefaultIndex(
             address(mockWeth),
-            address(mockLink),
-            address(mockWethPriceFeed),
-            address(mockLinkPriceFeed)
+            address(mockLink)
         );
 
         address lookupAB = indexManager.getIndexByAssetsAddresses(
@@ -124,9 +150,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexToken0IsLessThanToken1() public {
         (, address token0, address token1) = _createDefaultIndex(
             address(mockWeth),
-            address(mockLink),
-            address(mockWethPriceFeed),
-            address(mockLinkPriceFeed)
+            address(mockLink)
         );
 
         assertTrue(token0 < token1, "token0 must be < token1 after sorting");
@@ -177,8 +201,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfSameAssets() public {
         IndexAsset memory sameAsset = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: weight50,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight50
         });
 
         vm.prank(deployer);
@@ -204,28 +227,23 @@ contract IndexManagerTest is BaseTest {
 
         IndexAsset memory wethAssetA = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: weight20,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight20
         });
         IndexAsset memory wethAssetB = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: weight100,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight100
         });
         IndexAsset memory wethAssetC = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: weight120,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight120
         });
         IndexAsset memory linkAssetA = IndexAsset({
             asset: address(mockLink),
-            weightPercentage: weight30,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: weight30
         });
         IndexAsset memory linkAssetB = IndexAsset({
             asset: address(mockLink),
-            weightPercentage: weight00,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: weight00
         });
 
         vm.prank(deployer);
@@ -252,13 +270,11 @@ contract IndexManagerTest is BaseTest {
         for (uint256 i = 0; i < invalidWeights0.length; i++) {
             IndexAsset memory wethAsset = IndexAsset({
                 asset: address(mockWeth),
-                weightPercentage: invalidWeights0[i],
-                priceFeed: address(mockWethPriceFeed)
+                weightPercentage: invalidWeights0[i]
             });
             IndexAsset memory linkAsset = IndexAsset({
                 asset: address(mockLink),
-                weightPercentage: MAX_WEIGHT - invalidWeights0[i],
-                priceFeed: address(mockLinkPriceFeed)
+                weightPercentage: MAX_WEIGHT - invalidWeights0[i]
             });
 
             vm.prank(deployer);
@@ -279,13 +295,11 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexAcceptsWeightsJustInsideBounds() public {
         IndexAsset memory wethAsset = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: MIN_WEIGHT + 1,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: MIN_WEIGHT + 1
         });
         IndexAsset memory linkAsset = IndexAsset({
             asset: address(mockLink),
-            weightPercentage: MAX_WEIGHT - MIN_WEIGHT - 1,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: MAX_WEIGHT - MIN_WEIGHT - 1
         });
 
         vm.prank(deployer);
@@ -300,13 +314,11 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfIndexAlreadyExists() public {
         IndexAsset memory wethAsset = IndexAsset({
             asset: address(mockWeth),
-            weightPercentage: weight50,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight50
         });
         IndexAsset memory wbtcAsset = IndexAsset({
             asset: address(mockWbtc),
-            weightPercentage: weight50,
-            priceFeed: address(mockWbtcPriceFeed)
+            weightPercentage: weight50
         });
 
         vm.prank(deployer);
@@ -319,46 +331,81 @@ contract IndexManagerTest is BaseTest {
         indexManager.createIndex(validFeePercentage, wethAsset, wbtcAsset);
     }
 
-    function testCreateIndexRevertIfAsset0PriceFeedIsNotAPriceFeed() public {
-        IndexAsset memory wethAsset = IndexAsset({
-            asset: address(mockWeth),
-            weightPercentage: weight60,
-            priceFeed: address(mockWbtc) // invalid
+    function testCreateIndexRevertIfAsset0PriceFeedNotRegistered() public {
+        address unregisteredAsset = _deployUnregisteredAssetAt(
+            LOW_UNREGISTERED_ASSET
+        );
+        IndexAsset memory unregistered = IndexAsset({
+            asset: unregisteredAsset,
+            weightPercentage: weight60
         });
+
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidPriceFeedAddress.selector);
-        indexManager.createIndex(validFeePercentage, wethAsset, linkAsset40);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                unregisteredAsset
+            )
+        );
+        indexManager.createIndex(validFeePercentage, unregistered, linkAsset40);
     }
 
-    function testCreateIndexRevertIfAsset1PriceFeedIsAddress0() public {
-        IndexAsset memory linkAsset = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight40,
-            priceFeed: address(0) // invalid
+    function testCreateIndexRevertIfAsset1PriceFeedNotRegistered() public {
+        address unregisteredAsset = _deployUnregisteredAssetAt(
+            HIGH_UNREGISTERED_ASSET
+        );
+        IndexAsset memory unregistered = IndexAsset({
+            asset: unregisteredAsset,
+            weightPercentage: weight40
         });
 
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidPriceFeedAddress.selector);
-        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                unregisteredAsset
+            )
+        );
+        indexManager.createIndex(validFeePercentage, wethAsset60, unregistered);
     }
 
-        function testCreateIndexRevertIfAsset1PriceFeedIsNotAPriceFeed() public {
-        IndexAsset memory linkAsset = IndexAsset({
-            asset: address(mockLink),
-            weightPercentage: weight40,
-            priceFeed: address(mockLink) // invalid
-        });
+    function testCreateIndexRevertIfUsdcPriceFeedNotRegistered() public {
+        IndexManager freshIndexManager = _deployIndexManagerWithoutUsdcFeed();
+        PriceFeedManager freshPriceFeedManager = PriceFeedManager(
+            freshIndexManager.getPriceFeedManagerAddress()
+        );
 
-        vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidPriceFeedAddress.selector);
-        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
+        // Register both index assets but not USDC, so only the USDC check can fail.
+        vm.startPrank(deployer);
+        freshIndexManager.setRouterAddress(address(router));
+        freshPriceFeedManager.registerPriceFeed(
+            address(mockWeth),
+            address(mockWethPriceFeed),
+            assetPriceFeedMaxDelay
+        );
+        freshPriceFeedManager.registerPriceFeed(
+            address(mockLink),
+            address(mockLinkPriceFeed),
+            assetPriceFeedMaxDelay
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                address(mockUsdc)
+            )
+        );
+        freshIndexManager.createIndex(
+            validFeePercentage,
+            wethAsset60,
+            linkAsset40
+        );
+        vm.stopPrank();
     }
 
     function testCreateIndexRevertIfAsset0IsNotErc20() public {
         IndexAsset memory wethAsset = IndexAsset({
             asset: address(mockWbtcPriceFeed), // invalid
-            weightPercentage: weight60,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight60
         });
 
         vm.prank(deployer);
@@ -369,8 +416,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfAsset0IsAddress0() public {
         IndexAsset memory wethAsset = IndexAsset({
             asset: address(0), // invalid
-            weightPercentage: weight60,
-            priceFeed: address(mockWethPriceFeed)
+            weightPercentage: weight60
         });
 
         vm.prank(deployer);
@@ -381,8 +427,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfAsset1IsNotErc20() public {
         IndexAsset memory linkAsset = IndexAsset({
             asset: address(mockWethPriceFeed), // invalid
-            weightPercentage: weight40,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: weight40
         });
 
         vm.prank(deployer);
@@ -393,8 +438,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfAsset1IsUsdc() public {
         IndexAsset memory linkAsset = IndexAsset({
             asset: address(mockUsdc), // invalid
-            weightPercentage: weight40,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: weight40
         });
 
         vm.prank(deployer);
@@ -406,8 +450,7 @@ contract IndexManagerTest is BaseTest {
     function testCreateIndexRevertIfAsset1IsAddress0() public {
         IndexAsset memory linkAsset = IndexAsset({
             asset: address(0), // invalid
-            weightPercentage: weight40,
-            priceFeed: address(mockLinkPriceFeed)
+            weightPercentage: weight40
         });
 
         vm.prank(deployer);

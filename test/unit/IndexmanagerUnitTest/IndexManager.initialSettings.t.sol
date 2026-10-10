@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
+import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
 import {
     ERC1967Utils
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -32,18 +33,17 @@ contract IndexManagerTest is BaseTest {
 
     function testConstructorSetsInitialStateCorrectly() public {
         SwapManager implementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
         vm.prank(deployer);
         IndexManager newIndexManager = new IndexManager(
             address(mockUsdc),
-            address(mockUsdcPriceFeed),
             address(mockUniRouter),
-            address(implementation)
+            address(implementation),
+            address(priceFeedManagerImplementation)
         );
         assertEq(newIndexManager.getUsdc(), address(mockUsdc));
-        assertEq(
-            newIndexManager.getUsdcPriceFeed(),
-            address(mockUsdcPriceFeed)
-        );
+        // The USDC feed is no longer a constructor argument: a fresh manager has none registered.
+        assertEq(newIndexManager.getUsdcPriceFeed(), address(0));
         assertEq(
             newIndexManager.getUniswapUniversalRouter(),
             address(mockUniRouter)
@@ -74,12 +74,13 @@ contract IndexManagerTest is BaseTest {
 
     function testConstructorDeploysAndInitializesSwapManagerProxy() public {
         SwapManager implementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
         vm.prank(deployer);
         IndexManager newIndexManager = new IndexManager(
             address(mockUsdc),
-            address(mockUsdcPriceFeed),
             address(mockUniRouter),
-            address(implementation)
+            address(implementation),
+            address(priceFeedManagerImplementation)
         );
 
         SwapManager proxy = SwapManager(newIndexManager.getSwapManagerAddress());
@@ -98,14 +99,65 @@ contract IndexManagerTest is BaseTest {
         );
     }
 
+    function testConstructorDeploysAndInitializesPriceFeedManagerProxy()
+        public
+    {
+        SwapManager swapManagerImplementation = new SwapManager();
+        PriceFeedManager implementation = new PriceFeedManager();
+        vm.prank(deployer);
+        IndexManager newIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
+            address(implementation)
+        );
+
+        PriceFeedManager proxy = PriceFeedManager(
+            newIndexManager.getPriceFeedManagerAddress()
+        );
+        assertTrue(address(proxy) != address(implementation));
+        assertTrue(
+            address(proxy) != newIndexManager.getSwapManagerAddress()
+        );
+        assertEq(proxy.owner(), address(newIndexManager));
+        assertEq(proxy.getImplementation(), address(implementation));
+        assertEq(
+            address(
+                uint160(
+                    uint256(
+                        vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)
+                    )
+                )
+            ),
+            address(implementation)
+        );
+        assertFalse(proxy.hasPriceFeed(address(mockUsdc)));
+    }
+
     function testConstructorRevertIfSwapManagerImplementationHasNoCode()
         public
     {
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
         vm.expectRevert(IndexManager__InvalidSwapManagerImplementation.selector);
         new IndexManager(
             address(mockUsdc),
-            address(mockUsdcPriceFeed),
             address(mockUniRouter),
+            makeAddr("noCode"),
+            address(priceFeedManagerImplementation)
+        );
+    }
+
+    function testConstructorRevertIfPriceFeedManagerImplementationHasNoCode()
+        public
+    {
+        SwapManager swapManagerImplementation = new SwapManager();
+        vm.expectRevert(
+            IndexManager__InvalidPriceFeedManagerImplementation.selector
+        );
+        new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
             makeAddr("noCode")
         );
     }

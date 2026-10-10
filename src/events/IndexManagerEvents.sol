@@ -19,6 +19,22 @@ event SwapManagerUpgradeCancelled(
     address indexed canceller
 );
 
+event PriceFeedManagerUpgradeProposed(
+    address indexed newImplementation,
+    uint256 executableAt,
+    address indexed proposer
+);
+
+event PriceFeedManagerUpgraded(
+    address indexed newImplementation,
+    address indexed executor
+);
+
+event PriceFeedManagerUpgradeCancelled(
+    address indexed cancelledImplementation,
+    address indexed canceller
+);
+
 event IndexCreated(
     address indexed indexAddress,
     address indexed asset0,

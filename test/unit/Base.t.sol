@@ -14,6 +14,7 @@ import {Router} from "../../src/Router.sol";
 import {IndexManager} from "../../src/IndexManager.sol";
 import {Index} from "../../src/Index.sol";
 import {SwapManager} from "../../src/SwapManager.sol";
+import {PriceFeedManager} from "../../src/PriceFeedManager.sol";
 import {MockUSDC} from "../mocks/USDCMock.sol";
 import {AssetTokenMock} from "../mocks/AssetTokenMock.sol";
 import {
@@ -40,6 +41,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     address public nonInitializedToken1;
 
     SwapManager public swapManager;
+    PriceFeedManager public priceFeedManager;
 
     // Mocks
     MockUSDC public mockUsdc;
@@ -88,6 +90,10 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     //int256 public constant USDC_INITIAL_PRICE = 9979999;
     int256 public constant USDC_INITIAL_PRICE = 1 * 10 ** 8; // $1 with 8 decimals, to be consistent with other price feeds
 
+    // Max delays the HelperConfig assigns to the feeds (heartbeat + margin), read in setUp().
+    uint32 public assetPriceFeedMaxDelay;
+    uint32 public usdcPriceFeedMaxDelay;
+
     /// Valid tolerance: 0,5% expressed with 4-decimal precision.
     uint256 constant VALID_TOLERANCE = (5 * PERCENTAGE_FEE_PRECISION) / 10; // 0,5%
 
@@ -115,6 +121,9 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         ) = helperConfig.getPriceFeedMocks();
 
         mockUniRouter = helperConfig.getUniswapUniversalRouter();
+        priceFeedManager = deployerPeriphery.priceFeedManager();
+        assetPriceFeedMaxDelay = helperConfig.ASSET_USD_PRICEFEED_MAX_DELAY();
+        usdcPriceFeedMaxDelay = helperConfig.USDC_USD_PRICEFEED_MAX_DELAY();
 
         feeCollector = helperConfig.getFeeCollector();
         rebalancer = helperConfig.getRebalancer();
@@ -215,6 +224,19 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         initializedToken0 = initializedIndex.getAsset0();
         initializedToken1 = initializedIndex.getAsset1();
 
+        // USDC is registered by DeployPeriphery and WETH/WBTC by DeployAndInitNewIndex.
+        // Register LINK and COMP so every mock asset can be used in an index.
+        _registerPriceFeedIfMissing(
+            address(mockLink),
+            address(mockLinkPriceFeed),
+            assetPriceFeedMaxDelay
+        );
+        _registerPriceFeedIfMissing(
+            address(mockComp),
+            address(mockCompPriceFeed),
+            assetPriceFeedMaxDelay
+        );
+
         //deploy a non initialized index
         AssetConfig memory asset0Config = helperConfig.getActiveAssetConfig(
             AssetAvailable.WBTC
@@ -225,14 +247,12 @@ abstract contract BaseTest is Test, ContractCodeConstants {
 
         IndexAsset memory indexAsset0 = IndexAsset({
             asset: asset0Config.token,
-            weightPercentage: weight40,
-            priceFeed: asset0Config.priceFeed
+            weightPercentage: weight40
         });
 
         IndexAsset memory indexAsset1 = IndexAsset({
             asset: asset1Config.token,
-            weightPercentage: weight60,
-            priceFeed: asset1Config.priceFeed
+            weightPercentage: weight60
         });
         vm.prank(deployer);
         (
@@ -433,9 +453,23 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     }
 
     /**
+     * @dev Registers `_feed` for `_asset` in the PriceFeedManager as `deployer`
+     *      (ASSET_MANAGER_ROLE holder) when the asset has no feed yet.
+     */
+    function _registerPriceFeedIfMissing(
+        address _asset,
+        address _feed,
+        uint32 _maxDelay
+    ) internal {
+        if (priceFeedManager.hasPriceFeed(_asset)) return;
+        vm.prank(deployer);
+        priceFeedManager.registerPriceFeed(_asset, _feed, _maxDelay);
+    }
+
+    /**
      * @dev Refreshes all mock price feeds to block.timestamp.
-     *      Required after vm.warp() because Index.getLatestPrice reverts with
-     *      Index__PriceIsStale when updatedAt > MAX_DELAY (1 hour) in the past.
+     *      Required after vm.warp() because PriceFeedManager.getPrice reverts with
+     *      PriceFeedManager__PriceIsStale when updatedAt is older than the feed maxDelay.
      */
     function _refreshPriceFeeds() internal {
         mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE);

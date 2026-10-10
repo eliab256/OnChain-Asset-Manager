@@ -434,7 +434,10 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         public
     {
         uint256 txId = _submitDummyTx();
-        uint256 nonceBefore = multiSigWallet.getNonce(ANVIL_OWNER_2);
+        uint256 nonceBefore = multiSigWallet.getConfirmNonce(
+            txId,
+            ANVIL_OWNER_2
+        );
 
         bytes memory sig = _signConfirm(ANVIL_OWNER_2_PK, ANVIL_OWNER_2, txId);
 
@@ -448,15 +451,20 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         (, , , , uint256 confirmations) = multiSigWallet.getTransaction(txId);
         assertEq(confirmations, 1);
         assertTrue(multiSigWallet.isTransactionConfirmed(txId, ANVIL_OWNER_2));
-        assertEq(multiSigWallet.getNonce(ANVIL_OWNER_2), nonceBefore + 1);
+        assertEq(
+            multiSigWallet.getConfirmNonce(txId, ANVIL_OWNER_2),
+            nonceBefore + 1
+        );
     }
 
     function test_confirmTransactionWithSig_revert_txDoesNotExist() public {
-        bytes memory sig = _signConfirm(
+        // getConfirmDigest now reverts for unknown ids, so sign an arbitrary digest:
+        // the existence check fires before any signature verification.
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
             ANVIL_OWNER_2_PK,
-            ANVIL_OWNER_2,
-            NONEXISTENT_TX_ID
+            keccak256("nonexistent tx")
         );
+        bytes memory sig = abi.encodePacked(r, s, v);
         vm.expectRevert(MultiSig__TxDoesNotExist.selector);
         multiSigWallet.confirmTransactionWithSig(
             NONEXISTENT_TX_ID,
@@ -508,10 +516,10 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         multiSigWallet.confirmTransactionWithSig(txId, ANVIL_OWNER_2, wrongSig);
     }
 
-    function test_confirmTransactionWithSig_revert_replayAttackWithStaleNonce()
+    function test_confirmTransactionWithSig_revert_sigForOtherTxIdIsRejected()
         public
     {
-        // sig0 is bound to txId=0 AND nonce=0
+        // sig0 is bound to txId0 (id + target/value/data + per-tx nonce)
         uint256 txId0 = _submitDummyTx();
         bytes memory sig0 = _signConfirm(
             ANVIL_OWNER_2_PK,
@@ -519,14 +527,14 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
             txId0
         );
 
-        // Consume the sig → nonce advances from 0 to 1
+        // Consume the sig → nonce of (txId0, owner2) advances from 0 to 1
         multiSigWallet.confirmTransactionWithSig(txId0, ANVIL_OWNER_2, sig0);
-        assertEq(multiSigWallet.getNonce(ANVIL_OWNER_2), 1);
+        assertEq(multiSigWallet.getConfirmNonce(txId0, ANVIL_OWNER_2), 1);
 
-        // Owner2 has NOT confirmed txId1 yet
+        // Owner2 has NOT confirmed txId1 yet; same content, different id
         uint256 txId1 = _submitDummyTx();
 
-        // Replaying sig0 (nonce=0) for txId1 is invalid because current nonce=1
+        // Replaying sig0 on txId1 is invalid because the digest binds the txId
         vm.expectRevert(MultiSig__InvalidSignature.selector);
         multiSigWallet.confirmTransactionWithSig(txId1, ANVIL_OWNER_2, sig0);
     }
@@ -535,10 +543,9 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
     //  getConfirmDigest
     // =========================================================================
 
-    function test_getConfirmDigest_signingItRecoversSigner() public view {
-        // We cannot submit a tx in a view context; tx 0 need not exist for
-        // digest computation — it only depends on txId + address + nonce.
-        uint256 txId = 0;
+    function test_getConfirmDigest_signingItRecoversSigner() public {
+        // The digest is built from the stored tx, so the tx must exist.
+        uint256 txId = _submitDummyTx();
         bytes32 digest = multiSigWallet.getConfirmDigest(txId, ANVIL_OWNER_1);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(ANVIL_OWNER_1_PK, digest);
         address recovered = ecrecover(digest, v, r, s);
@@ -623,14 +630,16 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         assertEq(multiSigWallet.getOwnerAt(OWNER_INDEX_2), ANVIL_OWNER_3);
     }
 
-    function test_getNonce_startsAtZeroAndIncrementsAfterSigConfirm() public {
-        assertEq(multiSigWallet.getNonce(ANVIL_OWNER_1), 0);
-
+    function test_getConfirmNonce_startsAtZeroAndIncrementsAfterSigConfirm()
+        public
+    {
         uint256 txId = _submitDummyTx();
+        assertEq(multiSigWallet.getConfirmNonce(txId, ANVIL_OWNER_1), 0);
+
         bytes memory sig = _signConfirm(ANVIL_OWNER_1_PK, ANVIL_OWNER_1, txId);
         multiSigWallet.confirmTransactionWithSig(txId, ANVIL_OWNER_1, sig);
 
-        assertEq(multiSigWallet.getNonce(ANVIL_OWNER_1), 1);
+        assertEq(multiSigWallet.getConfirmNonce(txId, ANVIL_OWNER_1), 1);
     }
 
     function test_isTransactionConfirmed_reflectsConfirmAndRevoke() public {

@@ -37,13 +37,14 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 | `IndexManager.sol` | Governance executor — creates and initialises indexes, orchestrates rebalancing, fee collection and weight updates |
 | `Index.sol`        | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance                          |
 | `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index                                 |
+| `PriceFeedManager.sol` | Oracle registry — one Chainlink feed per asset with its own staleness limit (`maxDelay`), shared by all indexes. Feed replacement is timelocked (2 days + 3-day window). UUPS proxy (ERC-7201 storage) deployed by IndexManager, upgradeable only by IndexManager after a 2-day timelock |
 | `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router. UUPS proxy (ERC-7201 storage) deployed by IndexManager; one proxy shared by all indexes, upgradeable only by IndexManager after a 2-day timelock |
 
 ### Key design properties
 
 - **USDC-denominated** — all shares are priced in USDC, providing a stable USD reference for users.
 - **Two-asset indexes** — each index holds exactly two ERC20 tokens with configurable target weights (4-decimal precision, e.g. `600000` = 60 %).
-- **Chainlink price feeds** — all USD valuations use Chainlink aggregators; stale-price protection is enforced on every read.
+- **Chainlink price feeds** — all USD valuations use Chainlink aggregators read through the shared `PriceFeedManager`; stale-price protection (per-feed `maxDelay` = heartbeat + margin) is enforced on every read. A deprecated feed can be replaced once for every index using that asset.
 - **Slippage protection** — mint tolerance and rebalance max-slippage are enforced on-chain, not just off-chain.
 - **Role-based access control** — `ASSET_MANAGER_ROLE`, `FEE_COLLECTOR_ROLE` and `REBALANCER_ROLE` are separated so governance can be distributed across multiple addresses.
 
@@ -59,8 +60,8 @@ These roles are defined in `IndexManager.sol`. The deployer receives all three r
 
 | Role                 | What it **can** do                                                                                                                  | What it **cannot** do                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager; propose, execute (after a 2-day delay, within a 3-day window) and cancel SwapManager upgrades | Cannot call any other operational function directly                               |
-| `ASSET_MANAGER_ROLE` | Create and initialise indexes, set the Router address, propose, execute (single, multiple, all) and cancel weight updates | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
+| `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager; propose, execute (after a 2-day delay, within a 3-day window) and cancel SwapManager and PriceFeedManager upgrades | Cannot call any other operational function directly                               |
+| `ASSET_MANAGER_ROLE` | Create and initialise indexes, set the Router address, propose, execute (single, multiple, all) and cancel weight updates; register price feeds and propose/execute/cancel feed replacements on the PriceFeedManager | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
 | `REBALANCER_ROLE`    | Trigger rebalancing on a single index, on a list of indexes, or on all indexes at once                                              | Cannot create indexes, change weights, collect fees, or modify contract addresses |
 | `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees from a single index, from a list of indexes, or from all indexes                                     | Cannot rebalance, create indexes, change weights, or modify contract addresses    |
 
@@ -142,8 +143,8 @@ make integrationtest
 .
 ├── script/
 │   ├── CodeConstants.sol            # Chain IDs, mainnet addresses, deployer constants
-│   ├── DeployPeriphery.s.sol        # Deploys SwapManager implementation, IndexManager (creates the SwapManager proxy), Router
-│   ├── DeployAndInitNewIndex.s.sol  # Deploys and seeds a new Index
+│   ├── DeployPeriphery.s.sol        # Deploys SwapManager/PriceFeedManager implementations, IndexManager (creates both proxies), Router; registers the USDC feed
+│   ├── DeployAndInitNewIndex.s.sol  # Registers missing asset feeds, deploys and seeds a new Index
 │   └── HelperConfig.s.sol           # Network config and mock setup for Anvil
 │
 ├── src/
@@ -151,11 +152,13 @@ make integrationtest
 │   ├── Index.sol                    # Core vault: mint, redeem, rebalance, fees
 │   ├── IndexManager.sol             # Governance: create, init, rebalance, collect fees
 │   ├── Router.sol                   # User entry point: input validation, buy/sell routing
+│   ├── PriceFeedManager.sol         # Shared Chainlink feed registry (UUPS proxy)
 │   ├── SwapManager.sol              # Uniswap V3/V4 swap parameter builder
 │   ├── types.sol                    # Shared structs and enums
 │   ├── Interface/
 │   │   ├── IIndex.sol
 │   │   ├── IIndexManager.sol
+│   │   ├── IPriceFeedManager.sol
 │   │   ├── IRouter.sol
 │   │   └── ISwapManager.sol
 │   ├── errors/

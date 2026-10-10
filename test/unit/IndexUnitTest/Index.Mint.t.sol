@@ -26,6 +26,9 @@ import {
 } from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import "../../../src/errors/IndexErrors.sol";
+import {
+    PriceFeedManager__PriceIsStale
+} from "../../../src/errors/PriceFeedManagerErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 
 contract IndexMintTest is BaseTest {
@@ -83,7 +86,7 @@ contract IndexMintTest is BaseTest {
 
         vm.warp(block.timestamp + 1 days); // Move forward in time to make the price stale
 
-        vm.expectRevert(abi.encodeWithSelector(Index__PriceIsStale.selector));
+        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager__PriceIsStale.selector));
         vm.prank(address(router));
         initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
@@ -227,7 +230,7 @@ contract IndexMintTest is BaseTest {
     function testMinMintPreviewRevertsIfPriceIsStale() public {
         vm.warp(block.timestamp + 1 days);
 
-        vm.expectRevert(abi.encodeWithSelector(Index__PriceIsStale.selector));
+        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager__PriceIsStale.selector));
         initializedIndex.minMintPreview(VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
 

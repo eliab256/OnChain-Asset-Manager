@@ -8,6 +8,12 @@ abstract contract CodeConstants {
 
     uint8 public constant PRICE_FEED_DECIMALS = 8;
 
+    // Price feed max delays (heartbeat + margin)
+    // ETH/BTC/LINK/COMP-USD heartbeat is 1h, USDC/USD heartbeat is 24h.
+    uint32 public constant ASSET_USD_PRICEFEED_MAX_DELAY =
+        1 hours + 15 minutes;
+    uint32 public constant USDC_USD_PRICEFEED_MAX_DELAY = 25 hours;
+
     //Multisig configuration
     uint256 public constant MULTISIG_REQUIRED_CONFIRMATIONS = 2;
 

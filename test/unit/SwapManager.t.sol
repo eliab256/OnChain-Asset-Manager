@@ -21,10 +21,14 @@ import {
     OwnableUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {SwapManagerV2Mock} from "../mocks/SwapManagerV2Mock.sol";
+import {SwapManagerHarness} from "../mocks/SwapManagerHarness.sol";
+import {IndexTokensMock} from "../mocks/IndexTokensMock.sol";
 
 contract SwapManagerTest is BaseTest {
 
     SwapManagerHarness harness;
+    /// Index stand-in (WETH / WBTC / USDC) used for harness-only route registrations
+    IndexTokensMock harnessIndexMock;
 
     // =========================================================================
     //  Constants
@@ -69,8 +73,8 @@ contract SwapManagerTest is BaseTest {
     /// Number of low sequential slots checked to be empty on the proxy
     uint256 constant LOW_SLOTS_CHECKED = 10;
 
-    /// Index address used for harness-only route registrations
-    address constant HARNESS_INDEX = address(0xBEEF);
+    /// Index address used for harness-only route registrations (assigned in setUp)
+    address HARNESS_INDEX;
 
     // =========================================================================
     //  setUp
@@ -88,6 +92,13 @@ contract SwapManagerTest is BaseTest {
                 )
             )
         );
+        // registerIndex now reads the index tokens, so the harness needs a contract exposing them.
+        harnessIndexMock = new IndexTokensMock(
+            address(mockWeth),
+            address(mockWbtc),
+            address(mockUsdc)
+        );
+        HARNESS_INDEX = address(harnessIndexMock);
     }
 
     // =========================================================================
@@ -290,7 +301,12 @@ contract SwapManagerTest is BaseTest {
         );
 
         vm.prank(user1);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                user1
+            )
+        );
         swapManager.registerIndex(
             address(nonInitializedIndex),
             route,
@@ -514,7 +530,12 @@ contract SwapManagerTest is BaseTest {
         );
 
         vm.prank(user1);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                user1
+            )
+        );
         swapManager.updateRoute(
             address(initializedIndex),
             SwapType.ASSET0_USDC,
@@ -1274,30 +1295,26 @@ contract SwapManagerTest is BaseTest {
     // =========================================================================
 
     /// @dev Builds a minimal valid V4 SwapRoute for harness-based tests.
-    function _validV4Route() internal view returns (SwapRoute memory) {
-        return
-            SwapRoute({
-                version: PoolVersion.V4,
-                poolKey: PoolKey({
-                    currency0: Currency.wrap(address(mockWeth)),
-                    currency1: Currency.wrap(address(mockWbtc)),
-                    fee: 3000,
-                    tickSpacing: 60,
-                    hooks: IHooks(address(0))
-                }),
-                v3Path: bytes("")
-            });
+    /// @dev Builds the three valid V4 routes of the harness index (WETH / WBTC / USDC),
+    ///      ordered by SwapType: ASSET0_USDC, ASSET1_USDC, ASSET0_ASSET1.
+    function _harnessV4Routes()
+        internal
+        view
+        returns (SwapRoute[3] memory routes)
+    {
+        routes[0] = _buildV4Route(address(mockWeth), address(mockUsdc));
+        routes[1] = _buildV4Route(address(mockWbtc), address(mockUsdc));
+        routes[2] = _buildV4Route(address(mockWeth), address(mockWbtc));
+    }
+
+    /// @dev Registers the harness index with the three valid V4 routes.
+    function _registerHarnessIndexWithV4Routes() internal {
+        SwapRoute[3] memory routes = _harnessV4Routes();
+        harness.registerIndex(HARNESS_INDEX, routes[0], routes[1], routes[2]);
     }
 
     function testCheckIfRegisteredIndexRevertsOnV4WithZeroCurrencies() public {
-        SwapRoute memory validRoute = _validV4Route();
-
-        harness.registerIndex(
-            address(0xBEEF),
-            validRoute,
-            validRoute,
-            validRoute
-        );
+        _registerHarnessIndexWithV4Routes();
 
         // Corrupt the ASSET0_ASSET1 route: version is V4 but both
         // currencies are zero → should revert.
@@ -1314,13 +1331,13 @@ contract SwapManagerTest is BaseTest {
         });
 
         harness.forceSetRoute(
-            address(0xBEEF),
+            HARNESS_INDEX,
             SwapType.ASSET0_ASSET1,
             abi.encode(corruptRoute)
         );
 
         vm.expectRevert(SwapManager.SwapManager__IndexNotRegistered.selector);
-        harness.exposed_checkIfRegisteredIndex(address(0xBEEF));
+        harness.exposed_checkIfRegisteredIndex(HARNESS_INDEX);
     }
 
     // =========================================================================
@@ -1377,17 +1394,17 @@ contract SwapManagerTest is BaseTest {
     }
 
     function testRegisterIndexWritesRoutesUnderErc7201Namespace() public {
-        SwapRoute memory route = _validV4Route();
-        address currency0 = Currency.unwrap(route.poolKey.currency0);
+        SwapRoute[3] memory routes = _harnessV4Routes();
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 slot = _routeSlot(HARNESS_INDEX, SwapType(i));
             assertEq(vm.load(address(harness), slot), bytes32(0), "route slot must be empty before registration");
         }
 
-        harness.registerIndex(HARNESS_INDEX, route, route, route);
+        harness.registerIndex(HARNESS_INDEX, routes[0], routes[1], routes[2]);
 
         for (uint256 i = 0; i < 3; i++) {
+            address currency0 = Currency.unwrap(routes[i].poolKey.currency0);
             bytes32 slot = _routeSlot(HARNESS_INDEX, SwapType(i));
             // word 0: version (enum, uint8)
             assertEq(
@@ -1411,8 +1428,7 @@ contract SwapManagerTest is BaseTest {
     }
 
     function testRegisterIndexLeavesLowSequentialSlotsEmpty() public {
-        SwapRoute memory route = _validV4Route();
-        harness.registerIndex(HARNESS_INDEX, route, route, route);
+        _registerHarnessIndexWithV4Routes();
 
         for (uint256 i = 0; i < LOW_SLOTS_CHECKED; i++) {
             assertEq(
@@ -1470,12 +1486,13 @@ contract SwapManagerTest is BaseTest {
     function testUpgradeToAndCallByOwnerKeepsRoutesAndSwitchesImplementation()
         public
     {
-        SwapRoute memory v4Route = _validV4Route();
+        // Mixed versions: ASSET0_USDC and ASSET0_ASSET1 on V4, ASSET1_USDC on V3
+        SwapRoute[3] memory v4Routes = _harnessV4Routes();
         SwapRoute memory v3Route = _buildV3Route(
             address(mockWbtc),
             address(mockUsdc)
         );
-        harness.registerIndex(HARNESS_INDEX, v4Route, v3Route, v4Route);
+        harness.registerIndex(HARNESS_INDEX, v4Routes[0], v3Route, v4Routes[2]);
 
         bytes32[3] memory routesBefore;
         for (uint256 i = 0; i < 3; i++) {
@@ -1519,36 +1536,3 @@ contract SwapManagerTest is BaseTest {
     }
 }
 
-// =============================================================================
-//  Harness 
-// =============================================================================
-
-contract SwapManagerHarness is SwapManager {
-
-    function exposed_storageLocation() external pure returns (bytes32 slot) {
-        SwapManagerStorage storage $ = _getSwapManagerStorage();
-        assembly {
-            slot := $.slot
-        }
-    }
-
-    function exposed_validateRoute(SwapRoute memory _route) external pure {
-        _validateRoute(_route);
-    }
-
-    function exposed_checkIfRegisteredIndex(
-        address _indexAddress
-    ) external view {
-        _checkIfRegisteredIndex(_indexAddress);
-    }
-
-    /// @dev Directly writes a route into storage, bypassing validation.
-    function forceSetRoute(
-        address _indexAddress,
-        SwapType _swapType,
-        bytes memory _rawRoute
-    ) external {
-        SwapRoute memory route = abi.decode(_rawRoute, (SwapRoute));
-        _getSwapManagerStorage().routes[_indexAddress][_swapType] = route;
-    }
-}

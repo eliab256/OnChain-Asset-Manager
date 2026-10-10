@@ -8,6 +8,10 @@ import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "../../../src/errors/IndexErrors.sol";
+import {
+    PriceFeedManager__PriceIsStale
+} from "../../../src/errors/PriceFeedManagerErrors.sol";
+import {AssetAvailable, FeedConfig} from "../../../src/types.sol";
 import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
 
 contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
@@ -155,29 +159,78 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
     }
 
     // =========================================================================
-    //  Staleness guard — MAX_DELAY = 1 hour
+    //  Staleness guard — per-feed maxDelay stored in the PriceFeedManager
     // =========================================================================
 
+    function test_priceFeedManager_feedsRegisteredWithHelperConfigMaxDelays()
+        public
+        view
+    {
+        FeedConfig memory wbtcConfig = priceFeedManager.getPriceFeedConfig(
+            address(wbtc)
+        );
+        FeedConfig memory wethConfig = priceFeedManager.getPriceFeedConfig(
+            address(weth)
+        );
+        FeedConfig memory usdcConfig = priceFeedManager.getPriceFeedConfig(
+            address(usdc)
+        );
+
+        assertEq(wbtcConfig.feed, address(wbtcPriceFeed));
+        assertEq(
+            wbtcConfig.maxDelay,
+            helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).priceFeedMaxDelay
+        );
+        assertEq(wethConfig.feed, address(wethPriceFeed));
+        assertEq(
+            wethConfig.maxDelay,
+            helperConfig.getActiveAssetConfig(AssetAvailable.WETH).priceFeedMaxDelay
+        );
+        assertEq(usdcConfig.feed, address(usdcPriceFeed));
+        assertEq(
+            usdcConfig.maxDelay,
+            helperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay
+        );
+    }
+
+    function test_getLatestPrice_matchesPriceFeedManagerPrice() public view {
+        assertEq(
+            wbtcWethIndex.getLatestPrice(address(wbtc)),
+            priceFeedManager.getPrice(address(wbtc))
+        );
+        assertEq(
+            wbtcWethIndex.getLatestPrice(address(usdc)),
+            priceFeedManager.getPrice(address(usdc))
+        );
+    }
 
     function test_getLatestPrice_revertsWhenPriceIsStale() public {
-        vm.warp(block.timestamp + MAX_DELAY + 1);
+        _warpPastMaxDelay(address(wbtc));
 
-        vm.expectRevert(Index__PriceIsStale.selector);
+        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
         wbtcWethIndex.getLatestPrice(address(wbtc));
     }
 
     function test_getLatestPrice_weth_revertsWhenPriceIsStale() public {
-        vm.warp(block.timestamp + MAX_DELAY + 1);
+        _warpPastMaxDelay(address(weth));
 
-        vm.expectRevert(Index__PriceIsStale.selector);
+        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
         wbtcWethIndex.getLatestPrice(address(weth));
     }
 
     function test_getLatestPrice_usdc_revertsWhenPriceIsStale() public {
-        vm.warp(block.timestamp + MAX_USDC_DELAY + 1);
+        _warpPastMaxDelay(address(usdc));
 
-        vm.expectRevert(Index__PriceIsStale.selector);
+        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
         wbtcWethIndex.getLatestPrice(address(usdc));
+    }
+
+    /// @dev Warps to one second after the latest answer of `_asset` exceeds its maxDelay.
+    function _warpPastMaxDelay(address _asset) internal {
+        FeedConfig memory config = priceFeedManager.getPriceFeedConfig(_asset);
+        (, , , uint256 updatedAt, ) = AggregatorV3Interface(config.feed)
+            .latestRoundData();
+        vm.warp(updatedAt + config.maxDelay + 1);
     }
 
     // =========================================================================

@@ -10,8 +10,11 @@ import {Transaction} from "./types.sol";
 contract MultiSigWallet is IMultiSigWallet,EIP712 {
     using ECDSA for bytes32;
 
+    // binds the signature to the stored tx content; the domain already binds verifyingContract
     bytes32 constant CONFIRM_TYPEHASH =
-        keccak256("Confirm(uint256 txId,address wallet,uint256 nonce)");
+        keccak256(
+            "Confirm(uint256 txId,address target,uint256 value,bytes32 dataHash,uint256 nonce)"
+        );
 
     // =========================================================================
     //  State
@@ -19,8 +22,9 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
     address[] private s_owners;
     mapping(address => bool) private s_isOwner;
 
-    // owner => nonce (for replay protection in off-chain signatures)
-    mapping(address => uint256) private s_nonces;
+    /// @dev txId => owner => nonce for off-chain confirmation signatures, bumped on use and on revoke
+    mapping(uint256 txId => mapping(address owner => uint256 nonce))
+        private s_txIdToOwnerToConfirmNonce;
     uint256 private immutable i_requiredConfirmations;
 
     Transaction[] private s_transactions;
@@ -61,7 +65,7 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
     constructor(
         address[] memory _owners,
         uint256 _required
-    ) EIP712("MultiSigWallet", "1") {
+    ) EIP712("MultiSigWallet", "2") {
         if (_owners.length == 0 || _required == 0 || _required > _owners.length)
             revert MultiSig__InvalidRequirement();
 
@@ -161,16 +165,13 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
         Transaction storage txn = s_transactions[_txId];
         txn.confirmations -= 1;
         s_isConfirmed[_txId][msg.sender] = false;
+        // invalidate any confirmation signature collected before the revoke
+        s_txIdToOwnerToConfirmNonce[_txId][msg.sender]++;
 
         emit ConfirmationRevoked(_txId, msg.sender);
     }
 
-    /**
-     * @notice Confirm a transaction using an EIP-712 signature produced off-chain.
-     * @param _txId       The transaction ID to confirm.
-     * @param _signer     The address of the owner who signed.
-     * @param _signature  The ECDSA signature (65 bytes) produced off-chain.
-     */
+    /// @dev Inherit from IMultiSigWallet. See interface for details.
     function confirmTransactionWithSig(
         uint256 _txId,
         address _signer,
@@ -184,22 +185,14 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
             revert MultiSig__TxAlreadyConfirmed();
 
         // 3. Reconstruct the EIP-712 digest
-        bytes32 structHash = keccak256(
-            abi.encode(
-                CONFIRM_TYPEHASH,
-                _txId,
-                address(this),
-                s_nonces[_signer]
-            )
-        );
-        bytes32 digest = _hashTypedDataV4(structHash);
+        bytes32 digest = _getConfirmDigest(_txId, _signer);
 
         // 4. Recover the signer and compare
         address recovered = digest.recover(_signature);
         if (recovered != _signer) revert MultiSig__InvalidSignature();
 
         // 5. Invalidate the nonce (replay protection)
-        s_nonces[_signer]++;
+        s_txIdToOwnerToConfirmNonce[_txId][_signer]++;
 
         // 6. Record the confirmation
         Transaction storage txn = s_transactions[_txId];
@@ -209,23 +202,40 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
         emit TransactionConfirmed(_txId, _signer);
     }
 
-    /**
-     * @notice Returns the digest to be signed off-chain.
-     * @dev Useful for the frontend to generate signatures.
-     * @param _txId   The transaction ID to get the digest for.
-     * @param _signer The address of the signer.
-     * @return The EIP-712 digest ready to be signed.
-     */
+    /// @dev Inherit from IMultiSigWallet. See interface for details.
     function getConfirmDigest(
         uint256 _txId,
         address _signer
-    ) external view returns (bytes32) {
+    ) external view txExists(_txId) returns (bytes32) {
+        return _getConfirmDigest(_txId, _signer);
+    }
+
+    // =========================================================================
+    //  Internal functions
+    // =========================================================================
+
+    /**
+     * @notice Builds the EIP-712 digest an owner signs to confirm a transaction.
+     * @dev Hashes Confirm(txId, target, value, keccak256(data), nonce) with target, value and data
+     *      read from the stored transaction, so the signature is bound to the transaction content.
+     *      The nonce is the current per-(txId, owner) confirm nonce. Caller must ensure _txId exists.
+     * @param _txId The transaction ID to confirm.
+     * @param _signer The owner whose nonce is used.
+     * @return The EIP-712 typed data digest.
+     */
+    function _getConfirmDigest(
+        uint256 _txId,
+        address _signer
+    ) internal view returns (bytes32) {
+        Transaction storage txn = s_transactions[_txId];
         bytes32 structHash = keccak256(
             abi.encode(
                 CONFIRM_TYPEHASH,
                 _txId,
-                address(this),
-                s_nonces[_signer]
+                txn.target,
+                txn.value,
+                keccak256(txn.data),
+                s_txIdToOwnerToConfirmNonce[_txId][_signer]
             )
         );
         return _hashTypedDataV4(structHash);
@@ -308,13 +318,12 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
         return s_owners[_index];
     }
 
-    /**
-     * @notice Get the nonce for a given owner (for replay protection).
-     * @param _owner The owner address.
-     * @return The current nonce of the owner.
-     */
-    function getNonce(address _owner) external view returns (uint256) {
-        return s_nonces[_owner];
+    /// @dev Inherit from IMultiSigWallet. See interface for details.
+    function getConfirmNonce(
+        uint256 _txId,
+        address _owner
+    ) external view returns (uint256) {
+        return s_txIdToOwnerToConfirmNonce[_txId][_owner];
     }
 
     /**

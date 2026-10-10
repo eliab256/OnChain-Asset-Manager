@@ -15,6 +15,34 @@ interface IIndexManager {
 
     function cancelSwapManagerUpgrade() external;
 
+    /**
+     * @notice Proposes an upgrade of the PriceFeedManager implementation, executable after PROXY_UPGRADE_DELAY.
+     * @dev Callable only by DEFAULT_ADMIN_ROLE. Reverts with IndexManager__PriceFeedManagerUpgradePending if a
+     *      proposal is still within its delay, and with IndexManager__InvalidPriceFeedManagerImplementation if the
+     *      implementation has no code, equals the current one or is not a UUPS implementation.
+     * @param _newImplementation The new UUPS-compatible PriceFeedManager implementation.
+     * @param _data Optional calldata executed on the proxy after the upgrade (e.g. a reinitializer). Empty for none.
+     * @return executableAt Timestamp from which the upgrade can be executed.
+     */
+    function proposePriceFeedManagerUpgrade(
+        address _newImplementation,
+        bytes calldata _data
+    ) external returns (uint256 executableAt);
+
+    /**
+     * @notice Executes the pending PriceFeedManager upgrade.
+     * @dev Callable only by DEFAULT_ADMIN_ROLE. Executable only within PROXY_UPGRADE_EXECUTION_WINDOW after the delay;
+     *      reverts with IndexManager__NoPendingPriceFeedManagerUpgrade before it and
+     *      IndexManager__PriceFeedManagerUpgradeExpired after it.
+     */
+    function executePriceFeedManagerUpgrade() external;
+
+    /**
+     * @notice Cancels the pending PriceFeedManager upgrade, whether it is still in its delay, executable or expired.
+     * @dev Callable only by DEFAULT_ADMIN_ROLE. Reverts with IndexManager__NoPendingPriceFeedManagerUpgrade if none.
+     */
+    function cancelPriceFeedManagerUpgrade() external;
+
     function createIndex(
         uint32 _feePercentage,
         IndexAsset memory _assetA,
@@ -96,6 +124,27 @@ interface IIndexManager {
     function getSwapManagerAddress() external view returns (address);
 
     function getPendingSwapManagerUpgrade()
+        external
+        view
+        returns (
+            address implementation,
+            bytes memory data,
+            uint256 executableAt
+        );
+
+    /**
+     * @notice Returns the address of the shared PriceFeedManager proxy, deployed by the constructor.
+     * @return The PriceFeedManager proxy address.
+     */
+    function getPriceFeedManagerAddress() external view returns (address);
+
+    /**
+     * @notice Returns the pending PriceFeedManager upgrade.
+     * @return implementation The proposed implementation (address(0) if none).
+     * @return data The calldata executed after the upgrade.
+     * @return executableAt Timestamp from which the upgrade can be executed (0 if none).
+     */
+    function getPendingPriceFeedManagerUpgrade()
         external
         view
         returns (

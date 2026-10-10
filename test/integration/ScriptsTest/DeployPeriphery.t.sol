@@ -9,6 +9,8 @@ import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {Index} from "../../../src/Index.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
+import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
+import {FeedConfig} from "../../../src/types.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 import {
     ERC1967Utils
@@ -74,6 +76,82 @@ contract DeployPeripheryTest is Test, CodeConstants {
             mainnetSwapManager.getImplementation(),
             implementation,
             "getImplementation must match the ERC-1967 slot"
+        );
+    }
+
+    function testDeployPeripheryDeploysPriceFeedManagerOnMainnet()
+        public
+        selectFork("mainnet")
+    {
+        DeployPeriphery mainnetDeployerPeriphery = new DeployPeriphery();
+        (
+            mainnetIndexManager,
+            mainnetRouter,
+            isolatedHelperConfig,
+            mainnetSwapManager,
+            multiSigWallet,
+            mainnetDeployer
+        ) = mainnetDeployerPeriphery.run();
+        PriceFeedManager priceFeedManager = mainnetDeployerPeriphery
+            .priceFeedManager();
+
+        assertEq(
+            address(priceFeedManager),
+            mainnetIndexManager.getPriceFeedManagerAddress(),
+            "script must expose the IndexManager PriceFeedManager proxy"
+        );
+        assertEq(
+            priceFeedManager.owner(),
+            address(mainnetIndexManager),
+            "IndexManager must own the PriceFeedManager proxy"
+        );
+
+        address implementation = address(
+            uint160(
+                uint256(
+                    vm.load(
+                        address(priceFeedManager),
+                        ERC1967Utils.IMPLEMENTATION_SLOT
+                    )
+                )
+            )
+        );
+        assertTrue(implementation != address(0), "implementation slot must be set");
+        assertTrue(
+            implementation != address(priceFeedManager),
+            "implementation must differ from the proxy"
+        );
+        assertTrue(implementation.code.length > 0, "implementation must have code");
+        assertEq(
+            priceFeedManager.getImplementation(),
+            implementation,
+            "getImplementation must match the ERC-1967 slot"
+        );
+
+        // USDC/USD feed registered by the script with USDC_USD_PRICEFEED_MAX_DELAY.
+        FeedConfig memory usdcConfig = priceFeedManager.getPriceFeedConfig(
+            USDC_MAINNET
+        );
+        assertEq(usdcConfig.feed, USDC_USD_PRICEFEED_MAINNET);
+        assertEq(usdcConfig.maxDelay, USDC_USD_PRICEFEED_MAX_DELAY);
+        assertTrue(priceFeedManager.hasPriceFeed(USDC_MAINNET));
+        assertGt(priceFeedManager.getPrice(USDC_MAINNET), 0);
+
+        // Asset feeds are registered later, by DeployAndInitNewIndex.
+        assertFalse(priceFeedManager.hasPriceFeed(WETH_MAINNET));
+
+        // The deployer no longer holds ASSET_MANAGER_ROLE: it cannot register feeds.
+        assertFalse(
+            mainnetIndexManager.hasRole(
+                mainnetIndexManager.ASSET_MANAGER_ROLE(),
+                mainnetDeployer
+            )
+        );
+        assertTrue(
+            mainnetIndexManager.hasRole(
+                mainnetIndexManager.ASSET_MANAGER_ROLE(),
+                address(multiSigWallet)
+            )
         );
     }
 

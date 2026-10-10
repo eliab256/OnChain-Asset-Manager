@@ -19,6 +19,7 @@ import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {Index} from "../../../src/Index.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
+import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     AggregatorV3Interface
@@ -33,6 +34,7 @@ contract IntegrationBase is Test {
     MultiSigWallet multiSigWallet;
     IndexManager indexManager;
     SwapManager swapManager;
+    PriceFeedManager priceFeedManager;
     Router router;
 
     /**
@@ -73,6 +75,8 @@ contract IntegrationBase is Test {
             multiSigWallet,
             deployer
         ) = deployScript.run();
+
+        priceFeedManager = deployScript.priceFeedManager();
 
         // After deployment, admin roles belong to the MultiSigWallet.
         // Grant them back to the deployer for convenience in integration tests.

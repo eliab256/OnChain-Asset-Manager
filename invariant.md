@@ -40,7 +40,7 @@
 
 18. **collectFees drains exactly s_totalFees**: Dopo `collectFees`, l'ammontare trasferito == il valore pre-call di `s_totalFees`, e `s_totalFees == 0`.
 
-19. **Price feed freshness**: `getLatestPrice` reverta se `answer <= 0`, `answeredInRound < roundId`, o `block.timestamp - updatedAt > MAX_DELAY`.
+19. **Price feed freshness**: `getLatestPrice` accetta solo asset0, asset1 e USDC e delega a `PriceFeedManager.getPrice`, che reverta se il feed non è registrato, `answer <= 0`, `answeredInRound < roundId` o `block.timestamp - updatedAt > maxDelay` del feed.
 
 ---
 
@@ -84,7 +84,7 @@
 
 18. **ERC20 validation**: Entrambi gli asset di un index devono implementare `symbol()` (proxy per validazione ERC20).
 
-19. **Price feed validation**: Entrambi i price feed devono implementare `latestRoundData()`.
+19. **Price feed registration**: `createIndex` reverta se asset0, asset1 o USDC non hanno un feed registrato nel PriceFeedManager.
 
 20. **Rebalance/fee collection non-reverting batch**: `rebalanceAllIndexes`, `collectFeesFromAllIndexes`, ecc. non revertano l'intera transazione se un singolo index fallisce — emettono eventi di fallimento.
 
@@ -149,3 +149,24 @@
 12. **V3 input encoding**: L'input V3 codifica `payerIsUser == false` e `amountOutMin` uguale al `_amountOutMinimum` passato (V4: `ExactInputSingleParams.amountOutMinimum`).
 
 13. **V4 action count**: L'input V4 decodificato contiene esattamente 3 action: `SWAP_EXACT_IN_SINGLE`, `SETTLE_ALL`, `TAKE_ALL`.
+
+---
+
+## PriceFeedManager.sol
+
+### Invariant di Stato
+
+1. **Un feed per asset**: Ogni asset ha al più una `FeedConfig`; tutti gli index con lo stesso asset leggono lo stesso feed.
+
+2. **Validità della configurazione**: Ogni feed registrato ha codice, ha restituito `answer > 0` alla registrazione, ha `decimals() <= 18`, e `0 < maxDelay <= MAX_FEED_DELAY_LIMIT`.
+
+3. **Registrazione una sola volta**: `registerPriceFeed` riesce solo se l'asset non ha già un feed; ogni sostituzione passa da `proposePriceFeedUpdate` → `executePriceFeedUpdate`.
+
+4. **Timelock sui feed**: `executePriceFeedUpdate` riesce solo se `executableAt <= block.timestamp <= executableAt + PRICE_FEED_UPDATE_EXECUTION_WINDOW`; il feed proposto viene ri-validato all'esecuzione. Dopo execute o cancel la proposta è azzerata.
+
+5. **Autorizzazioni**: register/propose/execute/cancel richiedono `ASSET_MANAGER_ROLE` sull'IndexManager (owner); `upgradeToAndCall` solo l'owner (IndexManager, tramite il suo timelock).
+
+6. **Prezzi normalizzati**: `getPrice` restituisce sempre il prezzo a 18 decimali.
+
+7. **Storage e proxy**: La configurazione vive nello storage ERC-7201 `onchainassetmanager.storage.PriceFeedManager` e resta invariata dopo un upgrade; il proxy è unico e il suo indirizzo è immutabile in IndexManager e in ogni Index.
+

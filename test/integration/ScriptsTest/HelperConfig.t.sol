@@ -711,4 +711,89 @@ contract HelperConfigTest is Test, CodeConstants {
             "COMP feed must not be zero on Anvil"
         );
     }
+
+    // ──────────────────────────────────────────────
+    //  Price feed max delays
+    // ──────────────────────────────────────────────
+
+    function testAssetConfigsHaveAssetPriceFeedMaxDelayOnAnvil()
+        public
+        onAnvilFork
+    {
+        _assertAssetMaxDelays(anvilHelperConfig);
+    }
+
+    function testAssetConfigsHaveAssetPriceFeedMaxDelayOnMainnet()
+        public
+        onMainnetFork
+    {
+        _assertAssetMaxDelays(mainnetHelperConfig);
+    }
+
+    function testNetworkConfigHasUsdcPriceFeedMaxDelayOnAnvil()
+        public
+        onAnvilFork
+    {
+        assertEq(
+            anvilHelperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay,
+            USDC_USD_PRICEFEED_MAX_DELAY,
+            "USDC feed maxDelay must be USDC_USD_PRICEFEED_MAX_DELAY"
+        );
+    }
+
+    function testNetworkConfigHasUsdcPriceFeedMaxDelayOnMainnet()
+        public
+        onMainnetFork
+    {
+        assertEq(
+            mainnetHelperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay,
+            USDC_USD_PRICEFEED_MAX_DELAY,
+            "USDC feed maxDelay must be USDC_USD_PRICEFEED_MAX_DELAY"
+        );
+    }
+
+    function testPriceFeedMaxDelayConstantsMatchHeartbeatPlusMargin()
+        public
+        pure
+    {
+        // L-03: 1h heartbeat + 15 min margin for assets, 24h heartbeat + 1h margin for USDC.
+        assertEq(ASSET_USD_PRICEFEED_MAX_DELAY, 1 hours + 15 minutes);
+        assertEq(USDC_USD_PRICEFEED_MAX_DELAY, 25 hours);
+    }
+
+    function testAssetConfigByChainIdGetterReturnsMaxDelay()
+        public
+        onAnvilFork
+    {
+        AssetConfig memory weth = anvilHelperConfig.getActiveAssetConfig(
+            AssetAvailable.WETH
+        );
+        (
+            address token,
+            address priceFeed,
+            uint32 priceFeedMaxDelay
+        ) = anvilHelperConfig.assetConfigByChainId(
+                AssetAvailable.WETH,
+                ANVIL_CHAIN_ID
+            );
+        assertEq(token, weth.token);
+        assertEq(priceFeed, weth.priceFeed);
+        assertEq(priceFeedMaxDelay, ASSET_USD_PRICEFEED_MAX_DELAY);
+    }
+
+    function _assertAssetMaxDelays(HelperConfig _helperConfig) internal view {
+        AssetAvailable[4] memory assets = [
+            AssetAvailable.WETH,
+            AssetAvailable.WBTC,
+            AssetAvailable.LINK,
+            AssetAvailable.COMP
+        ];
+        for (uint256 i = 0; i < assets.length; i++) {
+            assertEq(
+                _helperConfig.getActiveAssetConfig(assets[i]).priceFeedMaxDelay,
+                ASSET_USD_PRICEFEED_MAX_DELAY,
+                "asset feed maxDelay must be ASSET_USD_PRICEFEED_MAX_DELAY"
+            );
+        }
+    }
 }

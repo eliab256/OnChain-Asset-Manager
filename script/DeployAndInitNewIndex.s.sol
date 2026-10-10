@@ -6,6 +6,7 @@ import {console} from "forge-std/console.sol";
 import {Index} from "../src/Index.sol";
 import {IndexManager} from "../src/IndexManager.sol";
 import {MultiSigWallet} from "../src/MultiSigWallet.sol";
+import {PriceFeedManager} from "../src/PriceFeedManager.sol";
 import {HelperConfig, AssetConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {IndexAsset, AssetAvailable, SwapRoute} from "../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -73,15 +74,17 @@ contract DeployAndInitNewIndex is Script {
             _params.assetB
         );
 
+        // Feeds must be registered in the PriceFeedManager before createIndex.
+        _registerPriceFeedIfMissing(assetAConfig);
+        _registerPriceFeedIfMissing(assetBConfig);
+
         IndexAsset memory indexAssetA = IndexAsset({
             asset: assetAConfig.token,
-            weightPercentage: _params.weightA,
-            priceFeed: assetAConfig.priceFeed
+            weightPercentage: _params.weightA
         });
         IndexAsset memory indexAssetB = IndexAsset({
             asset: assetBConfig.token,
-            weightPercentage: _params.weightB,
-            priceFeed: assetBConfig.priceFeed
+            weightPercentage: _params.weightB
         });
 
         bytes memory createIndexData = abi.encodeCall(
@@ -93,6 +96,33 @@ contract DeployAndInitNewIndex is Script {
 
         address[] memory deployedIndexes = indexManager.getDeployedIndexes();
         newIndex = deployedIndexes[deployedIndexes.length - 1];
+    }
+
+    /**
+     * @dev Registers the asset price feed in the PriceFeedManager through the MultiSig
+     *      (holder of ASSET_MANAGER_ROLE) if the asset has no feed yet.
+     */
+    function _registerPriceFeedIfMissing(
+        AssetConfig memory _assetConfig
+    ) internal {
+        PriceFeedManager priceFeedManager = PriceFeedManager(
+            indexManager.getPriceFeedManagerAddress()
+        );
+        if (priceFeedManager.hasPriceFeed(_assetConfig.token)) return;
+
+        bytes memory registerPriceFeedData = abi.encodeCall(
+            PriceFeedManager.registerPriceFeed,
+            (
+                _assetConfig.token,
+                _assetConfig.priceFeed,
+                _assetConfig.priceFeedMaxDelay
+            )
+        );
+        _submitConfirmAndExecute(
+            address(priceFeedManager),
+            0,
+            registerPriceFeedData
+        );
     }
 
     /**
