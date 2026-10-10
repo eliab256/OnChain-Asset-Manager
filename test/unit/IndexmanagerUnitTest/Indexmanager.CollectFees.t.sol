@@ -241,6 +241,45 @@ contract IndexManagerTest is BaseTest {
         assertGe(indexManager.getTotalFeesCollected(), before);
     }
 
+    function testCollectFeesAfterRedeemTransfersExactAccruedFees() public {
+        _generateFees(address(initializedIndex));
+        (, uint128 feesAfterMint) = initializedIndex.getFeesInfo();
+
+        uint256 sharesToSell = initializedIndex.balanceOf(user1);
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(
+            address(initializedIndex),
+            sharesToSell,
+            VALID_TOLERANCE
+        );
+
+        (, uint128 feesToCollect) = initializedIndex.getFeesInfo();
+        // Redeem of ~10_000 USDC at 1% fee: accrued fee must stay in USDC token decimals.
+        assertGt(feesToCollect, feesAfterMint, "Redeem must accrue fees");
+        assertLe(
+            feesToCollect - feesAfterMint,
+            10000 * 10 ** 6,
+            "Redeem fee not in USDC token decimals"
+        );
+
+        uint256 collectorBalanceBefore = mockUsdc.balanceOf(deployer);
+        vm.prank(deployer);
+        indexManager.collectFeesFromSingleIndex(address(initializedIndex));
+
+        (, uint128 feesAfterCollect) = initializedIndex.getFeesInfo();
+        assertEq(feesAfterCollect, 0, "Fees not reset after collection");
+        assertEq(
+            mockUsdc.balanceOf(deployer) - collectorBalanceBefore,
+            feesToCollect,
+            "Collector did not receive the accrued fees"
+        );
+        assertEq(
+            mockUsdc.balanceOf(address(initializedIndex)),
+            0,
+            "Index must hold no USDC after collection"
+        );
+    }
+
     // =========================================================================
     //  collectFeesFromMultipleIndexes
     // =========================================================================

@@ -45,26 +45,25 @@ contract DeployPeriphery is Script, CodeConstants {
         );
         address(multiSigWallet).call{value: 10 ether}("");
 
-        // 2. Deploy IndexManager
+        // 2. Deploy the SwapManager implementation (initializers disabled)
+        SwapManager swapManagerImplementation = new SwapManager();
+
+        // 3. Deploy IndexManager; its constructor deploys and initializes the SwapManager proxy
         indexManager = new IndexManager(
             config.usdcAddress,
             config.usdcPriceFeedAddress,
-            config.uniswapUniversalRouter
+            config.uniswapUniversalRouter,
+            address(swapManagerImplementation)
         );
+        swapManager = SwapManager(indexManager.getSwapManagerAddress());
 
-        // 3. Deploy Router with the address of the deployed IndexManager
+        // 4. Deploy Router with the address of the deployed IndexManager
         router = new Router(address(indexManager));
-
-        // 4. Deploy SwapManager with the address of the deployed IndexManager
-        swapManager = new SwapManager(address(indexManager));
 
         // 5. Set the Router address in the IndexManager
         indexManager.setRouterAddress(address(router));
 
-        // 6. Set the SwapManager address in the IndexManager
-        indexManager.setSwapManagerAddress(address(swapManager));
-
-        // 7. Transfer ownership to MultiSigWallet
+        // 6. Transfer ownership to MultiSigWallet
         // Grant roles to the multi-sig first
         indexManager.grantRole(
             indexManager.DEFAULT_ADMIN_ROLE(),
@@ -84,7 +83,11 @@ contract DeployPeriphery is Script, CodeConstants {
             console.log("Deployer Address:", deployer);
             console.log("MultiSigWallet Address:", address(multiSigWallet));
             console.log("IndexManager Address:", address(indexManager));
-            console.log("SwapManager Address:", address(swapManager));
+            console.log("SwapManager Proxy Address:", address(swapManager));
+            console.log(
+                "SwapManager Implementation Address:",
+                address(swapManagerImplementation)
+            );
             console.log("Router Address:", address(router));
             console.log(
                 "Router sets IndexManager's router address to:",
@@ -95,7 +98,7 @@ contract DeployPeriphery is Script, CodeConstants {
                 indexManager.getRouterAddress()
             );
             console.log(
-                "IndexManager sets SwapManager's address to:",
+                "IndexManager's SwapManager proxy:",
                 indexManager.getSwapManagerAddress()
             );
         }

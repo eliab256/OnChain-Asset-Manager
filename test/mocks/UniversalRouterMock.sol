@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 
 
 contract UniversalRouterMock {
@@ -18,6 +19,10 @@ contract UniversalRouterMock {
     );
     error UniversalRouterMock__UnsupportedCommand(uint8 command);
     error UniversalRouterMock__InvalidPath();
+    error UniversalRouterMock__TooLittleReceived(
+        uint256 minAmountOut,
+        uint256 amountOut
+    );
 
     event SwapExecuted(
         address indexed tokenIn,
@@ -39,6 +44,9 @@ contract UniversalRouterMock {
 
     /// @notice exchangeRates[tokenIn][tokenOut] = rate (scaled by RATE_PRECISION).
     mapping(address => mapping(address => uint256)) public exchangeRates;
+
+    /// @notice When false, amountOutMinimum is ignored (to test the caller's own post-swap checks).
+    bool public enforceMinAmountOut = true;
 
     // ─── Configuration ────────────────────────────────────────────────────────
 
@@ -82,6 +90,10 @@ contract UniversalRouterMock {
      * @dev    Call this from your test after minting tokens to address(this),
      *         or simply mint directly to address(this).
      */
+    function setEnforceMinAmountOut(bool _enforce) external {
+        enforceMinAmountOut = _enforce;
+    }
+
     function fundToken(address token, uint256 amount) external {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
     }
@@ -124,7 +136,7 @@ contract UniversalRouterMock {
         (
             address recipient,
             uint256 amountIn,
-            , // amountOutMin — ignored in mock
+            uint256 amountOutMin,
             bytes memory path,
 
         ) = abi.decode(input, (address, uint256, uint256, bytes, bool)); // payerIsUser — ignored in mock
@@ -138,7 +150,7 @@ contract UniversalRouterMock {
         address tokenIn = _addressAt(path, 0);
         address tokenOut = _addressAt(path, path.length - 20);
 
-        _executeSwap(tokenIn, tokenOut, amountIn, recipient);
+        _executeSwap(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
     }
 
     // ─── V4 handler ───────────────────────────────────────────────────────────
@@ -149,7 +161,7 @@ contract UniversalRouterMock {
      *      Input encoding (matches SwapManager._buildV4Params):
      *        abi.encode(bytes actions, bytes[] actionParams)
      *
-     *      actionParams[0] = abi.encode(ExactInputSingleParams) — not read
+     *      actionParams[0] = abi.encode(ExactInputSingleParams) — only amountOutMinimum is read
      *      actionParams[1] = abi.encode(Currency tokenIn, uint256 amountIn, bool payerIsUser)  // SETTLE
      *      actionParams[2] = abi.encode(Currency tokenOut, uint256 minOut)     // TAKE_ALL
      *
@@ -160,6 +172,11 @@ contract UniversalRouterMock {
     function _handleV4Swap(bytes calldata input) internal {
         (, bytes[] memory actionParams) = abi.decode(input, (bytes, bytes[]));
 
+        IV4Router.ExactInputSingleParams memory swapParams = abi.decode(
+            actionParams[0],
+            (IV4Router.ExactInputSingleParams)
+        );
+
         (address tokenIn, uint256 amountIn) = abi.decode(
             actionParams[1],
             (address, uint256)
@@ -167,7 +184,13 @@ contract UniversalRouterMock {
         (address tokenOut, ) = abi.decode(actionParams[2], (address, uint256));
 
         // V4 TAKE_ALL sends output to the caller (the Index contract).
-        _executeSwap(tokenIn, tokenOut, amountIn, msg.sender);
+        _executeSwap(
+            tokenIn,
+            tokenOut,
+            amountIn,
+            swapParams.amountOutMinimum,
+            msg.sender
+        );
     }
 
     // ─── Internal swap logic ──────────────────────────────────────────────────
@@ -176,6 +199,7 @@ contract UniversalRouterMock {
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
+        uint256 amountOutMin,
         address recipient
     ) internal {
         uint256 rate = exchangeRates[tokenIn][tokenOut];
@@ -183,6 +207,13 @@ contract UniversalRouterMock {
             revert UniversalRouterMock__RateNotSet(tokenIn, tokenOut);
 
         uint256 amountOut = (amountIn * rate) / RATE_PRECISION;
+
+        // Mirrors the real router slippage check (V3TooLittleReceived / V4TooLittleReceived).
+        if (enforceMinAmountOut && amountOut < amountOutMin)
+            revert UniversalRouterMock__TooLittleReceived(
+                amountOutMin,
+                amountOut
+            );
 
         // Verify the mock has enough output tokens.
         uint256 available = IERC20(tokenOut).balanceOf(address(this));

@@ -3,7 +3,21 @@ pragma solidity ^0.8.0;
 
 event RouterAddressSet(address indexed newRouter, address indexed setter);
 
-event SwapManagerAddressSet(address indexed newSwapManager, address indexed setter);
+event SwapManagerUpgradeProposed(
+    address indexed newImplementation,
+    uint256 executableAt,
+    address indexed proposer
+);
+
+event SwapManagerUpgraded(
+    address indexed newImplementation,
+    address indexed executor
+);
+
+event SwapManagerUpgradeCancelled(
+    address indexed cancelledImplementation,
+    address indexed canceller
+);
 
 event IndexCreated(
     address indexed indexAddress,
@@ -42,5 +56,10 @@ event FeesCollectionFailed(
 );
 
 event WeightUpdateExecuted(address indexed indexAddress);
+
+event WeightUpdateCancelled(
+    address indexed indexAddress,
+    address indexed assetManager
+);
 
 event WeightUpdateFailed(address indexed indexAddress, bytes reasonData);

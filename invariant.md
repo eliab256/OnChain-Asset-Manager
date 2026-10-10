@@ -30,11 +30,11 @@
 
 13. **Redeem decreases supply and reserves**: Dopo `redeem`, `totalSupply()` e almeno una riserva devono diminuire.
 
-14. **Rebalance preserves total value**: Dopo `rebalanceIndex`, `totalAssetUsdValueAfter >= totalAssetUsdValueBefore * (1 - MAX_SLIPPAGE_TOLERANCE / MAX_PERCENTAGE)`.
+14. **Rebalance preserves total value**: Dopo `rebalanceIndex`, `totalAssetUsdValueBefore - totalAssetUsdValueAfter <= swappedUsdValue * REBALANCE_SWAP_SLIPPAGE / MAX_PERCENTAGE`, dove `swappedUsdValue` è il valore oracolo dell'asset venduto. Lo swap del rebalance ha `amountOutMinimum` = output atteso da oracolo meno `REBALANCE_SWAP_SLIPPAGE`.
 
 15. **Rebalance preserves total supply**: `rebalanceIndex` non minta né brucia shares; `totalSupply()` resta invariato.
 
-16. **Weight update delay**: `executeWeightUpdate` può essere chiamato solo se `block.timestamp >= s_weightUpdateExecutableAt > 0`.
+16. **Weight update delay**: `executeWeightUpdate` può essere chiamato solo se `s_weightUpdateExecutableAt > 0` e `s_weightUpdateExecutableAt <= block.timestamp <= s_weightUpdateExecutableAt + WEIGHT_UPDATE_EXECUTION_WINDOW`. `cancelWeightUpdate` azzera sempre pesi pendenti e timestamp.
 
 17. **No double pending**: `proposeUpdateWeights` reverta se esiste già un update pendente non ancora eseguibile (`s_weightUpdateExecutableAt != 0 && block.timestamp < s_weightUpdateExecutableAt`).
 
@@ -70,9 +70,9 @@
 
 11. **Weight sum at creation**: Per ogni index creato, `asset0.weightPercentage + asset1.weightPercentage == MAX_WEIGHT`.
 
-12. **Router/SwapManager preconditions**: `createIndex` reverta se `s_router == address(0)` o `s_swapManager == address(0)`.
+12. **Router precondition**: `createIndex` reverta se `s_router == address(0)`.
 
-13. **initializeIndex requires swapManager set**: Il modifier `isSwapManagerSet` garantisce `s_swapManager != address(0)`.
+13. **Single SwapManager proxy**: `i_swapManager` è il proxy ERC1967 creato nel costruttore, non cambia mai ed è lo stesso indirizzo passato a ogni Index (`Index.i_swapManager == IndexManager.getSwapManagerAddress()`). L'owner del proxy è l'IndexManager.
 
 14. **totalFeesCollected monotonicity**: `s_totalFeesCollected` può solo aumentare (mai decrementato).
 
@@ -87,6 +87,8 @@
 19. **Price feed validation**: Entrambi i price feed devono implementare `latestRoundData()`.
 
 20. **Rebalance/fee collection non-reverting batch**: `rebalanceAllIndexes`, `collectFeesFromAllIndexes`, ecc. non revertano l'intera transazione se un singolo index fallisce — emettono eventi di fallimento.
+
+21. **SwapManager upgrade timelock**: `executeSwapManagerUpgrade` riesce solo se c'è una proposta e `executableAt <= block.timestamp <= executableAt + SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW`, con `executableAt = proposta + SWAP_MANAGER_UPGRADE_DELAY`. Propose, execute e cancel richiedono `DEFAULT_ADMIN_ROLE`; dopo execute o cancel lo stato pendente è azzerato.
 
 ---
 
@@ -142,6 +144,8 @@
 
 11. **Owner-only registration**: Solo l'indirizzo con il ruolo appropriato (IndexManager) può chiamare `registerIndex` e `updateRoute`.
 
-12. **V3 input encoding**: L'input V3 codifica `payerIsUser == false` e `amountOutMin == 0` (slippage gestito altrove).
+11b. **Upgrade e storage**: Solo l'owner (IndexManager) può chiamare `upgradeToAndCall`. Le route vivono nello storage ERC-7201 `onchainassetmanager.storage.SwapManager` e restano invariate dopo un upgrade. L'implementation non è inizializzabile (`_disableInitializers`) e `initialize` sul proxy si chiama una volta sola.
+
+12. **V3 input encoding**: L'input V3 codifica `payerIsUser == false` e `amountOutMin` uguale al `_amountOutMinimum` passato (V4: `ExactInputSingleParams.amountOutMinimum`).
 
 13. **V4 action count**: L'input V4 decodificato contiene esattamente 3 action: `SWAP_EXACT_IN_SINGLE`, `SETTLE_ALL`, `TAKE_ALL`.

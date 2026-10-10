@@ -17,11 +17,16 @@ interface ISwapManager {
         SwapRoute memory _newRoute
     ) external;
 
+    function initialize(address _indexManager) external;
+
+    function getImplementation() external view returns (address);
+
     function buildSingleSwapParams(
         address _indexAddress,
         SwapType _swapType,
         address _tokenIn,
-        uint128 _amountIn
+        uint128 _amountIn,
+        uint128 _amountOutMinimum
     )
         external
         view
@@ -39,7 +44,9 @@ interface ISwapManager {
         address _tokenIn0,
         address _tokenIn1,
         uint128 _amountIn0,
-        uint128 _amountIn1
+        uint128 _amountIn1,
+        uint128 _amountOutMinimum0,
+        uint128 _amountOutMinimum1
     ) external view returns (bytes memory commands, bytes[] memory inputs);
 
     function getRoute(

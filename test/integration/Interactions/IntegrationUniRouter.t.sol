@@ -17,6 +17,9 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
 
     uint256 constant TOLERANCE = 5 * PERCENTAGE_FEE_PRECISION; //5%
     uint256 constant INVALID_TOLERANCE_ABOVE = 11 * PERCENTAGE_FEE_PRECISION; //11%
+    uint128 constant WBTC_TARGET_WEIGHT_AFTER_SHIFT = 500000; // 50%
+    // Storage slot of Index.s_weight0 | s_weight1 (see `forge inspect Index storageLayout`).
+    uint256 constant INDEX_WEIGHTS_SLOT = 9;
     uint256 constant INVALID_TOLERANCE_ZERO = 0;
 
     function setUp() public override {
@@ -341,13 +344,13 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     // =========================================================================
 
     /**
-     * @dev  Increases the Chainlink WBTC answer by 20 % via vm.mockCall so the
-     *       effective weight of WBTC rises from ~60 % to ~64 %, exceeding the
-     *       REBALANCE_THRESHOLD of 3 %.  The rebalance then sells WBTC for WETH
-     *       through the real Universal Router.
+     * @dev  Moves the WBTC target weight from 60 % to 50 % so the effective weight
+     *       (~60 %) exceeds the REBALANCE_THRESHOLD of 3 %, while oracle and pool
+     *       prices stay aligned. The rebalance then sells WBTC for WETH through
+     *       the real Universal Router.
      */
     function test_rebalance_swapsSellsOverweightAsset() public {
-        _mockDoubleWbtcPrice();
+        _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
 
         (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
             .getAssetsReserves();
@@ -372,7 +375,7 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     }
 
     function test_rebalance_reducesWeightDeviation() public {
-        _mockDoubleWbtcPrice();
+        _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
 
         (uint128 ew0Before, ) = wbtcWethIndex.getAssetsEffectiveWeights();
         (uint128 tw0, ) = wbtcWethIndex.getAssetsWeights();
@@ -398,10 +401,10 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
 
     /**
      * @dev  After rebalancing, the total USD value of the index should not drop
-     *       by more than MAX_SLIPPAGE_TOLERANCE (0.2 %).
+     *       by more than REBALANCE_SWAP_SLIPPAGE (1 %) of the swapped notional.
      */
     function test_rebalance_preservesIndexTotalValue() public {
-        _mockDoubleWbtcPrice();
+        _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
 
         (, , uint256 totalUsdBefore) = wbtcWethIndex.getAssetsUsdValue();
 
@@ -410,13 +413,37 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
 
         (, , uint256 totalUsdAfter) = wbtcWethIndex.getAssetsUsdValue();
 
-        // Allow up to 2 % loss from slippage (conservative upper bound on top of the 0.2 % protocol limit)
-        uint256 minAcceptable = (totalUsdBefore * 98) / 100;
+        // The swapped notional is ~10 % of the TVL, so a 1 % notional slippage
+        // bounds the TVL loss at ~0.1 %.
+        assertTrue(
+            totalUsdAfter != totalUsdBefore,
+            "Rebalance must have been executed"
+        );
+        uint256 minAcceptable = (totalUsdBefore * 999) / 1000;
         assertGe(
             totalUsdAfter,
             minAcceptable,
             "Index total USD value dropped beyond acceptable slippage"
         );
+    }
+
+    /**
+     * @dev  The oracle prices WBTC 20 % above the pool (e.g. pool price pushed by a
+     *       sandwich, or oracle out of sync). The swap would lose ~17 % of the notional,
+     *       so the router minOut must reject it and the reserves stay unchanged.
+     */
+    function test_rebalance_rejectedWhenPoolDivergesFromOracle() public {
+        _mockDoubleWbtcPrice();
+
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
+            .getAssetsReserves();
+
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+
+        (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
+        assertEq(r0After, r0Before, "WBTC reserve must be unchanged");
+        assertEq(r1After, r1Before, "WETH reserve must be unchanged");
     }
 
     // ─── Rebalance gating ─────────────────────────────────────────────────────
@@ -524,12 +551,25 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     // =========================================================================
 
     /**
-     * @dev  Increases the WBTC/USD answer by 20 % via vm.mockCall so the effective
-     *       weight of WBTC rises from ~60 % to ~64 %, exceeding the
-     *       REBALANCE_THRESHOLD of 3 %.  A moderate bump (instead of 2×) avoids
-     *       tripping the MAX_SLIPPAGE_TOLERANCE check, because the Chainlink
-     *       price used for USD accounting diverges only slightly from the real
-     *       pool price.
+     * @dev  Overwrites the target weights in storage (s_weight0 / s_weight1, packed in
+     *       slot INDEX_WEIGHTS_SLOT) without going through the 2-day weight update
+     *       delay, which would make the forked price feeds stale.
+     */
+    function _setTargetWeights(uint128 _weight0) internal {
+        uint128 weight1 = uint128(MAX_PERCENTAGE) - _weight0;
+        vm.store(
+            address(wbtcWethIndex),
+            bytes32(INDEX_WEIGHTS_SLOT),
+            bytes32((uint256(weight1) << 128) | uint256(_weight0))
+        );
+        (uint128 w0, uint128 w1) = wbtcWethIndex.getAssetsWeights();
+        assertEq(w0, _weight0, "Weights storage slot changed");
+        assertEq(w1, weight1, "Weights storage slot changed");
+    }
+
+    /**
+     * @dev  Increases the WBTC/USD answer by 20 % via vm.mockCall, so the oracle
+     *       diverges from the real pool price.
      *
      *       All other fields (roundId, startedAt, updatedAt, answeredInRound)
      *       are kept identical to the live values so staleness checks pass.

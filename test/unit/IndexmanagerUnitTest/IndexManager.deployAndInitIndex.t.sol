@@ -245,6 +245,58 @@ contract IndexManagerTest is BaseTest {
         indexManager.createIndex(validFeePercentage, wethAssetC, linkAssetB);
     }
 
+    function testCreateIndexRevertIfSingleWeightOutOfBounds() public {
+        // Weights sum to 100% but one of them is outside (MIN_WEIGHT, MAX_WEIGHT).
+        uint128[2] memory invalidWeights0 = [uint128(0), MIN_WEIGHT];
+
+        for (uint256 i = 0; i < invalidWeights0.length; i++) {
+            IndexAsset memory wethAsset = IndexAsset({
+                asset: address(mockWeth),
+                weightPercentage: invalidWeights0[i],
+                priceFeed: address(mockWethPriceFeed)
+            });
+            IndexAsset memory linkAsset = IndexAsset({
+                asset: address(mockLink),
+                weightPercentage: MAX_WEIGHT - invalidWeights0[i],
+                priceFeed: address(mockLinkPriceFeed)
+            });
+
+            vm.prank(deployer);
+            vm.expectRevert(
+                IndexManager__InvalidIndexAssetsPercentages.selector
+            );
+            indexManager.createIndex(validFeePercentage, wethAsset, linkAsset);
+
+            // Same weights with swapped roles: the out-of-bounds weight is on the other asset.
+            vm.prank(deployer);
+            vm.expectRevert(
+                IndexManager__InvalidIndexAssetsPercentages.selector
+            );
+            indexManager.createIndex(validFeePercentage, linkAsset, wethAsset);
+        }
+    }
+
+    function testCreateIndexAcceptsWeightsJustInsideBounds() public {
+        IndexAsset memory wethAsset = IndexAsset({
+            asset: address(mockWeth),
+            weightPercentage: MIN_WEIGHT + 1,
+            priceFeed: address(mockWethPriceFeed)
+        });
+        IndexAsset memory linkAsset = IndexAsset({
+            asset: address(mockLink),
+            weightPercentage: MAX_WEIGHT - MIN_WEIGHT - 1,
+            priceFeed: address(mockLinkPriceFeed)
+        });
+
+        vm.prank(deployer);
+        (address index, , ) = indexManager.createIndex(
+            validFeePercentage,
+            wethAsset,
+            linkAsset
+        );
+        assertTrue(indexManager.isIndexAddress(index));
+    }
+
     function testCreateIndexRevertIfIndexAlreadyExists() public {
         IndexAsset memory wethAsset = IndexAsset({
             asset: address(mockWeth),
@@ -370,16 +422,6 @@ contract IndexManagerTest is BaseTest {
 
         vm.prank(deployer);
         vm.expectRevert(IndexManager__RouterAddressNotSet.selector);
-        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
-    }
-
-    function testCreateIndexRevertISwapManagerNotSet() public {
-        // Remove the swap manager so the guard triggers.
-        vm.prank(deployer);
-        indexManager.setSwapManagerAddress(address(0));
-
-        vm.prank(deployer);
-        vm.expectRevert(IndexManager__SwapManagerAddressNotSet.selector);
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
     }
 

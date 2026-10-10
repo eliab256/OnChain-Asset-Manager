@@ -37,7 +37,7 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 | `IndexManager.sol` | Governance executor — creates and initialises indexes, orchestrates rebalancing, fee collection and weight updates |
 | `Index.sol`        | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance                          |
 | `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index                                 |
-| `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router                                   |
+| `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router. UUPS proxy (ERC-7201 storage) deployed by IndexManager; one proxy shared by all indexes, upgradeable only by IndexManager after a 2-day timelock |
 
 ### Key design properties
 
@@ -59,8 +59,8 @@ These roles are defined in `IndexManager.sol`. The deployer receives all three r
 
 | Role                 | What it **can** do                                                                                                                  | What it **cannot** do                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager                                                                                           | Cannot call any operational function directly                                     |
-| `ASSET_MANAGER_ROLE` | Create and initialise indexes, set the Router and SwapManager addresses, propose and execute weight updates (single, multiple, all) | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
+| `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager; propose, execute (after a 2-day delay, within a 3-day window) and cancel SwapManager upgrades | Cannot call any other operational function directly                               |
+| `ASSET_MANAGER_ROLE` | Create and initialise indexes, set the Router address, propose, execute (single, multiple, all) and cancel weight updates | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
 | `REBALANCER_ROLE`    | Trigger rebalancing on a single index, on a list of indexes, or on all indexes at once                                              | Cannot create indexes, change weights, collect fees, or modify contract addresses |
 | `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees from a single index, from a list of indexes, or from all indexes                                     | Cannot rebalance, create indexes, change weights, or modify contract addresses    |
 
@@ -70,7 +70,7 @@ These roles are defined in `Index.sol` and are assigned automatically during dep
 
 | Role                 | Holder                                       | What it does                                                                        |
 | -------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `INDEX_MANAGER_ROLE` | IndexManager contract (and the Index itself) | Initialise the index, execute rebalancing, execute weight updates, collect fees     |
+| `INDEX_MANAGER_ROLE` | IndexManager contract (and the Index itself) | Initialise the index, execute rebalancing, execute and cancel weight updates, collect fees     |
 | `ROUTER_ROLE`        | Router contract                              | Call `mintShares` and `redeem` — the only entry points for user buy/sell operations |
 
 ### User (no role required)
@@ -142,7 +142,7 @@ make integrationtest
 .
 ├── script/
 │   ├── CodeConstants.sol            # Chain IDs, mainnet addresses, deployer constants
-│   ├── DeployPeriphery.s.sol        # Deploys IndexManager, Router, SwapManager
+│   ├── DeployPeriphery.s.sol        # Deploys SwapManager implementation, IndexManager (creates the SwapManager proxy), Router
 │   ├── DeployAndInitNewIndex.s.sol  # Deploys and seeds a new Index
 │   └── HelperConfig.s.sol           # Network config and mock setup for Anvil
 │
@@ -251,7 +251,7 @@ make unittest
 source .env
 anvil --fork-url $MAINNET_RPC_URL &
 
-# Deploy IndexManager, Router, SwapManager
+# Deploy SwapManager implementation, IndexManager (creates the SwapManager proxy), Router
 forge script script/DeployPeriphery.s.sol --broadcast --rpc-url http://localhost:8545
 
 # Deploy and initialise a WETH/WBTC 60/40 index
@@ -287,7 +287,7 @@ Three distinct roles are enforced via OpenZeppelin `AccessControl`:
 
 | Role                 | Allowed operations                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------ |
-| `ASSET_MANAGER_ROLE` | Create/initialise indexes, propose/execute weight updates, set router and swap manager addresses |
+| `ASSET_MANAGER_ROLE` | Create/initialise indexes, propose/execute weight updates, set router address                    |
 | `REBALANCER_ROLE`    | Trigger rebalancing on one or multiple indexes                                                   |
 | `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees                                                                   |
 

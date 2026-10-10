@@ -8,6 +8,7 @@ import {
 } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/events/IndexEvents.sol";
+import {UniversalRouterMock} from "../../mocks/UniversalRouterMock.sol";
 
 contract IndexRebalanceAndWeightsTest is BaseTest {
     function setUp() public override {
@@ -381,6 +382,142 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         initializedIndex.rebalanceIndex();
     }
 
+    function testExecuteWeightUpdateSucceedsAtEndOfExecutionWindow() public {
+        vm.startPrank(address(indexManager));
+        uint256 executableAt = initializedIndex.proposeUpdateWeights(weight70);
+        vm.warp(executableAt + WEIGHT_UPDATE_EXECUTION_WINDOW);
+        _refreshPriceFeeds();
+
+        initializedIndex.executeWeightUpdate();
+        vm.stopPrank();
+
+        (uint128 actualWeight0, ) = initializedIndex.getAssetsWeights();
+        assertEq(actualWeight0, weight70);
+    }
+
+    function testExecuteWeightUpdateRevertsIfProposalExpired() public {
+        vm.startPrank(address(indexManager));
+        uint256 executableAt = initializedIndex.proposeUpdateWeights(weight70);
+        vm.warp(executableAt + WEIGHT_UPDATE_EXECUTION_WINDOW + 1);
+
+        vm.expectRevert(Index__WeightUpdateExpired.selector);
+        initializedIndex.executeWeightUpdate();
+        vm.stopPrank();
+    }
+
+    function testProposeUpdateWeightsOverwritesExpiredProposal() public {
+        vm.startPrank(address(indexManager));
+        uint256 executableAt = initializedIndex.proposeUpdateWeights(weight70);
+        vm.warp(executableAt + WEIGHT_UPDATE_EXECUTION_WINDOW + 1);
+
+        uint256 newExecutableAt = initializedIndex.proposeUpdateWeights(
+            weight30
+        );
+        vm.stopPrank();
+
+        (
+            uint128 pendingWeight0,
+            ,
+            uint256 implementationTimestamp
+        ) = initializedIndex.getAssetsPendingWeights();
+        assertEq(pendingWeight0, weight30);
+        assertEq(implementationTimestamp, newExecutableAt);
+    }
+
+    // =========================================================================
+    //  cancelWeightUpdate
+    // =========================================================================
+
+    function testCancelWeightUpdateRevertsIfNotManager() public {
+        vm.prank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user1,
+                keccak256("INDEX_MANAGER_ROLE")
+            )
+        );
+        initializedIndex.cancelWeightUpdate();
+    }
+
+    function testCancelWeightUpdateRevertsIfNoPendingUpdate() public {
+        vm.prank(address(indexManager));
+        vm.expectRevert(Index__NotPendingWeightUpdate.selector);
+        initializedIndex.cancelWeightUpdate();
+    }
+
+    function testCancelWeightUpdateResetsStorageAndEmitsEvent() public {
+        vm.startPrank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(weight70);
+
+        vm.expectEmit(false, false, false, true, address(initializedIndex));
+        emit WeightsUpdateCancelled(weight70, weight30);
+        initializedIndex.cancelWeightUpdate();
+        vm.stopPrank();
+
+        (
+            uint128 pendingWeight0,
+            uint128 pendingWeight1,
+            uint256 implementationTimestamp
+        ) = initializedIndex.getAssetsPendingWeights();
+        assertEq(pendingWeight0, 0);
+        assertEq(pendingWeight1, 0);
+        assertEq(implementationTimestamp, 0);
+    }
+
+    function testCancelWeightUpdatePreventsExecution() public {
+        vm.startPrank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(weight70);
+        initializedIndex.cancelWeightUpdate();
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1 hours);
+
+        vm.expectRevert(Index__NotPendingWeightUpdate.selector);
+        initializedIndex.executeWeightUpdate();
+        vm.stopPrank();
+    }
+
+    function testCancelWeightUpdateAllowsNewProposalDuringDelay() public {
+        vm.startPrank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(weight70);
+        initializedIndex.cancelWeightUpdate();
+
+        // Without cancellation this would revert with Index__PendingWeightUpdate.
+        initializedIndex.proposeUpdateWeights(weight30);
+        vm.stopPrank();
+
+        (uint128 pendingWeight0, , ) = initializedIndex
+            .getAssetsPendingWeights();
+        assertEq(pendingWeight0, weight30);
+    }
+
+    function testRebalanceCheckDoesNotUnderflowWithWeightBelowThreshold()
+        public
+    {
+        // Target weight0 below REBALANCE_THRESHOLD (3%) but above MIN_WEIGHT (1%).
+        uint128 lowWeight0 = 2 * WEIGHT_PRECISION;
+        assertLt(lowWeight0, REBALANCE_THRESHOLD);
+
+        vm.startPrank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(lowWeight0);
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1 hours);
+        _refreshPriceFeeds();
+        initializedIndex.executeWeightUpdate();
+
+        (uint128 weight0, ) = initializedIndex.getAssetsWeights();
+        assertEq(weight0, lowWeight0, "Weight0 must be updated");
+
+        // The rebalance check must run without an arithmetic panic. Any other
+        // outcome (success, RebalanceNotNeeded, slippage) is acceptable here.
+        try initializedIndex.rebalanceIndex() {} catch (bytes memory reason) {
+            assertNotEq(
+                keccak256(reason),
+                keccak256(abi.encodeWithSignature("Panic(uint256)", 0x11)),
+                "Rebalance check underflowed"
+            );
+        }
+        vm.stopPrank();
+    }
+
     function testRebalanceIndexRevertsIfNotNeeded() public {
         vm.prank(address(indexManager));
         // weights didn't change
@@ -388,7 +525,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         initializedIndex.rebalanceIndex();
     }
 
-    function testRebalanceIndexRevertsIfSlippageIsTooHigh() public {
+    function testRebalanceIndexRevertsInRouterIfOutputBelowMinOut() public {
         _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
 
         mockUniRouter.setExchangeRate(
@@ -398,8 +535,98 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         );
 
         vm.prank(address(indexManager));
+        vm.expectPartialRevert(
+            UniversalRouterMock.UniversalRouterMock__TooLittleReceived.selector
+        );
+        initializedIndex.rebalanceIndex();
+    }
+
+    /// @dev Oracle-fair rate after WBTC doubles: 1 WBTC = 30 WETH. Scaled by `_bps` / 10_000.
+    function _setWbtcToWethRateRelativeToOracle(uint256 _bps) internal {
+        mockUniRouter.setExchangeRate(
+            initializedToken1, // WBTC → sell
+            initializedToken0, // WETH → buy
+            mockUniRouter.computeRate(1e8, (30e18 * _bps) / 10_000)
+        );
+    }
+
+    function testRebalanceIndexSucceedsWithSlippageJustBelowLimit() public {
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+        _setWbtcToWethRateRelativeToOracle(9_910); // -0.9 %
+
+        (, uint128 reserveBefore1) = initializedIndex.getAssetsReserves();
+        vm.prank(address(indexManager));
+        initializedIndex.rebalanceIndex();
+
+        (, uint128 reserveAfter1) = initializedIndex.getAssetsReserves();
+        assertLt(reserveAfter1, reserveBefore1, "WBTC must be sold");
+    }
+
+    function testRebalanceIndexRevertsWithSlippageJustAboveLimit() public {
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+        _setWbtcToWethRateRelativeToOracle(9_890); // -1.1 %
+
+        vm.prank(address(indexManager));
+        vm.expectPartialRevert(
+            UniversalRouterMock.UniversalRouterMock__TooLittleReceived.selector
+        );
+        initializedIndex.rebalanceIndex();
+    }
+
+    function testRebalanceIndexPostSwapCheckRevertsIfRouterIgnoresMinOut()
+        public
+    {
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+        _setWbtcToWethRateRelativeToOracle(9_800); // -2 % of the notional
+        mockUniRouter.setEnforceMinAmountOut(false);
+
+        // The loss is ~0.2 % of the TVL (below the old 2 %-of-TVL limit) but 2 % of
+        // the notional, so the notional-based check must reject it.
+        vm.prank(address(indexManager));
         vm.expectRevert(Index__RebalanceSlippageTooHigh.selector);
         initializedIndex.rebalanceIndex();
+    }
+
+    function testExecuteWeightUpdateKeepsReservesIfRebalanceSandwiched()
+        public
+    {
+        vm.startPrank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(weight70);
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1 hours);
+        _refreshPriceFeeds();
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+        _setWbtcToWethRateRelativeToOracle(9_000); // pool price pushed 10 % away
+
+        (uint128 reserveBefore0, uint128 reserveBefore1) = initializedIndex
+            .getAssetsReserves();
+
+        vm.recordLogs();
+        initializedIndex.executeWeightUpdate();
+        vm.stopPrank();
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool rebalanceFailedEmitted;
+        bytes memory reasonData;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == WeightUpdateRebalanceFailed.selector) {
+                rebalanceFailedEmitted = true;
+                reasonData = abi.decode(logs[i].data, (bytes));
+            }
+        }
+        assertTrue(rebalanceFailedEmitted, "Rebalance must fail");
+        assertEq(
+            bytes4(reasonData),
+            UniversalRouterMock.UniversalRouterMock__TooLittleReceived.selector,
+            "Rebalance must fail on the router minOut"
+        );
+
+        (uint128 weight0, ) = initializedIndex.getAssetsWeights();
+        assertEq(weight0, weight70, "Weights must still be updated");
+
+        (uint128 reserveAfter0, uint128 reserveAfter1) = initializedIndex
+            .getAssetsReserves();
+        assertEq(reserveAfter0, reserveBefore0);
+        assertEq(reserveAfter1, reserveBefore1);
     }
 
     function testRebalanceIndexSucceedsUpdatesStateAndEmitsEvent() public {

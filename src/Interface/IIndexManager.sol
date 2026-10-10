@@ -6,7 +6,14 @@ import {IndexAsset, SwapRoute} from "../types.sol";
 interface IIndexManager {
     function setRouterAddress(address _newRouter) external;
 
-    function setSwapManagerAddress(address _swapManager) external;
+    function proposeSwapManagerUpgrade(
+        address _newImplementation,
+        bytes calldata _data
+    ) external returns (uint256 executableAt);
+
+    function executeSwapManagerUpgrade() external;
+
+    function cancelSwapManagerUpgrade() external;
 
     function createIndex(
         uint32 _feePercentage,
@@ -43,6 +50,8 @@ interface IIndexManager {
     ) external;
 
     function executeSingleWeightUpdate(address _indexAddress) external;
+
+    function cancelWeightUpdate(address _indexAddress) external;
 
     function executeWeightUpdateForMultipleIndexes(
         address[] calldata _indexAddresses
@@ -85,6 +94,15 @@ interface IIndexManager {
     function getRouterAddress() external view returns (address);
 
     function getSwapManagerAddress() external view returns (address);
+
+    function getPendingSwapManagerUpgrade()
+        external
+        view
+        returns (
+            address implementation,
+            bytes memory data,
+            uint256 executableAt
+        );
 
     function getTotalFeesCollected() external view returns (uint256);
 

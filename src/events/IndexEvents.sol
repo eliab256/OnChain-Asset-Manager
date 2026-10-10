@@ -47,4 +47,9 @@ event IndexWeightsUpdated(
 
 event WeightUpdateRebalanceFailed(bytes reasonData);
 
+event WeightsUpdateCancelled(
+    uint128 cancelledWeightAsset0,
+    uint128 cancelledWeightAsset1
+);
+
 event FeesCollected(address indexed feeCollector, uint256 feeAmount);

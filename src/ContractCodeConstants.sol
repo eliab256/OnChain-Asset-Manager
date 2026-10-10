@@ -44,6 +44,23 @@ abstract contract ContractCodeConstants {
     uint256 internal constant WEIGHT_UPDATE_DELAY = 2 days;
 
     /**
+     * @dev The delay between a SwapManager upgrade proposal and its execution.
+     * @dev Gives users time to review the new implementation, which affects the swaps of every index.
+     */
+    uint256 internal constant SWAP_MANAGER_UPGRADE_DELAY = 2 days;
+
+    /**
+     * @dev The window after SWAP_MANAGER_UPGRADE_DELAY during which a proposed upgrade can be executed.
+     */
+    uint256 internal constant SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW = 3 days;
+
+    /**
+     * @dev The window after WEIGHT_UPDATE_DELAY during which a proposed weight update can be executed.
+     * @dev After this window the proposal expires and must be proposed again.
+     */
+    uint256 internal constant WEIGHT_UPDATE_EXECUTION_WINDOW = 3 days;
+
+    /**
      * @dev The precision for weight calculations.
      */
     uint128 internal constant WEIGHT_PRECISION = 10000;
@@ -65,11 +82,12 @@ abstract contract ContractCodeConstants {
     uint128 internal constant REBALANCE_THRESHOLD = 3 * WEIGHT_PRECISION;
 
     /**
-     * @dev The maximum slippage tolerance for rebalancing, in basis points (1 basis point = 0.01%).
-     * This is used to prevent excessive slippage during swaps in the rebalancing process.
+     * @dev The maximum slippage tolerated on a rebalance swap, relative to the swapped notional (1%).
+     * @dev Used both for the router amountOutMinimum (derived from oracle prices) and for the
+     *      post-swap check on the total USD value. Must cover pool fee, price impact and oracle deviation.
      */
-    uint256 internal constant MAX_SLIPPAGE_TOLERANCE =
-        2 * PERCENTAGE_FEE_PRECISION;
+    uint256 internal constant REBALANCE_SWAP_SLIPPAGE =
+        1 * PERCENTAGE_FEE_PRECISION;
 
     /**
      * @dev The deadline for swap operations, in seconds.

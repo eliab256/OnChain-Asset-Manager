@@ -80,16 +80,6 @@ contract IndexManagerRebalanceTest is BaseTest {
         indexManager.rebalanceSingleIndex(address(nonInitializedIndex));
     }
 
-    function testRebalanceSingleIndexRevertIfSwapManagerNotSet() public {
-        //set swaprouter to address(0) to trigger the revert
-        vm.prank(deployer);
-        indexManager.setSwapManagerAddress(address(0));
-
-        vm.prank(deployer);
-        vm.expectRevert(IndexManager__SwapManagerAddressNotSet.selector);
-        indexManager.rebalanceSingleIndex(address(initializedIndex));
-    }
-
     function testRebalanceSingleIndexRevertIfCallerNotRebalancer() public {
         vm.prank(user1);
         vm.expectRevert(

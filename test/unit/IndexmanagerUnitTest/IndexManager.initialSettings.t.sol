@@ -3,6 +3,10 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
+import {SwapManager} from "../../../src/SwapManager.sol";
+import {
+    ERC1967Utils
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {IndexAsset, SwapRoute} from "../../../src/types.sol";
 import {HelperConfig} from "../../../script/HelperConfig.s.sol";
@@ -27,11 +31,13 @@ contract IndexManagerTest is BaseTest {
     // =========================================================================
 
     function testConstructorSetsInitialStateCorrectly() public {
+        SwapManager implementation = new SwapManager();
         vm.prank(deployer);
         IndexManager newIndexManager = new IndexManager(
             address(mockUsdc),
             address(mockUsdcPriceFeed),
-            address(mockUniRouter)
+            address(mockUniRouter),
+            address(implementation)
         );
         assertEq(newIndexManager.getUsdc(), address(mockUsdc));
         assertEq(
@@ -66,6 +72,44 @@ contract IndexManagerTest is BaseTest {
         );
     }
 
+    function testConstructorDeploysAndInitializesSwapManagerProxy() public {
+        SwapManager implementation = new SwapManager();
+        vm.prank(deployer);
+        IndexManager newIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUsdcPriceFeed),
+            address(mockUniRouter),
+            address(implementation)
+        );
+
+        SwapManager proxy = SwapManager(newIndexManager.getSwapManagerAddress());
+        assertTrue(address(proxy) != address(implementation));
+        assertEq(proxy.owner(), address(newIndexManager));
+        assertEq(proxy.getImplementation(), address(implementation));
+        assertEq(
+            address(
+                uint160(
+                    uint256(
+                        vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)
+                    )
+                )
+            ),
+            address(implementation)
+        );
+    }
+
+    function testConstructorRevertIfSwapManagerImplementationHasNoCode()
+        public
+    {
+        vm.expectRevert(IndexManager__InvalidSwapManagerImplementation.selector);
+        new IndexManager(
+            address(mockUsdc),
+            address(mockUsdcPriceFeed),
+            address(mockUniRouter),
+            makeAddr("noCode")
+        );
+    }
+
     // =========================================================================
     //  setRouterAddress
     // =========================================================================
@@ -84,26 +128,5 @@ contract IndexManagerTest is BaseTest {
         vm.prank(rebalancer);
         vm.expectRevert();
         indexManager.setRouterAddress(makeAddr("newRouter"));
-    }
-
-    // =========================================================================
-    //  setSwapManagerAddress
-    // =========================================================================
-
-    function testSetSwapManagerAddressUpdatesStateAndEmitsEvent() public {
-        address newSwapMgr = makeAddr("newSwapManager");
-
-        vm.prank(deployer);
-        vm.expectEmit(true, true, false, false);
-        emit SwapManagerAddressSet(newSwapMgr, deployer);
-        indexManager.setSwapManagerAddress(newSwapMgr);
-
-        assertEq(indexManager.getSwapManagerAddress(), newSwapMgr);
-    }
-
-    function testSetSwapManagerAddressRevertIfCallerNotAssetManager() public {
-        vm.prank(user1);
-        vm.expectRevert();
-        indexManager.setSwapManagerAddress(makeAddr("newSwapManager"));
     }
 }

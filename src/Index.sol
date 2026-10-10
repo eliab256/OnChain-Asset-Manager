@@ -442,9 +442,18 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 i_asset1.balanceOf(address(this))).toUint128();
         }
 
-        // 4. Fees (applied on USDC amounts, not USD).
-        (uint128 feeAmount, uint256 netUsdcAmount) = _calculateFees(
-            usdcReceived
+        // 4. Fees are computed in USDC token decimals because s_totalFees is
+        //    accounted and transferred in token decimals.
+        uint256 usdcReceivedTokenDec = _convertFromStdDecimalsToTokenDecimals(
+            usdcReceived,
+            i_decimalsUsdc
+        );
+        (uint128 feeAmount, uint256 netUsdcAmountTokenDec) = _calculateFees(
+            usdcReceivedTokenDec
+        );
+        uint256 netUsdcAmount = _convertToDecimalStandard(
+            netUsdcAmountTokenDec,
+            i_decimalsUsdc
         );
 
         // 5. Tolerance check.
@@ -472,11 +481,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         s_asset1Reserve -= asset1AmountRedeemedTokenDec;
         s_totalFees += feeAmount;
 
-        // 7. Transfer USDC to user (convert from std decimals to token decimals).
-        uint256 netUsdcAmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
-            netUsdcAmount,
-            i_decimalsUsdc
-        );
+        // 7. Transfer USDC to user.
         i_usdc.safeTransfer(_from, netUsdcAmountTokenDec);
 
         //8. Burn shares and emit the event
@@ -622,6 +627,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     /**
      * @notice Executes the pending weight update and triggers a rebalance.
      * @notice Rebalance is attempted even if the update fails to execute to avoid getting stuck with pending weights that cannot be implemented.
+     * @dev Executable only within WEIGHT_UPDATE_EXECUTION_WINDOW after s_weightUpdateExecutableAt; after that the proposal is expired.
      */
     function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
         // 1. Check if there is a pending weight update ready to be executed, if not revert.
@@ -629,6 +635,12 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             s_weightUpdateExecutableAt == 0 ||
             block.timestamp < s_weightUpdateExecutableAt
         ) revert Index__NotPendingWeightUpdate();
+
+        // 1.1. Check that the proposal has not expired.
+        if (
+            block.timestamp >
+            s_weightUpdateExecutableAt + WEIGHT_UPDATE_EXECUTION_WINDOW
+        ) revert Index__WeightUpdateExpired();
 
         // 2. Update target weights with the pending weights
         s_weight0 = s_pendingWeight0;
@@ -645,6 +657,23 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
         // 5. Emit event with the new weights and the timestamp of the execution
         emit IndexWeightsUpdated(s_weight0, s_weight1, block.timestamp);
+    }
+
+    /**
+     * @notice Cancels the pending weight update, whether it is still in its delay, executable or expired.
+     */
+    function cancelWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
+        // 1. Check if there is a pending weight update, if not revert.
+        if (s_weightUpdateExecutableAt == 0)
+            revert Index__NotPendingWeightUpdate();
+
+        // 2. Emit event with the cancelled weights before resetting them.
+        emit WeightsUpdateCancelled(s_pendingWeight0, s_pendingWeight1);
+
+        // 3. Reset pending weights and timestamp in storage.
+        s_pendingWeight0 = 0;
+        s_pendingWeight1 = 0;
+        s_weightUpdateExecutableAt = 0;
     }
 
     /**
@@ -724,7 +753,9 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 // 4.1.1 Swap asset0 to asset1; result is in std decimals.
                 uint128 token1ReceivedStd = _swapAssetForAsset(
                     address(i_asset0),
-                    amount0ToSwapStd
+                    amount0ToSwapStd,
+                    initState.priceAsset0,
+                    initState.priceAsset1
                 );
 
                 // 4.1.2 Convert amounts to token decimals for storage.
@@ -747,7 +778,9 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 // 4.2.1 Swap asset1 to asset0; result is in std decimals.
                 uint128 token0ReceivedStd = _swapAssetForAsset(
                     address(i_asset1),
-                    amount1ToSwapStd
+                    amount1ToSwapStd,
+                    initState.priceAsset1,
+                    initState.priceAsset0
                 );
 
                 // 4.2.2 Convert amounts to token decimals for storage.
@@ -773,15 +806,20 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         s_asset0Reserve = updatedReserv0;
         s_asset1Reserve = updatedReserv1;
 
-        // 6. Slippage check (works on USD values, unaffected by decimal format).
-        (, , uint256 totalAssetUsdValueAfter) = getAssetsUsdValue();
-        if (
-            totalAssetUsdValueAfter <
-            initState.totalAssetUsdValue.calculateNetAmountFromTolerance(
-                MAX_SLIPPAGE_TOLERANCE,
-                MAX_PERCENTAGE
-            )
-        ) revert Index__RebalanceSlippageTooHigh();
+        // 6. Slippage check on the swapped notional (works on USD values, unaffected by decimal format).
+        if (amount0ToSwapStd > 0) {
+            _checkRebalanceSlippage(
+                initState.totalAssetUsdValue,
+                amount0ToSwapStd,
+                initState.priceAsset0
+            );
+        } else {
+            _checkRebalanceSlippage(
+                initState.totalAssetUsdValue,
+                amount1ToSwapStd,
+                initState.priceAsset1
+            );
+        }
 
         // 7. Emit event with rebalance details.
         emit IndexRebalanced(
@@ -863,10 +901,10 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @notice Assumes the USDC amount is already in the 18-decimal standard.
-     * @param _usdcAmountIn USDC amount in 18-decimal standard.
-     * @return feeAmount Calculated fee amount in 18-decimal standard.
-     * @return netUsdcAmount USDC amount after deducting the fee, in 18-decimal standard.
+     * @notice Decimal-agnostic: outputs share the decimals of the input. Amounts added to s_totalFees must be in USDC token decimals.
+     * @param _usdcAmountIn USDC amount.
+     * @return feeAmount Calculated fee amount, in the same decimals as the input.
+     * @return netUsdcAmount USDC amount after deducting the fee, in the same decimals as the input.
      */
     function _calculateFees(
         uint256 _usdcAmountIn
@@ -975,7 +1013,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(this),
                 SwapType.ASSET1_USDC,
                 address(i_usdc),
-                usdcAmount1TokenDec.toUint128()
+                usdcAmount1TokenDec.toUint128(),
+                0 // no minOut: user tolerance is checked on the whole amount
             );
             asset1BalanceBefore = i_asset1.balanceOf(address(this));
         }
@@ -985,7 +1024,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(this),
                 SwapType.ASSET0_USDC,
                 address(i_usdc),
-                usdcAmount0TokenDec.toUint128()
+                usdcAmount0TokenDec.toUint128(),
+                0 // no minOut: user tolerance is checked on the whole amount
             );
             asset0BalanceBefore = i_asset0.balanceOf(address(this));
         }
@@ -998,7 +1038,9 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(i_usdc),
                 address(i_usdc),
                 usdcAmount0TokenDec.toUint128(),
-                usdcAmount1TokenDec.toUint128()
+                usdcAmount1TokenDec.toUint128(),
+                0, // no minOut: user tolerance is checked on the whole amount
+                0
             );
             asset0BalanceBefore = i_asset0.balanceOf(address(this));
             asset1BalanceBefore = i_asset1.balanceOf(address(this));
@@ -1087,7 +1129,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(this),
                 SwapType.ASSET0_USDC,
                 address(i_asset0),
-                asset0AmountTokenDec.toUint128()
+                asset0AmountTokenDec.toUint128(),
+                0 // no minOut: user tolerance is checked on the whole amount
             );
             i_asset0.safeTransfer(
                 address(i_universalRouter),
@@ -1099,7 +1142,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(this),
                 SwapType.ASSET1_USDC,
                 address(i_asset1),
-                asset1AmountTokenDec.toUint128()
+                asset1AmountTokenDec.toUint128(),
+                0 // no minOut: user tolerance is checked on the whole amount
             );
             i_asset1.safeTransfer(
                 address(i_universalRouter),
@@ -1114,7 +1158,9 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(i_asset0),
                 address(i_asset1),
                 asset0AmountTokenDec.toUint128(),
-                asset1AmountTokenDec.toUint128()
+                asset1AmountTokenDec.toUint128(),
+                0, // no minOut: user tolerance is checked on the whole amount
+                0
             );
             i_asset0.safeTransfer(
                 address(i_universalRouter),
@@ -1150,13 +1196,18 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
     /**
      * @dev Swaps one underlying asset for the other during rebalancing.
+     * @dev The router enforces a minimum output derived from oracle prices minus REBALANCE_SWAP_SLIPPAGE.
      * @param _swapFrom     Asset address to sell.
      * @param _amountToSwap Amount in std decimals (18).
+     * @param _priceIn      Oracle USD price of the asset sold, in std decimals (18).
+     * @param _priceOut     Oracle USD price of the asset bought, in std decimals (18).
      * @return amountReceived Amount received in std decimals (18).
      */
     function _swapAssetForAsset(
         address _swapFrom,
-        uint256 _amountToSwap
+        uint256 _amountToSwap,
+        uint256 _priceIn,
+        uint256 _priceOut
     ) internal returns (uint128 amountReceived) {
         // 1. Convert the std-decimal amount to token decimals for the actual ERC20 operations.
         uint256 amountToSwapTokenDec;
@@ -1172,7 +1223,21 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             );
         }
 
-        // 2. Build swap command for the asset0 ↔ asset1 route.
+        uint8 receivedAssetDecimals = (_swapFrom == address(i_asset0))
+            ? i_decimals1
+            : i_decimals0;
+
+        // 2. Minimum output: oracle-expected amount minus the tolerated slippage, in token decimals (rounded down).
+        uint256 minAmountOutTokenDec = _convertFromStdDecimalsToTokenDecimals(
+            ((_amountToSwap * _priceIn) / _priceOut)
+                .calculateNetAmountFromTolerance(
+                    REBALANCE_SWAP_SLIPPAGE,
+                    MAX_PERCENTAGE
+                ),
+            receivedAssetDecimals
+        );
+
+        // 3. Build swap command for the asset0 ↔ asset1 route.
         (
             bytes memory commands,
             bytes[] memory inputs,
@@ -1182,10 +1247,11 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 address(this),
                 SwapType.ASSET0_ASSET1,
                 _swapFrom,
-                amountToSwapTokenDec.toUint128()
+                amountToSwapTokenDec.toUint128(),
+                minAmountOutTokenDec.toUint128()
             );
 
-        // 3. Snapshot balance, transfer tokens to the Universal Router, and execute the swap.
+        // 4. Snapshot balance, transfer tokens to the Universal Router, and execute the swap.
         uint256 amountReceivedTokenDec;
         {
             uint256 balanceBefore = IERC20(tokenToReceive).balanceOf(
@@ -1207,10 +1273,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 balanceBefore;
         }
 
-        // 4. Convert received amount from token decimals to std decimals.
-        uint8 receivedAssetDecimals = (_swapFrom == address(i_asset0))
-            ? i_decimals1
-            : i_decimals0;
+        // 5. Convert received amount from token decimals to std decimals.
         amountReceived = _convertToDecimalStandard(
             amountReceivedTokenDec,
             receivedAssetDecimals
@@ -1220,6 +1283,30 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     // =========================================================================
     //  Internal — rebalance helpers
     // =========================================================================
+
+    /**
+     * @dev Reverts if the USD value lost by the rebalance exceeds REBALANCE_SWAP_SLIPPAGE of the swapped notional.
+     * @dev Must be called after reserves are updated, so that getAssetsUsdValue reflects the post-swap state.
+     * @param _totalUsdValueBefore Total USD value of the reserves before the swap, in std decimals.
+     * @param _amountSwappedStd Amount of the sold asset, in std decimals.
+     * @param _priceSwapped Oracle USD price of the sold asset, in std decimals.
+     */
+    function _checkRebalanceSlippage(
+        uint256 _totalUsdValueBefore,
+        uint256 _amountSwappedStd,
+        uint256 _priceSwapped
+    ) internal view {
+        (, , uint256 totalUsdValueAfter) = getAssetsUsdValue();
+        uint256 usdValueLost = _totalUsdValueBefore > totalUsdValueAfter
+            ? _totalUsdValueBefore - totalUsdValueAfter
+            : 0;
+        uint256 swappedUsdValue = (_amountSwappedStd * _priceSwapped) /
+            (10 ** DECIMALS_STANDARD);
+        if (
+            usdValueLost >
+            (swappedUsdValue * REBALANCE_SWAP_SLIPPAGE) / MAX_PERCENTAGE
+        ) revert Index__RebalanceSlippageTooHigh();
+    }
 
     /**
      * @notice Used on the executeWeightUpdate function to attempt the rebalance and catch any error that may occur during the process to emit it in an event instead of reverting the transaction.
@@ -1263,9 +1350,11 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             _token0UsdValue,
             _totalAssetUsdValue
         );
-        return
-            weight0 < s_weight0 - REBALANCE_THRESHOLD ||
-            weight0 > s_weight0 + REBALANCE_THRESHOLD;
+        // Absolute difference avoids underflow when s_weight0 < REBALANCE_THRESHOLD.
+        uint128 weightDiff = weight0 > s_weight0
+            ? weight0 - s_weight0
+            : s_weight0 - weight0;
+        return weightDiff > REBALANCE_THRESHOLD;
     }
 
     // =========================================================================

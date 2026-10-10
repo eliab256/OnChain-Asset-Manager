@@ -43,6 +43,8 @@ interface IIndex is IERC20, IERC20Metadata {
 
     function executeWeightUpdate() external;
 
+    function cancelWeightUpdate() external;
+
     function collectFees(
         address _collector
     ) external returns (uint256 feesCollected);

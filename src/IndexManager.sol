@@ -6,6 +6,19 @@ import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
+import {SwapManager} from "./SwapManager.sol";
+import {
+    ERC1967Proxy
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {
+    ERC1967Utils
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {
+    IERC1822Proxiable
+} from "@openzeppelin/contracts/interfaces/draft-IERC1822.sol";
+import {
+    UUPSUpgradeable
+} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./errors/IndexManagerErrors.sol";
 import "./events/IndexManagerEvents.sol";
 import {IndexAsset, SwapRoute} from "./types.sol";
@@ -40,6 +53,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     address internal immutable i_usdc;
     address internal immutable i_usdcPriceFeed;
     address internal immutable i_uniswapUniversalRouter;
+    // SwapManager ERC1967 proxy, deployed in the constructor. Same address for every index.
+    address internal immutable i_swapManager;
 
     address[] private s_deployedIndexes;
     address[] private s_initializedIndexes;
@@ -51,8 +66,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     mapping(address => bool) private s_isInitialized;
 
     address internal s_router;
-    address internal s_swapManager;
     uint256 private s_totalFeesCollected;
+
+    // Pending SwapManager upgrade (timelocked).
+    address private s_pendingSwapManagerImplementation;
+    bytes private s_pendingSwapManagerUpgradeData;
+    uint256 private s_swapManagerUpgradeExecutableAt;
 
     modifier isIndexInitialized(address indexAddress) {
         _isIndexInitialized(indexAddress);
@@ -64,19 +83,30 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         _;
     }
 
-    modifier isSwapManagerSet() {
-        _isSwapManagerSet();
-        _;
-    }
-
+    /**
+     * @param _usdcAddress The USDC token address.
+     * @param _usdcPriceFeed The USDC/USD Chainlink price feed.
+     * @param _uniswapUniversalRouter The Uniswap Universal Router address.
+     * @param _swapManagerImplementation The SwapManager implementation; the constructor deploys its proxy, owned by this contract.
+     */
     constructor(
         address _usdcAddress,
         address _usdcPriceFeed,
-        address _uniswapUniversalRouter
+        address _uniswapUniversalRouter,
+        address _swapManagerImplementation
     ) {
+        if (_swapManagerImplementation.code.length == 0) {
+            revert IndexManager__InvalidSwapManagerImplementation();
+        }
         i_usdc = _usdcAddress;
         i_usdcPriceFeed = _usdcPriceFeed;
         i_uniswapUniversalRouter = _uniswapUniversalRouter;
+        i_swapManager = address(
+            new ERC1967Proxy(
+                _swapManagerImplementation,
+                abi.encodeCall(SwapManager.initialize, (address(this)))
+            )
+        );
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ASSET_MANAGER_ROLE, msg.sender);
@@ -97,15 +127,86 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @notice Sets the address of the swap manager contract.
-     * @param _swapManager The address of the new swap manager contract.
+     * @notice Proposes an upgrade of the SwapManager implementation, executable after SWAP_MANAGER_UPGRADE_DELAY.
+     * @param _newImplementation The new UUPS-compatible SwapManager implementation.
+     * @param _data Optional calldata executed on the proxy after the upgrade (e.g. a reinitializer). Empty for none.
+     * @return executableAt Timestamp from which the upgrade can be executed.
      */
-    function setSwapManagerAddress(
-        address _swapManager
-    ) public onlyRole(ASSET_MANAGER_ROLE) {
-        s_swapManager = _swapManager;
+    function proposeSwapManagerUpgrade(
+        address _newImplementation,
+        bytes calldata _data
+    ) public onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256 executableAt) {
+        // 1. Check there is no proposal still within its delay.
+        if (
+            s_swapManagerUpgradeExecutableAt != 0 &&
+            block.timestamp < s_swapManagerUpgradeExecutableAt
+        ) revert IndexManager__SwapManagerUpgradePending();
 
-        emit SwapManagerAddressSet(_swapManager, msg.sender);
+        // 2. Check the implementation is a different UUPS contract.
+        if (
+            _newImplementation.code.length == 0 ||
+            _newImplementation ==
+            ISwapManager(i_swapManager).getImplementation()
+        ) revert IndexManager__InvalidSwapManagerImplementation();
+        try IERC1822Proxiable(_newImplementation).proxiableUUID() returns (
+            bytes32 slot
+        ) {
+            if (slot != ERC1967Utils.IMPLEMENTATION_SLOT)
+                revert IndexManager__InvalidSwapManagerImplementation();
+        } catch {
+            revert IndexManager__InvalidSwapManagerImplementation();
+        }
+
+        // 3. Store the pending upgrade.
+        executableAt = block.timestamp + SWAP_MANAGER_UPGRADE_DELAY;
+        s_pendingSwapManagerImplementation = _newImplementation;
+        s_pendingSwapManagerUpgradeData = _data;
+        s_swapManagerUpgradeExecutableAt = executableAt;
+
+        emit SwapManagerUpgradeProposed(
+            _newImplementation,
+            executableAt,
+            msg.sender
+        );
+    }
+
+    /**
+     * @notice Executes the pending SwapManager upgrade.
+     * @dev Executable only within SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW after the delay; after that the proposal is expired.
+     */
+    function executeSwapManagerUpgrade() public onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 executableAt = s_swapManagerUpgradeExecutableAt;
+
+        // 1. Check there is a pending upgrade past its delay and not expired.
+        if (executableAt == 0 || block.timestamp < executableAt)
+            revert IndexManager__NoPendingSwapManagerUpgrade();
+        if (
+            block.timestamp >
+            executableAt + SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW
+        ) revert IndexManager__SwapManagerUpgradeExpired();
+
+        // 2. Cache and reset the pending upgrade before the external call.
+        address newImplementation = s_pendingSwapManagerImplementation;
+        bytes memory data = s_pendingSwapManagerUpgradeData;
+        _resetPendingSwapManagerUpgrade();
+
+        // 3. Upgrade the proxy. Only this contract (owner) is authorized.
+        UUPSUpgradeable(i_swapManager).upgradeToAndCall(newImplementation, data);
+
+        emit SwapManagerUpgraded(newImplementation, msg.sender);
+    }
+
+    /**
+     * @notice Cancels the pending SwapManager upgrade, whether it is still in its delay, executable or expired.
+     */
+    function cancelSwapManagerUpgrade() public onlyRole(DEFAULT_ADMIN_ROLE) {
+        address pendingImplementation = s_pendingSwapManagerImplementation;
+        if (s_swapManagerUpgradeExecutableAt == 0)
+            revert IndexManager__NoPendingSwapManagerUpgrade();
+
+        _resetPendingSwapManagerUpgrade();
+
+        emit SwapManagerUpgradeCancelled(pendingImplementation, msg.sender);
     }
 
     /**
@@ -127,9 +228,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     {
         if (s_router == address(0)) {
             revert IndexManager__RouterAddressNotSet();
-        }
-        if (s_swapManager == address(0)) {
-            revert IndexManager__SwapManagerAddressNotSet();
         }
         if (_assetA.asset == _assetB.asset) {
             revert IndexManager__InvalidIndexAssetsAddress();
@@ -165,8 +263,15 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             );
         }
 
-        // 3. Check that the weights sum to 100%.
-        if (asset0.weightPercentage + asset1.weightPercentage != MAX_WEIGHT) {
+        // 3. Check that each weight is strictly between MIN_WEIGHT and MAX_WEIGHT
+        //    (same bounds as Index.proposeUpdateWeights) and that they sum to 100%.
+        if (
+            asset0.weightPercentage <= MIN_WEIGHT ||
+            asset0.weightPercentage >= MAX_WEIGHT ||
+            asset1.weightPercentage <= MIN_WEIGHT ||
+            asset1.weightPercentage >= MAX_WEIGHT ||
+            asset0.weightPercentage + asset1.weightPercentage != MAX_WEIGHT
+        ) {
             revert IndexManager__InvalidIndexAssetsPercentages();
         }
 
@@ -212,7 +317,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         SwapRoute memory _routeAsset0Usdc,
         SwapRoute memory _routeAsset1Usdc,
         SwapRoute memory _routeAsset0Asset1
-    ) public onlyRole(ASSET_MANAGER_ROLE) isSwapManagerSet {
+    ) public onlyRole(ASSET_MANAGER_ROLE) {
         if (_underlyingAmount0 == 0) {
             revert IndexManager__InvalidIndexAssetsAmount();
         }
@@ -226,7 +331,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         s_isInitialized[_indexAddress] = true;
         s_initializedIndexes.push(_indexAddress);
 
-        ISwapManager(s_swapManager).registerIndex(
+        ISwapManager(i_swapManager).registerIndex(
             _indexAddress,
             _routeAsset0Usdc,
             _routeAsset1Usdc,
@@ -292,7 +397,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         public
         isIndexInitialized(_indexAddress)
         onlyRole(REBALANCER_ROLE)
-        isSwapManagerSet
     {
         (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
             _indexAddress
@@ -316,7 +420,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         public
         onlyRole(REBALANCER_ROLE)
         areIndexesInitialized(_indexAddresses)
-        isSwapManagerSet
     {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
@@ -338,7 +441,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     function rebalanceAllIndexes()
         public
         onlyRole(REBALANCER_ROLE)
-        isSwapManagerSet
     {
         uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
@@ -394,7 +496,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         public
         isIndexInitialized(_indexAddress)
         onlyRole(ASSET_MANAGER_ROLE)
-        isSwapManagerSet
     {
         (bool success, bytes memory reasonBytes) = _executeSingleWeightUpdate(
             _indexAddress
@@ -404,6 +505,17 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         } else {
             emit WeightUpdateExecuted(_indexAddress);
         }
+    }
+
+    /**
+     * @notice Cancels the pending weight update for the specified index.
+     * @param _indexAddress The address of the index to cancel the weight update for.
+     */
+    function cancelWeightUpdate(
+        address _indexAddress
+    ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
+        IIndex(_indexAddress).cancelWeightUpdate();
+        emit WeightUpdateCancelled(_indexAddress, msg.sender);
     }
 
     /**
@@ -417,7 +529,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         public
         onlyRole(ASSET_MANAGER_ROLE)
         areIndexesInitialized(_indexAddresses)
-        isSwapManagerSet
     {
         uint256 length = _indexAddresses.length;
         for (uint256 i = 0; i < length; i++) {
@@ -440,7 +551,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     function executeWeightUpdateForAllIndexes()
         public
         onlyRole(ASSET_MANAGER_ROLE)
-        isSwapManagerSet
     {
         uint256 length = s_initializedIndexes.length;
         for (uint256 i = 0; i < length; i++) {
@@ -583,13 +693,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @dev Checks if the swap manager address is set and reverts if it is not
-     * @dev This is thw wrapper for the isSwapManagerSet modifier.
+     * @dev Clears the pending SwapManager upgrade.
      */
-    function _isSwapManagerSet() internal view {
-        if (s_swapManager == address(0)) {
-            revert IndexManager__SwapManagerAddressNotSet();
-        }
+    function _resetPendingSwapManagerUpgrade() internal {
+        s_pendingSwapManagerImplementation = address(0);
+        delete s_pendingSwapManagerUpgradeData;
+        s_swapManagerUpgradeExecutableAt = 0;
     }
 
     /**
@@ -622,7 +731,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
                 s_router,
                 i_usdc,
                 i_usdcPriceFeed,
-                s_swapManager,
+                i_swapManager,
                 i_uniswapUniversalRouter,
                 _asset0,
                 _asset1,
@@ -847,7 +956,25 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @return The swap manager address.
      */
     function getSwapManagerAddress() public view returns (address) {
-        return s_swapManager;
+        return i_swapManager;
+    }
+
+    /**
+     * @notice Returns the pending SwapManager upgrade.
+     * @return implementation The proposed implementation (address(0) if none).
+     * @return data The calldata executed after the upgrade.
+     * @return executableAt Timestamp from which the upgrade can be executed (0 if none).
+     */
+    function getPendingSwapManagerUpgrade()
+        public
+        view
+        returns (address implementation, bytes memory data, uint256 executableAt)
+    {
+        return (
+            s_pendingSwapManagerImplementation,
+            s_pendingSwapManagerUpgradeData,
+            s_swapManagerUpgradeExecutableAt
+        );
     }
 
     /**

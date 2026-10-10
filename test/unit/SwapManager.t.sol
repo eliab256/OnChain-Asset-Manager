@@ -7,6 +7,20 @@ import {SwapType, SwapRoute, PoolVersion} from "../../src/types.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
+import {
+    ERC1967Proxy
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {
+    ERC1967Utils
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {
+    Initializable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {
+    OwnableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {SwapManagerV2Mock} from "../mocks/SwapManagerV2Mock.sol";
 
 contract SwapManagerTest is BaseTest {
 
@@ -40,6 +54,24 @@ contract SwapManagerTest is BaseTest {
     /// Expected commands array length for a double swap
     uint256 constant DOUBLE_SWAP_COMMANDS_LENGTH = 2;
 
+    /// ERC-7201 namespace id of SwapManager storage
+    string constant SWAP_MANAGER_NAMESPACE_ID =
+        "onchainassetmanager.storage.SwapManager";
+
+    /// OZ v5 OwnableUpgradeable ERC-7201 slot (no public reader in OZ)
+    bytes32 constant OZ_OWNABLE_STORAGE_LOCATION =
+        0x9016d09d72d40fdae2fd8ceac6b6234c7706214fd39c1cd1e609a0528c199300;
+
+    /// OZ v5 Initializable ERC-7201 slot (no public reader in OZ)
+    bytes32 constant OZ_INITIALIZABLE_STORAGE_LOCATION =
+        0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+
+    /// Number of low sequential slots checked to be empty on the proxy
+    uint256 constant LOW_SLOTS_CHECKED = 10;
+
+    /// Index address used for harness-only route registrations
+    address constant HARNESS_INDEX = address(0xBEEF);
+
     // =========================================================================
     //  setUp
     // =========================================================================
@@ -48,7 +80,14 @@ contract SwapManagerTest is BaseTest {
         super.setUp();
         // initializedIndex already has V4 routes registered via Base.setUp().
         // nonInitializedIndex has NO routes in SwapManager.
-        harness = new SwapManagerHarness(address(this));
+        harness = SwapManagerHarness(
+            address(
+                new ERC1967Proxy(
+                    address(new SwapManagerHarness()),
+                    abi.encodeCall(SwapManager.initialize, (address(this)))
+                )
+            )
+        );
     }
 
     // =========================================================================
@@ -558,7 +597,8 @@ contract SwapManagerTest is BaseTest {
                 address(initializedIndex),
                 SwapType.ASSET0_USDC,
                 address(mockWeth),
-                1e18
+                1e18,
+                0
             );
 
         assertEq(commands.length, SINGLE_SWAP_COMMANDS_LENGTH);
@@ -573,7 +613,8 @@ contract SwapManagerTest is BaseTest {
             address(initializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWeth),
-            1e18
+            1e18,
+            0
         );
 
         // USDC ↔ asset routes use V3
@@ -585,7 +626,8 @@ contract SwapManagerTest is BaseTest {
             address(initializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWeth),
-            1e18
+            1e18,
+            0
         );
 
         assertEq(tokenIn, address(mockWeth));
@@ -600,7 +642,8 @@ contract SwapManagerTest is BaseTest {
             address(initializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWeth),
-            1e18
+            1e18,
+            0
         );
 
         assertEq(tokenOut, address(mockUsdc));
@@ -615,7 +658,8 @@ contract SwapManagerTest is BaseTest {
             address(initializedIndex),
             SwapType.ASSET0_USDC,
             address(mockUsdc),
-            1e6
+            1e6,
+            0
         );
 
         assertEq(tokenOut, address(mockWeth));
@@ -631,7 +675,8 @@ contract SwapManagerTest is BaseTest {
                 address(initializedIndex),
                 SwapType.ASSET1_USDC,
                 address(mockWbtc),
-                1e8
+                1e8,
+                0
             );
 
         assertEq(tokenIn, address(mockWbtc));
@@ -648,11 +693,36 @@ contract SwapManagerTest is BaseTest {
                 address(initializedIndex),
                 SwapType.ASSET0_ASSET1,
                 address(mockWeth),
-                1e18
+                1e18,
+                0
             );
 
         assertEq(tokenIn, address(mockWeth));
         assertEq(tokenOut, address(mockWbtc));
+    }
+
+    function testBuildSingleSwapParamsV4EncodesAmountOutMinimum() public {
+        _registerNonInitializedIndexWithV4Routes();
+        uint128 minOut = 123e6;
+        (bytes memory commands, bytes[] memory inputs, , ) = swapManager
+            .buildSingleSwapParams(
+                address(nonInitializedIndex),
+                SwapType.ASSET0_ASSET1,
+                address(mockWbtc),
+                1e8,
+                minOut
+            );
+        assertEq(uint8(commands[0]), uint8(0x10)); // V4_SWAP
+
+        (, bytes[] memory actionParams) = abi.decode(
+            inputs[0],
+            (bytes, bytes[])
+        );
+        IV4Router.ExactInputSingleParams memory swapParams = abi.decode(
+            actionParams[0],
+            (IV4Router.ExactInputSingleParams)
+        );
+        assertEq(swapParams.amountOutMinimum, minOut);
     }
 
     function testBuildSingleSwapParamsV4ReversedAsset0Asset1Route()
@@ -665,7 +735,8 @@ contract SwapManagerTest is BaseTest {
                 address(initializedIndex),
                 SwapType.ASSET0_ASSET1,
                 address(mockWbtc),
-                1e8
+                1e8,
+                0
             );
 
         assertEq(tokenIn, address(mockWbtc));
@@ -678,7 +749,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
     }
 
@@ -690,7 +762,8 @@ contract SwapManagerTest is BaseTest {
             unknownIndex,
             SwapType.ASSET0_USDC,
             address(mockWeth),
-            1e18
+            1e18,
+            0
         );
     }
 
@@ -705,10 +778,30 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         assertEq(uint8(commands[0]), V3_SWAP_EXACT_IN_COMMAND);
+    }
+
+    function testBuildSingleSwapParamsV3EncodesAmountOutMinimum() public {
+        _registerNonInitializedIndexWithV3Routes();
+        uint128 minOut = 456e6;
+
+        (, bytes[] memory inputs, , ) = swapManager.buildSingleSwapParams(
+            address(nonInitializedIndex),
+            SwapType.ASSET0_USDC,
+            address(mockWbtc),
+            1e8,
+            minOut
+        );
+
+        (, , uint256 amountOutMin, , ) = abi.decode(
+            inputs[0],
+            (address, uint256, uint256, bytes, bool)
+        );
+        assertEq(amountOutMin, minOut);
     }
 
     function testBuildSingleSwapParamsV3ReturnsCorrectCommandLength() public {
@@ -719,7 +812,8 @@ contract SwapManagerTest is BaseTest {
                 address(nonInitializedIndex),
                 SwapType.ASSET0_USDC,
                 address(mockWbtc),
-                1e8
+                1e8,
+                0
             );
 
         assertEq(commands.length, SINGLE_SWAP_COMMANDS_LENGTH);
@@ -733,7 +827,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         assertEq(tokenIn, address(mockWbtc));
@@ -750,7 +845,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         assertEq(tokenOut, address(mockUsdc));
@@ -763,7 +859,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET1_USDC,
             address(mockLink),
-            1e18
+            1e18,
+            0
         );
 
         assertEq(tokenOut, address(mockUsdc));
@@ -776,7 +873,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_ASSET1,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         assertEq(tokenOut, address(mockLink));
@@ -819,7 +917,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         // Last 20 bytes of multihopPath = USDC
@@ -838,7 +937,9 @@ contract SwapManagerTest is BaseTest {
             address(mockWeth),
             address(mockWbtc),
             1e18,
-            1e8
+            1e8,
+            0,
+            0
         );
 
         assertEq(commands.length, DOUBLE_SWAP_COMMANDS_LENGTH);
@@ -855,7 +956,9 @@ contract SwapManagerTest is BaseTest {
             address(mockWeth),
             address(mockWbtc),
             1e18,
-            1e8
+            1e8,
+            0,
+            0
         );
 
         assertEq(inputs.length, DOUBLE_SWAP_COMMANDS_LENGTH);
@@ -872,7 +975,9 @@ contract SwapManagerTest is BaseTest {
             address(mockWeth),
             address(mockWbtc),
             1e18,
-            1e8
+            1e8,
+            0,
+            0
         );
 
         // Both USDC routes are V3
@@ -910,7 +1015,9 @@ contract SwapManagerTest is BaseTest {
             address(mockWbtc),
             address(mockLink),
             1e8,
-            1e18
+            1e18,
+            0,
+            0
         );
 
         assertEq(commands.length, DOUBLE_SWAP_COMMANDS_LENGTH);
@@ -930,7 +1037,9 @@ contract SwapManagerTest is BaseTest {
             address(mockWeth),
             address(mockWbtc),
             1e18,
-            1e8
+            1e8,
+            0,
+            0
         );
 
         assertGt(inputs[0].length, 0, "inputs[0] must not be empty");
@@ -946,7 +1055,9 @@ contract SwapManagerTest is BaseTest {
             address(mockWbtc),
             address(mockLink),
             1e8,
-            1e18
+            1e18,
+            0,
+            0
         );
     }
 
@@ -1061,7 +1172,8 @@ contract SwapManagerTest is BaseTest {
                 address(initializedIndex),
                 SwapType.ASSET0_USDC,
                 address(mockWeth),
-                1e18
+                1e18,
+                0
             );
 
         // Commands must be 1 byte = V3_SWAP_EXACT_IN_COMMAND
@@ -1090,7 +1202,8 @@ contract SwapManagerTest is BaseTest {
             address(nonInitializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         // V3 input: abi.encode(address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
@@ -1107,7 +1220,7 @@ contract SwapManagerTest is BaseTest {
         assertEq(
             amountOutMin,
             0,
-            "amountOutMin must be 0 (slippage handled elsewhere)"
+            "amountOutMin must match the value passed (0)"
         );
         assertFalse(payerIsUser, "payerIsUser must be false");
         assertNotEq(recipient, address(0), "recipient must not be address(0)");
@@ -1124,20 +1237,24 @@ contract SwapManagerTest is BaseTest {
             address(mockWeth),
             address(mockWbtc),
             1e18,
-            1e8
+            1e8,
+            0,
+            0
         );
 
         (, bytes[] memory inputs0, , ) = swapManager.buildSingleSwapParams(
             address(initializedIndex),
             SwapType.ASSET0_USDC,
             address(mockWeth),
-            1e18
+            1e18,
+            0
         );
         (, bytes[] memory inputs1, , ) = swapManager.buildSingleSwapParams(
             address(initializedIndex),
             SwapType.ASSET1_USDC,
             address(mockWbtc),
-            1e8
+            1e8,
+            0
         );
 
         assertEq(
@@ -1205,6 +1322,201 @@ contract SwapManagerTest is BaseTest {
         vm.expectRevert(SwapManager.SwapManager__IndexNotRegistered.selector);
         harness.exposed_checkIfRegisteredIndex(address(0xBEEF));
     }
+
+    // =========================================================================
+    //  Upgradeability — initialize
+    // =========================================================================
+
+    function testInitializeRevertsIfCalledTwiceOnProxy() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        harness.initialize(user1);
+    }
+
+    function testInitializeRevertsOnBareImplementation() public {
+        SwapManager implementation = new SwapManager();
+
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        implementation.initialize(user1);
+    }
+
+    function testInitializeSetsOwnerOnProxy() public view {
+        assertEq(harness.owner(), address(this), "proxy owner must be the initializer argument");
+    }
+
+    // =========================================================================
+    //  Upgradeability — ERC-7201 storage
+    // =========================================================================
+
+    /// @dev ERC-7201 formula applied to the SwapManager namespace id.
+    function _erc7201SwapManagerLocation() internal pure returns (bytes32) {
+        return
+            keccak256(
+                abi.encode(
+                    uint256(keccak256(bytes(SWAP_MANAGER_NAMESPACE_ID))) - 1
+                )
+            ) & ~bytes32(uint256(0xff));
+    }
+
+    /// @dev Storage slot of routes[_index][_swapType] (first word of the SwapRoute struct).
+    function _routeSlot(
+        address _index,
+        SwapType _swapType
+    ) internal pure returns (bytes32) {
+        bytes32 innerMappingSlot = keccak256(
+            abi.encode(_index, _erc7201SwapManagerLocation())
+        );
+        return keccak256(abi.encode(uint256(_swapType), innerMappingSlot));
+    }
+
+    function testStorageLocationMatchesErc7201Formula() public view {
+        assertEq(
+            harness.exposed_storageLocation(),
+            _erc7201SwapManagerLocation(),
+            "storage location must follow the ERC-7201 formula"
+        );
+    }
+
+    function testRegisterIndexWritesRoutesUnderErc7201Namespace() public {
+        SwapRoute memory route = _validV4Route();
+        address currency0 = Currency.unwrap(route.poolKey.currency0);
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 slot = _routeSlot(HARNESS_INDEX, SwapType(i));
+            assertEq(vm.load(address(harness), slot), bytes32(0), "route slot must be empty before registration");
+        }
+
+        harness.registerIndex(HARNESS_INDEX, route, route, route);
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 slot = _routeSlot(HARNESS_INDEX, SwapType(i));
+            // word 0: version (enum, uint8)
+            assertEq(
+                uint256(vm.load(address(harness), slot)),
+                uint256(PoolVersion.V4),
+                "route.version must live in the namespaced slot"
+            );
+            // word 1: poolKey.currency0
+            assertEq(
+                address(
+                    uint160(
+                        uint256(
+                            vm.load(address(harness), bytes32(uint256(slot) + 1))
+                        )
+                    )
+                ),
+                currency0,
+                "route.poolKey.currency0 must live right after version"
+            );
+        }
+    }
+
+    function testRegisterIndexLeavesLowSequentialSlotsEmpty() public {
+        SwapRoute memory route = _validV4Route();
+        harness.registerIndex(HARNESS_INDEX, route, route, route);
+
+        for (uint256 i = 0; i < LOW_SLOTS_CHECKED; i++) {
+            assertEq(
+                vm.load(address(harness), bytes32(i)),
+                bytes32(0),
+                "no sequential storage slot must be used by the proxy"
+            );
+        }
+    }
+
+    function testOzNamespacedStorageHoldsOwnerAndInitializedVersion()
+        public
+        view
+    {
+        assertEq(
+            address(
+                uint160(
+                    uint256(
+                        vm.load(address(harness), OZ_OWNABLE_STORAGE_LOCATION)
+                    )
+                )
+            ),
+            address(this),
+            "owner must be stored in the OZ Ownable namespace"
+        );
+        // _initialized (uint64) occupies the low bytes of the Initializable slot
+        assertEq(
+            uint64(
+                uint256(
+                    vm.load(address(harness), OZ_INITIALIZABLE_STORAGE_LOCATION)
+                )
+            ),
+            1,
+            "proxy must be initialized at version 1"
+        );
+    }
+
+    // =========================================================================
+    //  Upgradeability — upgradeToAndCall
+    // =========================================================================
+
+    function testUpgradeToAndCallRevertsIfCallerNotOwner() public {
+        SwapManagerV2Mock newImplementation = new SwapManagerV2Mock();
+
+        vm.prank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                user1
+            )
+        );
+        harness.upgradeToAndCall(address(newImplementation), "");
+    }
+
+    function testUpgradeToAndCallByOwnerKeepsRoutesAndSwitchesImplementation()
+        public
+    {
+        SwapRoute memory v4Route = _validV4Route();
+        SwapRoute memory v3Route = _buildV3Route(
+            address(mockWbtc),
+            address(mockUsdc)
+        );
+        harness.registerIndex(HARNESS_INDEX, v4Route, v3Route, v4Route);
+
+        bytes32[3] memory routesBefore;
+        for (uint256 i = 0; i < 3; i++) {
+            routesBefore[i] = keccak256(
+                abi.encode(harness.getRoute(HARNESS_INDEX, SwapType(i)))
+            );
+        }
+        address implementationBefore = harness.getImplementation();
+
+        SwapManagerV2Mock newImplementation = new SwapManagerV2Mock();
+        harness.upgradeToAndCall(address(newImplementation), "");
+
+        SwapManagerV2Mock upgraded = SwapManagerV2Mock(address(harness));
+        assertTrue(
+            implementationBefore != address(newImplementation),
+            "implementation must differ before upgrade"
+        );
+        assertEq(upgraded.getImplementation(), address(newImplementation), "getImplementation must return V2");
+        assertEq(
+            address(
+                uint160(
+                    uint256(
+                        vm.load(address(harness), ERC1967Utils.IMPLEMENTATION_SLOT)
+                    )
+                )
+            ),
+            address(newImplementation),
+            "ERC-1967 slot must point to V2"
+        );
+        assertEq(upgraded.version(), 2, "V2 logic must be reachable through the proxy");
+        assertEq(upgraded.owner(), address(this), "owner must survive the upgrade");
+        for (uint256 i = 0; i < 3; i++) {
+            assertEq(
+                keccak256(
+                    abi.encode(upgraded.getRoute(HARNESS_INDEX, SwapType(i)))
+                ),
+                routesBefore[i],
+                "routes must survive the upgrade"
+            );
+        }
+    }
 }
 
 // =============================================================================
@@ -1212,7 +1524,13 @@ contract SwapManagerTest is BaseTest {
 // =============================================================================
 
 contract SwapManagerHarness is SwapManager {
-    constructor(address im) SwapManager(im) {}
+
+    function exposed_storageLocation() external pure returns (bytes32 slot) {
+        SwapManagerStorage storage $ = _getSwapManagerStorage();
+        assembly {
+            slot := $.slot
+        }
+    }
 
     function exposed_validateRoute(SwapRoute memory _route) external pure {
         _validateRoute(_route);
@@ -1231,6 +1549,6 @@ contract SwapManagerHarness is SwapManager {
         bytes memory _rawRoute
     ) external {
         SwapRoute memory route = abi.decode(_rawRoute, (SwapRoute));
-        s_routes[_indexAddress][_swapType] = route;
+        _getSwapManagerStorage().routes[_indexAddress][_swapType] = route;
     }
 }

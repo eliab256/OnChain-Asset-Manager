@@ -319,6 +319,93 @@ contract IndexManagerWeightsTest is BaseTest {
         );
     }
 
+    function testExecuteWeightUpdateEmitsWeightUpdateFailedWhenProposalExpired()
+        public
+    {
+        vm.prank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight50);
+
+        vm.warp(
+            block.timestamp +
+                WEIGHT_UPDATE_DELAY +
+                WEIGHT_UPDATE_EXECUTION_WINDOW +
+                1
+        );
+        vm.prank(deployer);
+        vm.recordLogs();
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool eventFound = false;
+        bytes memory reasonDataFromEvent;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == WeightUpdateFailed.selector) {
+                eventFound = true;
+                reasonDataFromEvent = logs[i].data;
+                break;
+            }
+        }
+        assertTrue(eventFound, "WeightUpdateFailed event not emitted");
+        bytes memory reasonBytes = abi.decode(reasonDataFromEvent, (bytes));
+        assertEq(
+            bytes4(reasonBytes),
+            Index__WeightUpdateExpired.selector,
+            "Incorrect reason in event"
+        );
+    }
+
+    // // =========================================================================
+    // //  cancelWeightUpdate
+    // // =========================================================================
+
+    function testCancelWeightUpdateResetsPendingWeightsAndEmitsEvent() public {
+        vm.prank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight50);
+
+        vm.expectEmit(true, true, false, false, address(indexManager));
+        emit WeightUpdateCancelled(address(initializedIndex), deployer);
+        vm.prank(deployer);
+        indexManager.cancelWeightUpdate(address(initializedIndex));
+
+        (
+            uint128 pendingWeight0,
+            uint128 pendingWeight1,
+            uint256 implementationTimestamp
+        ) = initializedIndex.getAssetsPendingWeights();
+        assertEq(pendingWeight0, 0);
+        assertEq(pendingWeight1, 0);
+        assertEq(implementationTimestamp, 0);
+    }
+
+    function testCancelWeightUpdateRevertIfNoPendingUpdate() public {
+        vm.prank(deployer);
+        vm.expectRevert(Index__NotPendingWeightUpdate.selector);
+        indexManager.cancelWeightUpdate(address(initializedIndex));
+    }
+
+    function testCancelWeightUpdateRevertIfIndexNotInitialized() public {
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__NotIndexInitialized.selector,
+                address(nonInitializedIndex)
+            )
+        );
+        indexManager.cancelWeightUpdate(address(nonInitializedIndex));
+    }
+
+    function testCancelWeightUpdateRevertIfCallerNotAssetManager() public {
+        vm.prank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user1,
+                keccak256("ASSET_MANAGER_ROLE")
+            )
+        );
+        indexManager.cancelWeightUpdate(address(initializedIndex));
+    }
+
     // // =========================================================================
     // //  executeWeightUpdateForMultipleIndexes
     // // =========================================================================

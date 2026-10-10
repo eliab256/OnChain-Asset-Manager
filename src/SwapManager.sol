@@ -5,12 +5,30 @@ import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {
     Commands
 } from "@uniswap/universal-router/contracts/libraries/Commands.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {
+    Initializable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {
+    OwnableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {
+    UUPSUpgradeable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {
+    ERC1967Utils
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 import {SwapType, PoolKey, PoolVersion, SwapRoute} from "./types.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
-contract SwapManager is Ownable {
+/**
+ * @title SwapManager
+ * @notice Registry of swap routes per index and encoder of Universal Router calldata.
+ * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager, which is
+ *      the owner and the only account allowed to upgrade it (through its own timelock).
+ *      Storage follows ERC-7201 namespaced layout.
+ */
+contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     // Errors
     error SwapManager__IndexNotRegistered();
     error SwapManager__RouteNotRegistered();
@@ -18,19 +36,32 @@ contract SwapManager is Ownable {
     error SwapManager__InvalidV3Path();
     error SwapManager__InvalidV4PoolKey();
 
-    // Immutable reference to the IndexManager
-    address internal immutable i_indexManager;
+    /// @custom:storage-location erc7201:onchainassetmanager.storage.SwapManager
+    struct SwapManagerStorage {
+        // Index address => swap type => swap route
+        mapping(address => mapping(SwapType => SwapRoute)) routes;
+    }
 
-    // Index address => swap type => swap route
-    mapping(address => mapping(SwapType => SwapRoute)) internal s_routes;
+    // keccak256(abi.encode(uint256(keccak256("onchainassetmanager.storage.SwapManager")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant SWAP_MANAGER_STORAGE_LOCATION =
+        0xe73f6e11bb678fc34c939722e07052d9d9f51b2455d3737e0b4ef584a3258e00;
 
     modifier onlyRegisteredIndex(address _indexAddress) {
         _checkIfRegisteredIndex(_indexAddress);
         _;
     }
 
-    constructor(address _indexManager) Ownable(_indexManager) {
-        i_indexManager = _indexManager;
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initializes the proxy storage.
+     * @param _indexManager The IndexManager address, set as owner (only account allowed to register routes and upgrade).
+     */
+    function initialize(address _indexManager) external initializer {
+        __Ownable_init(_indexManager);
     }
 
     /**
@@ -51,9 +82,10 @@ contract SwapManager is Ownable {
         _validateRoute(_routeAsset1Usdc);
         _validateRoute(_routeAsset0Asset1);
 
-        s_routes[_indexAddress][SwapType.ASSET0_USDC] = _routeAsset0Usdc;
-        s_routes[_indexAddress][SwapType.ASSET1_USDC] = _routeAsset1Usdc;
-        s_routes[_indexAddress][SwapType.ASSET0_ASSET1] = _routeAsset0Asset1;
+        SwapManagerStorage storage $ = _getSwapManagerStorage();
+        $.routes[_indexAddress][SwapType.ASSET0_USDC] = _routeAsset0Usdc;
+        $.routes[_indexAddress][SwapType.ASSET1_USDC] = _routeAsset1Usdc;
+        $.routes[_indexAddress][SwapType.ASSET0_ASSET1] = _routeAsset0Asset1;
     }
 
     /**
@@ -68,7 +100,7 @@ contract SwapManager is Ownable {
         SwapRoute memory _newRoute
     ) external onlyOwner onlyRegisteredIndex(_indexAddress) {
         _validateRoute(_newRoute);
-        s_routes[_indexAddress][_swapType] = _newRoute;
+        _getSwapManagerStorage().routes[_indexAddress][_swapType] = _newRoute;
     }
 
     /**
@@ -77,6 +109,7 @@ contract SwapManager is Ownable {
      * @param _swapType The type of swap.
      * @param _tokenIn The address of the input token.
      * @param _amountIn The amount of the input token.
+     * @param _amountOutMinimum Minimum output amount in token decimals; the router reverts if not met (0 disables the check).
      * @return commands The encoded commands for the swap.
      * @return inputs The encoded inputs for the swap.
      * @return tokenIn The address of the input token.
@@ -86,7 +119,8 @@ contract SwapManager is Ownable {
         address _indexAddress,
         SwapType _swapType,
         address _tokenIn,
-        uint128 _amountIn
+        uint128 _amountIn,
+        uint128 _amountOutMinimum
     )
         public
         view
@@ -98,12 +132,26 @@ contract SwapManager is Ownable {
             address tokenOut
         )
     {
-        SwapRoute memory route = s_routes[_indexAddress][_swapType];
+        SwapRoute memory route = _getSwapManagerStorage().routes[
+            _indexAddress
+        ][_swapType];
 
         if (route.version == PoolVersion.V4) {
-            return _buildV4Params(route.poolKey, _tokenIn, _amountIn);
+            return
+                _buildV4Params(
+                    route.poolKey,
+                    _tokenIn,
+                    _amountIn,
+                    _amountOutMinimum
+                );
         } else if (route.version == PoolVersion.V3) {
-            return _buildV3Params(route.v3Path, _tokenIn, _amountIn);
+            return
+                _buildV3Params(
+                    route.v3Path,
+                    _tokenIn,
+                    _amountIn,
+                    _amountOutMinimum
+                );
         } else {
             revert SwapManager__InvalidPoolVersion();
         }
@@ -119,6 +167,8 @@ contract SwapManager is Ownable {
      * @param _tokenIn1 The input token address for the second swap.
      * @param _amountIn0 The input amount for the first swap.
      * @param _amountIn1 The input amount for the second swap.
+     * @param _amountOutMinimum0 Minimum output amount for the first swap, in token decimals.
+     * @param _amountOutMinimum1 Minimum output amount for the second swap, in token decimals.
      * @return commands The concatenated router commands.
      * @return inputs The encoded router inputs for both swaps.
      */
@@ -129,7 +179,9 @@ contract SwapManager is Ownable {
         address _tokenIn0,
         address _tokenIn1,
         uint128 _amountIn0,
-        uint128 _amountIn1
+        uint128 _amountIn1,
+        uint128 _amountOutMinimum0,
+        uint128 _amountOutMinimum1
     ) external view returns (bytes memory commands, bytes[] memory inputs) {
         (
             bytes memory commands0,
@@ -140,7 +192,8 @@ contract SwapManager is Ownable {
                 _indexAddress,
                 _swapType0,
                 _tokenIn0,
-                _amountIn0
+                _amountIn0,
+                _amountOutMinimum0
             );
 
         (
@@ -152,7 +205,8 @@ contract SwapManager is Ownable {
                 _indexAddress,
                 _swapType1,
                 _tokenIn1,
-                _amountIn1
+                _amountIn1,
+                _amountOutMinimum1
             );
 
         commands = abi.encodePacked(commands0, commands1);
@@ -172,7 +226,7 @@ contract SwapManager is Ownable {
         address _indexAddress,
         SwapType _swapType
     ) external view returns (SwapRoute memory) {
-        return s_routes[_indexAddress][_swapType];
+        return _getSwapManagerStorage().routes[_indexAddress][_swapType];
     }
 
     /**
@@ -180,6 +234,7 @@ contract SwapManager is Ownable {
      * @param _key The V4 pool key.
      * @param _tokenIn The input token address.
      * @param _amountIn The input amount.
+     * @param _amountOutMinimum The minimum output amount.
      * @return commands The encoded router command.
      * @return inputs The encoded router input array.
      * @return tokenIn The input token address.
@@ -188,7 +243,8 @@ contract SwapManager is Ownable {
     function _buildV4Params(
         PoolKey memory _key,
         address _tokenIn,
-        uint128 _amountIn
+        uint128 _amountIn,
+        uint128 _amountOutMinimum
     )
         internal
         pure
@@ -210,7 +266,7 @@ contract SwapManager is Ownable {
                 poolKey: _key,
                 zeroForOne: zeroForOne,
                 amountIn: _amountIn,
-                amountOutMinimum: 0, // @audit-info: slippage should be handled in Index.sol
+                amountOutMinimum: _amountOutMinimum,
                 hookData: ""
             });
 
@@ -236,6 +292,7 @@ contract SwapManager is Ownable {
      *                 For multi-hop: abi.encodePacked(tokenIn, fee, tokenMid, fee, tokenOut)
      * @param _tokenIn The input token address.
      * @param _amountIn The input amount.
+     * @param _amountOutMinimum The minimum output amount.
      * @return commands The encoded router command.
      * @return inputs The encoded router input array.
      * @return tokenIn The input token address.
@@ -244,7 +301,8 @@ contract SwapManager is Ownable {
     function _buildV3Params(
         bytes memory _v3Path,
         address _tokenIn,
-        uint128 _amountIn
+        uint128 _amountIn,
+        uint128 _amountOutMinimum
     )
         internal
         pure
@@ -275,7 +333,7 @@ contract SwapManager is Ownable {
         inputs[0] = abi.encode(
             address(1), // recipient: MSG_SENDER → maps to the Index (caller of execute)
             uint256(_amountIn),
-            uint256(0), // amountOutMinimum — @audit-info: slippage handling still needed
+            uint256(_amountOutMinimum),
             directionalPath,
             false // payerIsUser: false, tokens are pre-transferred to the Universal Router
         );
@@ -316,9 +374,9 @@ contract SwapManager is Ownable {
      * @param _indexAddress The index contract address to check.
      */
     function _checkIfRegisteredIndex(address _indexAddress) internal view {
-        SwapRoute memory route = s_routes[_indexAddress][
-            SwapType.ASSET0_ASSET1
-        ];
+        SwapRoute memory route = _getSwapManagerStorage().routes[
+            _indexAddress
+        ][SwapType.ASSET0_ASSET1];
 
         if (route.version == PoolVersion.V4) {
             // The index is not registered if both currencies are zero, which is the struct default.
@@ -417,6 +475,31 @@ contract SwapManager is Ownable {
                     reversed[dstFee + j] = _path[srcFee + j];
                 }
             }
+        }
+    }
+
+    /**
+     * @notice Returns the current implementation address of the proxy.
+     */
+    function getImplementation() external view returns (address) {
+        return ERC1967Utils.getImplementation();
+    }
+
+    /**
+     * @dev Only the owner (IndexManager) can upgrade the implementation.
+     */
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    /**
+     * @dev Returns the ERC-7201 namespaced storage struct.
+     */
+    function _getSwapManagerStorage()
+        internal
+        pure
+        returns (SwapManagerStorage storage $)
+    {
+        assembly {
+            $.slot := SWAP_MANAGER_STORAGE_LOCATION
         }
     }
 }

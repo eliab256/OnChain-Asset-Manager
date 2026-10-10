@@ -10,6 +10,9 @@ import {IndexManager} from "../../../src/IndexManager.sol";
 import {Index} from "../../../src/Index.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
+import {
+    ERC1967Utils
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 contract DeployPeripheryTest is Test, CodeConstants {
     MultiSigWallet public multiSigWallet;
@@ -44,6 +47,34 @@ contract DeployPeripheryTest is Test, CodeConstants {
         assertEq(mainnetIndexManager.getUniswapUniversalRouter(), isolatedHelperConfig.getActiveNetworkConfig().uniswapUniversalRouter);
         assertEq(mainnetIndexManager.getRouterAddress(), address(mainnetRouter));
         assertEq(mainnetIndexManager.getSwapManagerAddress(), address(mainnetSwapManager));
+
+        // SwapManager is the ERC1967 proxy owned by the IndexManager
+        assertEq(
+            mainnetSwapManager.owner(),
+            address(mainnetIndexManager),
+            "IndexManager must own the SwapManager proxy"
+        );
+        address implementation = address(
+            uint160(
+                uint256(
+                    vm.load(
+                        address(mainnetSwapManager),
+                        ERC1967Utils.IMPLEMENTATION_SLOT
+                    )
+                )
+            )
+        );
+        assertTrue(implementation != address(0), "implementation slot must be set");
+        assertTrue(
+            implementation != address(mainnetSwapManager),
+            "implementation must differ from the proxy"
+        );
+        assertTrue(implementation.code.length > 0, "implementation must have code");
+        assertEq(
+            mainnetSwapManager.getImplementation(),
+            implementation,
+            "getImplementation must match the ERC-1967 slot"
+        );
     }
 
 
