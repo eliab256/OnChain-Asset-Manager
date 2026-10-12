@@ -5,7 +5,12 @@ import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {Index} from "../../../src/Index.sol";
-import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
+import {
+    IndexAsset,
+    SwapRoute,
+    AssetAvailable,
+    IndexAction
+} from "../../../src/types.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
 import {
@@ -18,6 +23,7 @@ import {
 
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/events/IndexManagerEvents.sol";
+import "../../../src/events/IndexEvents.sol";
 import "../../../src/errors/IndexErrors.sol";
 
 contract IndexManagerRebalanceTest is BaseTest {
@@ -98,14 +104,19 @@ contract IndexManagerRebalanceTest is BaseTest {
         indexManager.rebalanceSingleIndex(address(initializedIndex));
 
         bytes32 expectedSig = IndexRebalanceFailed.selector;
-        bytes32 expectedReason = Index__RebalanceNotNeeded.selector;
+        bytes memory expectedReason = abi.encodeWithSelector(
+            Index__RebalanceNotNeeded.selector
+        );
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bool rebalanceFailedEmitted = false;
         bytes memory reason;
         address indexEmitter;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSig) {
+            if (
+                logs[i].emitter == address(indexManager) &&
+                logs[i].topics[0] == expectedSig
+            ) {
                 rebalanceFailedEmitted = true;
                 indexEmitter = address(uint160(uint256(logs[i].topics[1])));
                 reason = logs[i].data;
@@ -126,9 +137,9 @@ contract IndexManagerRebalanceTest is BaseTest {
         // (offset + length + value). Decode it first to get the raw bytes.
         bytes memory decodedReason = abi.decode(reason, (bytes));
         assertEq(
-            bytes4(decodedReason),
+            decodedReason,
             expectedReason,
-            "Event emitted with wrong reason"
+            "Event must carry the raw Index__RebalanceNotNeeded revert data"
         );
     }
 
@@ -151,15 +162,11 @@ contract IndexManagerRebalanceTest is BaseTest {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bool rebalanceEmitted = false;
         address indexFromEvent;
-        address rebalancerFromEvent;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSig) {
+            if (logs[i].topics[0] == expectedSig && !rebalanceEmitted) {
                 rebalanceEmitted = true;
-                indexFromEvent = address(uint160(uint256(logs[i].topics[1])));
-                rebalancerFromEvent = address(
-                    uint160(uint256(logs[i].topics[2]))
-                );
-                break;
+                // IndexRebalanced is now emitted only by the Index itself
+                indexFromEvent = logs[i].emitter;
             }
         }
 
@@ -169,10 +176,11 @@ contract IndexManagerRebalanceTest is BaseTest {
             address(initializedIndex),
             "Event emitted by wrong index"
         );
-        assertEq(
-            rebalancerFromEvent,
+        _assertOnlyActionTriggered(
+            logs,
+            address(initializedIndex),
             deployer,
-            "Event emitted by wrong rebalancer"
+            IndexAction.REBALANCE
         );
     }
 
@@ -267,17 +275,12 @@ contract IndexManagerRebalanceTest is BaseTest {
         uint256 rebalanceFailedCount = 0;
         uint256 rebalanceSuccessCount = 0;
         address[] memory indexesFromEvent = new address[](3);
-        address[] memory rebalancerFromEvent = new address[](3);
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].topics[0] == rebalanceFailedSig) {
                 rebalanceFailedCount++;
             } else if (logs[i].topics[0] == rebalanceSuccessSig) {
-                indexesFromEvent[rebalanceSuccessCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
-                );
-                rebalancerFromEvent[rebalanceSuccessCount] = address(
-                    uint160(uint256(logs[i].topics[2]))
-                );
+                // IndexRebalanced is emitted by each Index: the index is the emitter
+                indexesFromEvent[rebalanceSuccessCount] = logs[i].emitter;
                 rebalanceSuccessCount++;
             }
         }
@@ -307,20 +310,23 @@ contract IndexManagerRebalanceTest is BaseTest {
             address(initializedIndex),
             "Event emitted by wrong index"
         );
+        for (uint256 i = 0; i < indexes.length; i++) {
+            _assertSingleActionTriggeredFor(
+                logs,
+                indexes[i],
+                deployer,
+                IndexAction.REBALANCE
+            );
+        }
         assertEq(
-            rebalancerFromEvent[0],
-            deployer,
-            "Event emitted by wrong rebalancer"
+            _countManagerEvents(logs, IndexActionTriggered.selector),
+            indexes.length,
+            "one IndexActionTriggered per successfully rebalanced index"
         );
         assertEq(
-            rebalancerFromEvent[1],
-            deployer,
-            "Event emitted by wrong rebalancer"
-        );
-        assertEq(
-            rebalancerFromEvent[2],
-            deployer,
-            "Event emitted by wrong rebalancer"
+            _countManagerEvents(logs, IndexRebalanceFailed.selector),
+            0,
+            "IndexManager must not emit IndexRebalanceFailed when every rebalance succeeds"
         );
     }
 

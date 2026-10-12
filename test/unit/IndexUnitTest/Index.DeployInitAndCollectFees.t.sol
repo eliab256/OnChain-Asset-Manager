@@ -296,8 +296,9 @@ contract IndexTest is BaseTest {
 
         uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
 
-        vm.expectEmit(true, true, true, true);
+        vm.expectEmit(true, true, true, true, address(nonInitializedIndex));
         emit IndexInitialized(
+            address(deployer),
             initAmount, // token decimals, not std
             amount1TokenDec, // token decimals, not std
             amount0InUsd,
@@ -384,7 +385,10 @@ contract IndexTest is BaseTest {
         uint256 collectFeesEvent;
 
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSig) {
+            if (
+                logs[i].emitter == address(initializedIndex) &&
+                logs[i].topics[0] == expectedSig
+            ) {
                 found = true;
                 collectFeesEvent = i;
             }

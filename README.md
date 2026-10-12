@@ -36,9 +36,11 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `IndexManager.sol` | Governance executor — creates and initialises indexes, orchestrates rebalancing, fee collection and weight updates |
 | `Index.sol`        | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance                          |
-| `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index                                 |
-| `PriceFeedManager.sol` | Oracle registry — one Chainlink feed per asset with its own staleness limit (`maxDelay`), shared by all indexes. Feed replacement is timelocked (2 days + 3-day window). UUPS proxy (ERC-7201 storage) deployed by IndexManager, upgradeable only by IndexManager after a 2-day timelock |
-| `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router. UUPS proxy (ERC-7201 storage) deployed by IndexManager; one proxy shared by all indexes, upgradeable only by IndexManager after a 2-day timelock |
+| `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index. UUPS proxy (ERC-7201 storage) deployed by IndexManager; every index grants `ROUTER_ROLE` to the same proxy, so its logic can be upgraded for all indexes (only by the `TimelockController`, after a 2-day delay) without migrating roles |
+| `PriceFeedManager.sol` | Oracle registry — one Chainlink feed per asset with its own staleness limit (`maxDelay`), shared by all indexes. Feed replacement is timelocked (2 days + 3-day window). UUPS proxy (ERC-7201 storage) deployed by IndexManager (owner), upgradeable only by the `TimelockController` after a 2-day delay |
+| `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router. UUPS proxy (ERC-7201 storage) deployed by IndexManager; one proxy shared by all indexes; IndexManager is the owner, upgrades only by the `TimelockController` after a 2-day delay |
+| `UpgraderAuth.sol` | Abstract UUPS authorization shared by the three proxies — stores a single `upgrader` (ERC-7201, set once in `initialize`, no setter) and lets only that address call `upgradeToAndCall`, independently of the owner |
+| `TimelockController` (OpenZeppelin) | The `upgrader` of all three proxies. The MultiSig is proposer, executor and canceller; min delay 2 days; no admin, so the delay can only change through the timelock itself |
 
 ### Key design properties
 
@@ -60,8 +62,8 @@ These roles are defined in `IndexManager.sol`. The deployer receives all three r
 
 | Role                 | What it **can** do                                                                                                                  | What it **cannot** do                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager; propose, execute (after a 2-day delay, within a 3-day window) and cancel SwapManager and PriceFeedManager upgrades | Cannot call any other operational function directly                               |
-| `ASSET_MANAGER_ROLE` | Create and initialise indexes, set the Router address, propose, execute (single, multiple, all) and cancel weight updates; register price feeds and propose/execute/cancel feed replacements on the PriceFeedManager | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
+| `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager | Cannot call any other operational function directly; cannot upgrade the proxies (only the `TimelockController` can) |
+| `ASSET_MANAGER_ROLE` | Create and initialise indexes, propose, execute (single, multiple, all) and cancel weight updates; register price feeds and propose/execute/cancel feed replacements on the PriceFeedManager | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
 | `REBALANCER_ROLE`    | Trigger rebalancing on a single index, on a list of indexes, or on all indexes at once                                              | Cannot create indexes, change weights, collect fees, or modify contract addresses |
 | `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees from a single index, from a list of indexes, or from all indexes                                     | Cannot rebalance, create indexes, change weights, or modify contract addresses    |
 
@@ -72,7 +74,7 @@ These roles are defined in `Index.sol` and are assigned automatically during dep
 | Role                 | Holder                                       | What it does                                                                        |
 | -------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `INDEX_MANAGER_ROLE` | IndexManager contract (and the Index itself) | Initialise the index, execute rebalancing, execute and cancel weight updates, collect fees     |
-| `ROUTER_ROLE`        | Router contract                              | Call `mintShares` and `redeem` — the only entry points for user buy/sell operations |
+| `ROUTER_ROLE`        | Router proxy (the same address for every index) | Call `mintShares` and `redeem` — the only entry points for user buy/sell operations |
 
 ### User (no role required)
 
@@ -86,6 +88,18 @@ Any externally-owned account can interact with the protocol through the **Router
 | Preview sell | `getMinRedeemPreview`            | Estimate the minimum USDC received for a given shares amount             |
 
 Users **cannot** bypass the Router to call Index directly (the `ROUTER_ROLE` check will revert), and they **cannot** rebalance, collect fees, or change weights.
+
+> **Trust note.** Users approve USDC to the **Index**, and `Index.redeem` burns shares without an allowance, so whoever controls the Router logic can mint with any user's approved USDC (choosing the tolerance) or force a redeem. Router upgrades therefore go through the same 2-day `TimelockController` as the other proxies, and its `CallScheduled` event carries the full `upgradeToAndCall` calldata, giving users time to revoke approvals or exit.
+
+### Proxy upgrades
+
+SwapManager, PriceFeedManager and Router are upgraded only through the OpenZeppelin `TimelockController`, never by the IndexManager:
+
+1. The MultiSig (proposer) calls `timelock.schedule(proxy, 0, abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (newImpl, data)), predecessor, salt, 2 days)` → `CallScheduled` on the timelock.
+2. After at least 2 days the MultiSig (executor) calls `timelock.execute(...)` with the same parameters. The timelock calls `upgradeToAndCall` on the proxy, `UpgraderAuth` checks `msg.sender == upgrader`, OpenZeppelin checks `proxiableUUID` and the proxy emits `Upgraded(newImpl)`; the timelock emits `CallExecuted`.
+3. Until it is executed, the MultiSig (canceller) can call `timelock.cancel(id)` → `Cancelled`.
+
+There is no execution window: a scheduled upgrade stays executable until it is executed or cancelled. The implementation is validated only at execution time. Several upgrades can be grouped with `scheduleBatch`/`executeBatch`.
 
 ---
 
@@ -143,7 +157,7 @@ make integrationtest
 .
 ├── script/
 │   ├── CodeConstants.sol            # Chain IDs, mainnet addresses, deployer constants
-│   ├── DeployPeriphery.s.sol        # Deploys SwapManager/PriceFeedManager implementations, IndexManager (creates both proxies), Router; registers the USDC feed
+│   ├── DeployPeriphery.s.sol        # Deploys MultiSig, TimelockController (upgrader), SwapManager/PriceFeedManager/Router implementations and IndexManager (creates the three proxies); registers the USDC feed
 │   ├── DeployAndInitNewIndex.s.sol  # Registers missing asset feeds, deploys and seeds a new Index
 │   └── HelperConfig.s.sol           # Network config and mock setup for Anvil
 │
@@ -151,7 +165,7 @@ make integrationtest
 │   ├── ContractCodeConstants.sol    # Protocol-wide constants (fees, weights, thresholds)
 │   ├── Index.sol                    # Core vault: mint, redeem, rebalance, fees
 │   ├── IndexManager.sol             # Governance: create, init, rebalance, collect fees
-│   ├── Router.sol                   # User entry point: input validation, buy/sell routing
+│   ├── Router.sol                   # User entry point: input validation, buy/sell routing (UUPS proxy)
 │   ├── PriceFeedManager.sol         # Shared Chainlink feed registry (UUPS proxy)
 │   ├── SwapManager.sol              # Uniswap V3/V4 swap parameter builder
 │   ├── types.sol                    # Shared structs and enums
@@ -197,6 +211,13 @@ make integrationtest
     │   │   ├── Router.BuyShares.t.sol
     │   │   ├── Router.Getters.t.sol
     │   │   └── Router.SellShares.t.sol
+    │   ├── UpgraderAuthUnitTest/    # Proxy upgrades through the TimelockController (all three proxies)
+    │   │   ├── BaseUpgraderAuth.t.sol
+    │   │   ├── UpgraderAuthInitialize.t.sol
+    │   │   ├── UpgraderAuthDirectUpgrade.t.sol
+    │   │   ├── UpgraderAuthTimelockAccess.t.sol
+    │   │   ├── UpgraderAuthTimelockEvents.t.sol
+    │   │   └── UpgraderAuthTimelockUpgrade.t.sol
     │   └── LibrariesUnitTest/
     │       ├── SharesMath.t.sol
     │       └── UnderlyingMath.t.sol
@@ -254,7 +275,7 @@ make unittest
 source .env
 anvil --fork-url $MAINNET_RPC_URL &
 
-# Deploy SwapManager implementation, IndexManager (creates the SwapManager proxy), Router
+# Deploy the MultiSig, the TimelockController, the SwapManager, PriceFeedManager and Router implementations and IndexManager (creates the three proxies)
 forge script script/DeployPeriphery.s.sol --broadcast --rpc-url http://localhost:8545
 
 # Deploy and initialise a WETH/WBTC 60/40 index
@@ -290,7 +311,7 @@ Three distinct roles are enforced via OpenZeppelin `AccessControl`:
 
 | Role                 | Allowed operations                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------ |
-| `ASSET_MANAGER_ROLE` | Create/initialise indexes, propose/execute weight updates, set router address                    |
+| `ASSET_MANAGER_ROLE` | Create/initialise indexes, propose/execute weight updates                                        |
 | `REBALANCER_ROLE`    | Trigger rebalancing on one or multiple indexes                                                   |
 | `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees                                                                   |
 
@@ -334,6 +355,7 @@ Test suites cover:
 | `RouterUnitTest/`       | Input validation (amount, balance, tolerance, index address), buy/sell share routing, getter functions                              |
 | `LibrariesUnitTest/`    | `SharesMath` (mint/redeem/tolerance arithmetic) and `UnderlyingMath` (USD valuation, decimal conversion, rebalance math)            |
 | `SwapManager.t.sol`     | V3/V4 route registration, directional path building, route update logic                                                             |
+| `UpgraderAuthUnitTest/` | `UpgraderAuth` storage and init, direct-upgrade rejection, schedule/execute/cancel/batch upgrades of SwapManager, PriceFeedManager and Router through the `TimelockController`, timelock roles and events |
 
 ### Integration tests (`test/integration/`)
 

@@ -20,6 +20,7 @@ import {
 import {
     OwnableUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UpgraderAuth__Unauthorized} from "../../src/errors/UpgraderAuthErrors.sol";
 import {SwapManagerV2Mock} from "../mocks/SwapManagerV2Mock.sol";
 import {SwapManagerHarness} from "../mocks/SwapManagerHarness.sol";
 import {IndexTokensMock} from "../mocks/IndexTokensMock.sol";
@@ -88,7 +89,10 @@ contract SwapManagerTest is BaseTest {
             address(
                 new ERC1967Proxy(
                     address(new SwapManagerHarness()),
-                    abi.encodeCall(SwapManager.initialize, (address(this)))
+                    abi.encodeCall(
+                        SwapManager.initialize,
+                        (address(this), address(this))
+                    )
                 )
             )
         );
@@ -1346,18 +1350,23 @@ contract SwapManagerTest is BaseTest {
 
     function testInitializeRevertsIfCalledTwiceOnProxy() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        harness.initialize(user1);
+        harness.initialize(user1, user1);
     }
 
     function testInitializeRevertsOnBareImplementation() public {
         SwapManager implementation = new SwapManager();
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        implementation.initialize(user1);
+        implementation.initialize(user1, user1);
     }
 
     function testInitializeSetsOwnerOnProxy() public view {
         assertEq(harness.owner(), address(this), "proxy owner must be the initializer argument");
+    }
+
+    function testInitializeSetsUpgraderOnProxy() public view {
+        assertEq(harness.getUpgrader(), address(this), "proxy upgrader must be the initializer argument");
+        assertEq(swapManager.getUpgrader(), address(timelock), "deployed proxy upgrader must be the timelock");
     }
 
     // =========================================================================
@@ -1470,20 +1479,18 @@ contract SwapManagerTest is BaseTest {
     //  Upgradeability — upgradeToAndCall
     // =========================================================================
 
-    function testUpgradeToAndCallRevertsIfCallerNotOwner() public {
+    function testUpgradeToAndCallRevertsIfCallerNotUpgrader() public {
         SwapManagerV2Mock newImplementation = new SwapManagerV2Mock();
 
         vm.prank(user1);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                user1
-            )
+            abi.encodeWithSelector(UpgraderAuth__Unauthorized.selector, user1)
         );
         harness.upgradeToAndCall(address(newImplementation), "");
     }
 
-    function testUpgradeToAndCallByOwnerKeepsRoutesAndSwitchesImplementation()
+    /// @dev The harness is initialized with this contract as both owner and upgrader.
+    function testUpgradeToAndCallByUpgraderKeepsRoutesAndSwitchesImplementation()
         public
     {
         // Mixed versions: ASSET0_USDC and ASSET0_ASSET1 on V4, ASSET1_USDC on V3

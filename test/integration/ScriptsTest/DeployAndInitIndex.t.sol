@@ -18,6 +18,9 @@ import {CodeConstants} from "../../../script/CodeConstants.sol";
 import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
 import {AssetAvailable} from "../../../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    TimelockController
+} from "@openzeppelin/contracts/governance/TimelockController.sol";
 
 contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
     MultiSigWallet public multiSigWallet;
@@ -25,6 +28,7 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
     Router public router;
     SwapManager public swapManager;
     HelperConfig public helperConfig;
+    TimelockController public timelock;
     address public deployer;
 
     modifier onMainnetFork() {
@@ -40,6 +44,7 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
             helperConfig,
             swapManager,
             multiSigWallet,
+            timelock,
             deployer
         ) = mainnetDeployerPeriphery.run();
     }

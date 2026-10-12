@@ -14,8 +14,8 @@ import {
     Initializable
 } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
-    OwnableUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+    UpgraderAuth__Unauthorized
+} from "../../../src/errors/UpgraderAuthErrors.sol";
 import {
     UUPSUpgradeable
 } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -65,7 +65,7 @@ contract PriceFeedManagerInitializeTest is BasePriceFeedManagerTest {
 
     function testInitializeRevertsIfCalledTwice() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        priceFeedManager.initialize(user1);
+        priceFeedManager.initialize(user1, address(timelock));
     }
 
     function testInitializeRevertsOnBareImplementation() public {
@@ -74,24 +74,29 @@ contract PriceFeedManagerInitializeTest is BasePriceFeedManagerTest {
         );
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        implementation.initialize(user1);
+        implementation.initialize(user1, address(timelock));
     }
 
     function testInitializeRevertsOnFreshImplementation() public {
         PriceFeedManager implementation = new PriceFeedManager();
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        implementation.initialize(user1);
+        implementation.initialize(user1, address(timelock));
+    }
+
+    function testInitializeSetsTimelockAsUpgrader() public view {
+        assertEq(priceFeedManager.getUpgrader(), address(timelock));
     }
 
     function testInitializeThroughNewProxySetsOwner() public {
         PriceFeedManager implementation = new PriceFeedManager();
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(implementation),
-            abi.encodeCall(PriceFeedManager.initialize, (user1))
+            abi.encodeCall(PriceFeedManager.initialize, (user1, user2))
         );
 
         assertEq(PriceFeedManager(address(proxy)).owner(), user1);
+        assertEq(PriceFeedManager(address(proxy)).getUpgrader(), user2);
         assertEq(
             PriceFeedManager(address(proxy)).getImplementation(),
             address(implementation)
@@ -173,7 +178,7 @@ contract PriceFeedManagerInitializeTest is BasePriceFeedManagerTest {
     }
 
     // =========================================================================
-    //  Direct upgrade bypassing the IndexManager timelock
+    //  Direct upgrade bypassing the TimelockController
     // =========================================================================
 
     function testDirectUpgradeToAndCallByAssetManagerReverts() public {
@@ -181,10 +186,7 @@ contract PriceFeedManagerInitializeTest is BasePriceFeedManagerTest {
 
         vm.prank(deployer);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                deployer
-            )
+            abi.encodeWithSelector(UpgraderAuth__Unauthorized.selector, deployer)
         );
         priceFeedManager.upgradeToAndCall(address(newImplementation), "");
     }
@@ -195,8 +197,22 @@ contract PriceFeedManagerInitializeTest is BasePriceFeedManagerTest {
         vm.prank(address(multiSigWallet));
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                UpgraderAuth__Unauthorized.selector,
                 address(multiSigWallet)
+            )
+        );
+        priceFeedManager.upgradeToAndCall(address(newImplementation), "");
+    }
+
+    function testDirectUpgradeToAndCallByOwnerIndexManagerReverts() public {
+        PriceFeedManagerV2Mock newImplementation = new PriceFeedManagerV2Mock();
+
+        // Ownership no longer grants upgrade rights: only the upgrader (timelock) can upgrade.
+        vm.prank(address(indexManager));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                UpgraderAuth__Unauthorized.selector,
+                address(indexManager)
             )
         );
         priceFeedManager.upgradeToAndCall(address(newImplementation), "");

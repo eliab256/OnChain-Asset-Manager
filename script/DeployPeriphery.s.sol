@@ -8,6 +8,9 @@ import {IndexManager} from "../src/IndexManager.sol";
 import {Router} from "../src/Router.sol";
 import {SwapManager} from "../src/SwapManager.sol";
 import {PriceFeedManager} from "../src/PriceFeedManager.sol";
+import {
+    TimelockController
+} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {HelperConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {CodeConstants} from "../script/CodeConstants.sol";
 
@@ -18,6 +21,7 @@ contract DeployPeriphery is Script, CodeConstants {
     HelperConfig public helperConfig;
     SwapManager public swapManager;
     PriceFeedManager public priceFeedManager;
+    TimelockController public timelock;
 
     function run()
         external
@@ -27,6 +31,7 @@ contract DeployPeriphery is Script, CodeConstants {
             HelperConfig,
             SwapManager,
             MultiSigWallet,
+            TimelockController,
             address deployer
         )
     {
@@ -47,23 +52,33 @@ contract DeployPeriphery is Script, CodeConstants {
         );
         address(multiSigWallet).call{value: 10 ether}("");
 
-        // 2. Deploy the SwapManager implementation (initializers disabled)
-        SwapManager swapManagerImplementation = new SwapManager();
+        // 2. Deploy the TimelockController, sole upgrader of the SwapManager, PriceFeedManager and Router proxies.
+        //    The MultiSigWallet is the only proposer and executor; no admin, so the roles can change only
+        //    through a timelocked operation on the timelock itself.
+        address[] memory timelockMembers = new address[](1);
+        timelockMembers[0] = address(multiSigWallet);
+        timelock = new TimelockController(
+            TIMELOCK_MIN_DELAY,
+            timelockMembers,
+            timelockMembers,
+            address(0)
+        );
 
-        // 2.1 Deploy the PriceFeedManager implementation (initializers disabled)
-        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
-
-        // 3. Deploy IndexManager; its constructor deploys and initializes the SwapManager and PriceFeedManager proxies
+        // 3. Deploy IndexManager; its constructor deploys and initializes the SwapManager, PriceFeedManager and Router proxies
+        //    from fresh implementations (initializers disabled), with the IndexManager as owner and the timelock as upgrader
         indexManager = new IndexManager(
             config.usdcAddress,
             config.uniswapUniversalRouter,
-            address(swapManagerImplementation),
-            address(priceFeedManagerImplementation)
+            address(new SwapManager()),
+            address(new PriceFeedManager()),
+            address(new Router()),
+            address(timelock)
         );
         swapManager = SwapManager(indexManager.getSwapManagerAddress());
         priceFeedManager = PriceFeedManager(
             indexManager.getPriceFeedManagerAddress()
         );
+        router = Router(indexManager.getRouterAddress());
 
         // 3.1 Register the USDC/USD feed while the deployer still holds ASSET_MANAGER_ROLE
         priceFeedManager.registerPriceFeed(
@@ -72,13 +87,7 @@ contract DeployPeriphery is Script, CodeConstants {
             config.usdcPriceFeedMaxDelay
         );
 
-        // 4. Deploy Router with the address of the deployed IndexManager
-        router = new Router(address(indexManager));
-
-        // 5. Set the Router address in the IndexManager
-        indexManager.setRouterAddress(address(router));
-
-        // 6. Transfer ownership to MultiSigWallet
+        // 4. Transfer ownership to MultiSigWallet
         // Grant roles to the multi-sig first
         indexManager.grantRole(
             indexManager.DEFAULT_ADMIN_ROLE(),
@@ -97,11 +106,12 @@ contract DeployPeriphery is Script, CodeConstants {
         if (!isAnvil) {
             console.log("Deployer Address:", deployer);
             console.log("MultiSigWallet Address:", address(multiSigWallet));
+            console.log("TimelockController (upgrader) Address:", address(timelock));
             console.log("IndexManager Address:", address(indexManager));
             console.log("SwapManager Proxy Address:", address(swapManager));
             console.log(
                 "SwapManager Implementation Address:",
-                address(swapManagerImplementation)
+                swapManager.getImplementation()
             );
             console.log(
                 "PriceFeedManager Proxy Address:",
@@ -109,17 +119,14 @@ contract DeployPeriphery is Script, CodeConstants {
             );
             console.log(
                 "PriceFeedManager Implementation Address:",
-                address(priceFeedManagerImplementation)
+                priceFeedManager.getImplementation()
             );
-            console.log("Router Address:", address(router));
+            console.log("Router Proxy Address:", address(router));
             console.log(
-                "Router sets IndexManager's router address to:",
-                router.getIndexManager()
+                "Router Implementation Address:",
+                router.getImplementation()
             );
-            console.log(
-                "IndexManager sets Router's address to:",
-                indexManager.getRouterAddress()
-            );
+            console.log("Router's IndexManager:", router.getIndexManager());
             console.log(
                 "IndexManager's SwapManager proxy:",
                 indexManager.getSwapManagerAddress()
@@ -133,6 +140,7 @@ contract DeployPeriphery is Script, CodeConstants {
             helperConfig,
             swapManager,
             multiSigWallet,
+            timelock,
             deployer
         );
     }

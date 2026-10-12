@@ -49,29 +49,6 @@ abstract contract ContractCodeConstants {
     uint256 internal constant WEIGHT_UPDATE_DELAY = 2 days;
 
     /**
-     * @dev The delay between an upgrade proposal of a proxy owned by the IndexManager
-     *      (SwapManager, PriceFeedManager) and its execution.
-     * @dev Gives users time to review the new implementation, which affects every index.
-     */
-    uint256 internal constant PROXY_UPGRADE_DELAY = 2 days;
-
-    /**
-     * @dev The window after PROXY_UPGRADE_DELAY during which a proposed proxy upgrade can be executed.
-     */
-    uint256 internal constant PROXY_UPGRADE_EXECUTION_WINDOW = 3 days;
-
-    /**
-     * @dev Alias of PROXY_UPGRADE_DELAY, kept for backward compatibility.
-     */
-    uint256 internal constant SWAP_MANAGER_UPGRADE_DELAY = PROXY_UPGRADE_DELAY;
-
-    /**
-     * @dev Alias of PROXY_UPGRADE_EXECUTION_WINDOW, kept for backward compatibility.
-     */
-    uint256 internal constant SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW =
-        PROXY_UPGRADE_EXECUTION_WINDOW;
-
-    /**
      * @dev The window after WEIGHT_UPDATE_DELAY during which a proposed weight update can be executed.
      * @dev After this window the proposal expires and must be proposed again.
      */

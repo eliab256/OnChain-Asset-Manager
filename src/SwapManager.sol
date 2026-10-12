@@ -11,9 +11,7 @@ import {
 import {
     OwnableUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {
-    UUPSUpgradeable
-} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {UpgraderAuth} from "./UpgraderAuth.sol";
 import {
     ERC1967Utils
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -25,11 +23,11 @@ import {IIndex} from "./Interface/IIndex.sol";
 /**
  * @title SwapManager
  * @notice Registry of swap routes per index and encoder of Universal Router calldata.
- * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager, which is
- *      the owner and the only account allowed to upgrade it (through its own timelock).
+ * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager, which is the owner.
+ *      Only the upgrader (the TimelockController) can upgrade it, see UpgraderAuth.
  *      Storage follows ERC-7201 namespaced layout.
  */
-contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
     // Errors
     error SwapManager__IndexNotRegistered();
     error SwapManager__RouteNotRegistered();
@@ -63,10 +61,16 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /**
      * @notice Initializes the proxy storage.
-     * @param _indexManager The IndexManager address, set as owner (only account allowed to register routes and upgrade).
+     * @dev Reverts with UpgraderAuth__ZeroAddress if `_upgrader` is zero.
+     * @param _indexManager The IndexManager address, set as owner (only account allowed to register and update routes).
+     * @param _upgrader The only account allowed to upgrade the proxy (the TimelockController).
      */
-    function initialize(address _indexManager) external initializer {
+    function initialize(
+        address _indexManager,
+        address _upgrader
+    ) external initializer {
         __Ownable_init(_indexManager);
+        __UpgraderAuth_init(_upgrader);
     }
 
     /**
@@ -582,11 +586,6 @@ contract SwapManager is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     function getImplementation() external view returns (address) {
         return ERC1967Utils.getImplementation();
     }
-
-    /**
-     * @dev Only the owner (IndexManager) can upgrade the implementation.
-     */
-    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     /**
      * @dev Returns the ERC-7201 namespaced storage struct.

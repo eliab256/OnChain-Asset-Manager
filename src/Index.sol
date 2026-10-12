@@ -216,6 +216,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
         // 10. Emit event with initialization details
         emit IndexInitialized(
+            _depositor,
             _underlyingAmount0,
             underlyingAmount1TokenDec,
             underlying0UsdValue,
@@ -252,92 +253,93 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         ) = _initFunctionValues();
 
         // 2. Fees (work in std decimals throughout).
-        uint256 netUsdcAmountStdDecimals;
+        uint128 feeAmount;
+        uint256 netDepositUsdValue;
         {
             // 2.1 Calculate fees on token decimals avoid future rounding error
-            uint128 feeAmount;
             uint256 netUsdcAmount;
             (feeAmount, netUsdcAmount) = _calculateFees(_usdcAmountIn);
             s_totalFees += feeAmount;
 
             // 2.2 Normalize netUsdcAmount to std decimals for internal calculations.
-            netUsdcAmountStdDecimals = _convertToDecimalStandard(
+            uint256 netUsdcAmountStdDecimals = _convertToDecimalStandard(
                 netUsdcAmount,
                 i_decimalsUsdc
             );
+
+            // 2.3 Convert net USDC amount to its real USD value using the USDC price feed.
+            netDepositUsdValue = _usdcToUsd(
+                netUsdcAmountStdDecimals,
+                initState.priceUsdc
+            );
         }
 
-        // 2.3 Convert net USDC amount to its real USD value using the USDC price feed.
-        uint256 netDepositUsdValue = _usdcToUsd(
-            netUsdcAmountStdDecimals,
-            initState.priceUsdc
-        );
-
-        // 3. Swaps.
+        // 3. Swaps and tolerance check (scoped to keep the stack shallow).
         // asset*ReceivedStd are in the 18-decimal standard (returned by _swapUsdcForAssets).
         uint256 asset0ReceivedStd;
         uint256 asset1ReceivedStd;
-        uint256 asset0ReceivedUsdValue;
-        uint256 asset1ReceivedUsdValue;
+        uint256 sharesToMint;
         {
-            // 3.1 get effective and target weights
-            (uint128 targetWeight0, uint128 targetWeight1) = getAssetsWeights();
-            (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
-                initState.asset0UsdValue,
-                initState.totalAssetUsdValue
-            );
-
-            // 3.2 Calculate USD amount to allocate to each underlying token
-            (
-                uint256 usdAmount0ToAllocate,
-                uint256 usdAmount1ToAllocate
-            ) = UnderlyingMath.calculateDepositAllocationInUsd(
-                    initState.totalAssetUsdValue,
-                    netDepositUsdValue,
-                    targetWeight0,
-                    targetWeight1,
-                    effectiveWeight0
+            {
+                // 3.1 get effective and target weights
+                (uint128 targetWeight0, uint128 targetWeight1) = getAssetsWeights();
+                (uint128 effectiveWeight0, ) = _getAssetsEffectiveWights(
+                    initState.asset0UsdValue,
+                    initState.totalAssetUsdValue
                 );
 
-            // 3.3 Convert USD allocation amounts back to USDC amounts for swaps
-            uint256 usdcAmount0ToSwap = _usdToUsdc(
-                usdAmount0ToAllocate,
-                initState.priceUsdc
-            );
-            uint256 usdcAmount1ToSwap = _usdToUsdc(
-                usdAmount1ToAllocate,
-                initState.priceUsdc
-            );
+                // 3.2 Calculate USD amount to allocate to each underlying token
+                (
+                    uint256 usdAmount0ToAllocate,
+                    uint256 usdAmount1ToAllocate
+                ) = UnderlyingMath.calculateDepositAllocationInUsd(
+                        initState.totalAssetUsdValue,
+                        netDepositUsdValue,
+                        targetWeight0,
+                        targetWeight1,
+                        effectiveWeight0
+                    );
 
-            // 3.4 Swap USDC and receive Token0 and Token1 amount in std decimals
-            (asset0ReceivedStd, asset1ReceivedStd) = _swapUsdcForAssets(
-                usdcAmount0ToSwap,
-                usdcAmount1ToSwap
-            );
+                // 3.3 Convert USD allocation amounts back to USDC amounts for swaps
+                uint256 usdcAmount0ToSwap = _usdToUsdc(
+                    usdAmount0ToAllocate,
+                    initState.priceUsdc
+                );
+                uint256 usdcAmount1ToSwap = _usdToUsdc(
+                    usdAmount1ToAllocate,
+                    initState.priceUsdc
+                );
 
-            // 3.5 Calculate the USD value of the amounts received to perform the tolerance check later.
-            asset0ReceivedUsdValue = UnderlyingMath
+                // 3.4 Swap USDC and receive Token0 and Token1 amount in std decimals
+                (asset0ReceivedStd, asset1ReceivedStd) = _swapUsdcForAssets(
+                    usdcAmount0ToSwap,
+                    usdcAmount1ToSwap
+                );
+            }
+
+            // 3.5 Calculate the USD value of the amounts received to perform the tolerance check.
+            uint256 asset0ReceivedUsdValue = UnderlyingMath
                 .calculateUSDValueOfTokenAmountStdDecimals(
                     asset0ReceivedStd,
                     initState.priceAsset0,
                     DECIMALS_STANDARD
                 );
-            asset1ReceivedUsdValue = UnderlyingMath
+            uint256 asset1ReceivedUsdValue = UnderlyingMath
                 .calculateUSDValueOfTokenAmountStdDecimals(
                     asset1ReceivedStd,
                     initState.priceAsset1,
                     DECIMALS_STANDARD
                 );
-        }
 
-        // 4. Tolerance check.
-        uint256 sharesToMint = _calculateShareToMintAndValidateTolerance(
-            netDepositUsdValue,
-            _maxTolerance,
-            initState.totalAssetUsdValue,
-            asset0ReceivedUsdValue,
-            asset1ReceivedUsdValue
-        );
+            // 4. Tolerance check.
+            sharesToMint = _calculateShareToMintAndValidateTolerance(
+                netDepositUsdValue,
+                _maxTolerance,
+                initState.totalAssetUsdValue,
+                asset0ReceivedUsdValue,
+                asset1ReceivedUsdValue
+            );
+        }
 
         if (sharesToMint == 0) revert Index__ToleranceExceeded();
 
@@ -361,10 +363,11 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         // 7. Emit SharesMinted event
         emit SharesMinted(
             _to,
-            _usdcAmountIn,
             sharesToMint,
             asset0ReceivedTokenDec,
-            asset1ReceivedTokenDec
+            asset1ReceivedTokenDec,
+            _usdcAmountIn,
+            feeAmount
         );
     }
 
@@ -439,20 +442,23 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
         // 4. Fees are computed in USDC token decimals because s_totalFees is
         //    accounted and transferred in token decimals.
-        uint256 usdcReceivedTokenDec = _convertFromStdDecimalsToTokenDecimals(
-            usdcReceived,
-            i_decimalsUsdc
-        );
-        (uint128 feeAmount, uint256 netUsdcAmountTokenDec) = _calculateFees(
-            usdcReceivedTokenDec
-        );
-        uint256 netUsdcAmount = _convertToDecimalStandard(
-            netUsdcAmountTokenDec,
-            i_decimalsUsdc
-        );
-
-        // 5. Tolerance check.
+        //    Fee and tolerance check are scoped to keep the stack shallow.
+        uint128 feeAmount;
+        uint256 netUsdcAmountTokenDec;
         {
+            uint256 usdcReceivedTokenDec = _convertFromStdDecimalsToTokenDecimals(
+                    usdcReceived,
+                    i_decimalsUsdc
+                );
+            (feeAmount, netUsdcAmountTokenDec) = _calculateFees(
+                usdcReceivedTokenDec
+            );
+            uint256 netUsdcAmount = _convertToDecimalStandard(
+                netUsdcAmountTokenDec,
+                i_decimalsUsdc
+            );
+
+            // 5. Tolerance check.
             //5.1. Get expected usdc amount
             uint256 expectedUsdcBeforeFees = _usdToUsdc(
                 sharesBurnUsdValue,
@@ -487,7 +493,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             _sharesAmount,
             asset0AmountRedeemedTokenDec,
             asset1AmountRedeemedTokenDec,
-            netUsdcAmountTokenDec
+            netUsdcAmountTokenDec,
+            feeAmount
         );
     }
 
@@ -581,6 +588,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
     /**
      * @notice Proposes a new target weight for asset0 and then derive the corresponding weight for asset1.
+     * @dev Emits WeightsUpdateProposed. If an executable or expired proposal is overwritten, WeightsUpdateCancelled is emitted for it first.
      * @param _newWeightAsset0 New target weight for asset0 in weight units (100% = 1000000).
      * @return implementationTimestamp Timestamp at which the proposed weights can be implemented.
      */
@@ -603,19 +611,25 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             _newWeightAsset0 == s_weight0;
         if (invalidWeight0) revert Index__InvalidWeight();
 
-        // 3. Update implementationTimestamp with new timestamp for when the weight update can be executed,
+        // 3. Close an executable or expired proposal that is about to be overwritten.
+        if (s_weightUpdateExecutableAt != 0)
+            emit WeightsUpdateCancelled(s_pendingWeight0, s_pendingWeight1);
+
+        // 4. Update implementationTimestamp with new timestamp for when the weight update can be executed,
         implementationTimestamp = block.timestamp + WEIGHT_UPDATE_DELAY;
 
-        // 4. Store the proposed weights in storage.
+        // 5. Store the proposed weights in storage.
         s_pendingWeight0 = _newWeightAsset0;
         s_pendingWeight1 = MAX_PERCENTAGE - _newWeightAsset0;
         s_weightUpdateExecutableAt = implementationTimestamp;
 
-        // 5. Emit event with the proposed weights and the timestamp execution
+        // 6. Emit event with the current and proposed weights and the timestamp execution
         emit WeightsUpdateProposed(
+            s_weight0,
+            s_weight1,
             s_pendingWeight0,
             s_pendingWeight1,
-            s_weightUpdateExecutableAt
+            implementationTimestamp
         );
     }
 
@@ -623,6 +637,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @notice Executes the pending weight update and triggers a rebalance.
      * @notice Rebalance is attempted even if the update fails to execute to avoid getting stuck with pending weights that cannot be implemented.
      * @dev Executable only within WEIGHT_UPDATE_EXECUTION_WINDOW after s_weightUpdateExecutableAt; after that the proposal is expired.
+     * @dev Emits WeightsUpdated, then WeightsUpdateRebalanceSkipped if the rebalance reverts with Index__RebalanceNotNeeded,
+     *      or WeightsUpdateRebalanceFailed with the raw revert data for any other revert. A successful rebalance emits IndexRebalanced.
      */
     function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
         // 1. Check if there is a pending weight update ready to be executed, if not revert.
@@ -646,12 +662,18 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         s_pendingWeight1 = 0;
         s_weightUpdateExecutableAt = 0;
 
-        // 4. Trigger rebalance and emit event with failure or success rebalance.
-        (bool rebalanceSuccess, bytes memory reasonData) = _tryRebalanceIndex();
-        if (!rebalanceSuccess) emit WeightUpdateRebalanceFailed(reasonData);
+        // 4. Emit event with the new weights before the rebalance attempt.
+        emit WeightsUpdated(s_weight0, s_weight1);
 
-        // 5. Emit event with the new weights and the timestamp of the execution
-        emit IndexWeightsUpdated(s_weight0, s_weight1, block.timestamp);
+        // 5. Trigger rebalance; "not needed" is the normal case and is reported as skipped.
+        (bool rebalanceSuccess, bytes memory reasonData) = _tryRebalanceIndex();
+        if (!rebalanceSuccess) {
+            if (
+                reasonData.length >= 4 &&
+                bytes4(reasonData) == Index__RebalanceNotNeeded.selector
+            ) emit WeightsUpdateRebalanceSkipped();
+            else emit WeightsUpdateRebalanceFailed(reasonData);
+        }
     }
 
     /**
@@ -821,8 +843,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             prevReserv0,
             prevReserv1,
             s_asset0Reserve,
-            s_asset1Reserve,
-            block.timestamp
+            s_asset1Reserve
         );
     }
 
@@ -1307,7 +1328,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @notice Used on the executeWeightUpdate function to attempt the rebalance and catch any error that may occur during the process to emit it in an event instead of reverting the transaction.
      * @dev Attempts to rebalance the index.
      * @return success True if the rebalance was successful, false otherwise.
-     * @return reasonData Encoded reason for failure if the rebalance was not successful.
+     * @return reasonData Raw revert data of the rebalance call, unchanged (may be empty); empty on success.
      */
     function _tryRebalanceIndex()
         internal
@@ -1315,19 +1336,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     {
         try this.rebalanceIndex() {
             return (true, "");
-        } catch Error(string memory reason) {
-            return (
-                false,
-                abi.encodeWithSelector(
-                    bytes4(keccak256("Error(string)")),
-                    reason
-                )
-            );
-        } catch (bytes memory lowLevelData) {
-            return (
-                false,
-                lowLevelData.length > 0 ? lowLevelData : bytes("Unknown error")
-            );
+        } catch (bytes memory reason) {
+            return (false, reason);
         }
     }
     /**

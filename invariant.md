@@ -70,7 +70,7 @@
 
 11. **Weight sum at creation**: Per ogni index creato, `asset0.weightPercentage + asset1.weightPercentage == MAX_WEIGHT`.
 
-12. **Router precondition**: `createIndex` reverta se `s_router == address(0)`.
+12. **Single Router proxy**: `i_router` è il proxy ERC1967 creato nel costruttore, non cambia mai e ogni Index assegna `ROUTER_ROLE` a questo indirizzo. Un upgrade del Router (solo tramite il `TimelockController`) vale per tutti gli index, compresi quelli già creati.
 
 13. **Single SwapManager proxy**: `i_swapManager` è il proxy ERC1967 creato nel costruttore, non cambia mai ed è lo stesso indirizzo passato a ogni Index (`Index.i_swapManager == IndexManager.getSwapManagerAddress()`). L'owner del proxy è l'IndexManager.
 
@@ -88,7 +88,7 @@
 
 20. **Rebalance/fee collection non-reverting batch**: `rebalanceAllIndexes`, `collectFeesFromAllIndexes`, ecc. non revertano l'intera transazione se un singolo index fallisce — emettono eventi di fallimento.
 
-21. **SwapManager upgrade timelock**: `executeSwapManagerUpgrade` riesce solo se c'è una proposta e `executableAt <= block.timestamp <= executableAt + SWAP_MANAGER_UPGRADE_EXECUTION_WINDOW`, con `executableAt = proposta + SWAP_MANAGER_UPGRADE_DELAY`. Propose, execute e cancel richiedono `DEFAULT_ADMIN_ROLE`; dopo execute o cancel lo stato pendente è azzerato.
+21. **Proxy upgrade timelock**: SwapManager, PriceFeedManager e Router hanno come `upgrader` (`UpgraderAuth`, storage ERC-7201 `onchainassetmanager.storage.UpgraderAuth`) il `TimelockController` passato al costruttore dell'IndexManager (mai zero, `IndexManager__ZeroAddress`). Solo l'upgrader può chiamare `upgradeToAndCall`: IndexManager, owner, admin o chiunque altro ricevono `UpgraderAuth__Unauthorized(caller)`. Ogni upgrade richiede quindi `schedule` + attesa di almeno `getMinDelay()` (2 giorni) + `execute` da parte del MultiSig; `cancel` è possibile finché non è eseguito. L'upgrader non ha setter: cambia solo con un upgrade. L'IndexManager non ha più funzioni di upgrade.
 
 ---
 
@@ -96,9 +96,9 @@
 
 ### Invariant di Stato
 
-1. **Immutability**: `i_IndexManager` e `i_usdc` sono immutabili dopo il deploy.
+1. **Storage e proxy**: indexManager e usdc vivono nello storage ERC-7201 `onchainassetmanager.storage.Router`, sono impostati una sola volta da `initialize` (mai zero) e restano invariati dopo un upgrade. L'implementation non è inizializzabile; solo l'upgrader (`TimelockController`) può chiamare `upgradeToAndCall`. Il Router non ha owner.
 
-2. **USDC consistency**: `i_usdc == IIndexManager(i_IndexManager).getUsdc()`.
+2. **USDC consistency**: `getUsdc() == IIndexManager(getIndexManager()).getUsdc()`.
 
 3. **Valid index gate**: Ogni operazione `buy/sell` richiede che l'index sia inizializzato in `IndexManager`.
 
@@ -112,7 +112,7 @@
 
 8. **Reentrancy protection**: Nessuna chiamata rientrante è possibile grazie a `ReentrancyGuard.nonReentrant`.
 
-9. **Router is stateless**: Il Router non mantiene stato mutabile proprio (nessuna variabile storage scrivibile post-constructor); funge da puro dispatcher.
+9. **Router is stateless**: Oltre alla configurazione scritta da `initialize` (e allo stato del `ReentrancyGuard`), il Router non mantiene stato mutabile proprio; funge da puro dispatcher.
 
 10. **Preview consistency**: `getMinMintPreview` e `getMinRedeemPreview` restituiscono valori coerenti con la logica di `Index.minMintPreview` / `Index.minRedeemPreview` per gli stessi input.
 
@@ -144,7 +144,7 @@
 
 11. **Owner-only registration**: Solo l'indirizzo con il ruolo appropriato (IndexManager) può chiamare `registerIndex` e `updateRoute`.
 
-11b. **Upgrade e storage**: Solo l'owner (IndexManager) può chiamare `upgradeToAndCall`. Le route vivono nello storage ERC-7201 `onchainassetmanager.storage.SwapManager` e restano invariate dopo un upgrade. L'implementation non è inizializzabile (`_disableInitializers`) e `initialize` sul proxy si chiama una volta sola.
+11b. **Upgrade e storage**: Solo l'upgrader (`TimelockController`) può chiamare `upgradeToAndCall`; l'owner (IndexManager) resta per le funzioni operative. Le route vivono nello storage ERC-7201 `onchainassetmanager.storage.SwapManager` e restano invariate dopo un upgrade. L'implementation non è inizializzabile (`_disableInitializers`) e `initialize` sul proxy si chiama una volta sola.
 
 12. **V3 input encoding**: L'input V3 codifica `payerIsUser == false` e `amountOutMin` uguale al `_amountOutMinimum` passato (V4: `ExactInputSingleParams.amountOutMinimum`).
 
@@ -164,7 +164,7 @@
 
 4. **Timelock sui feed**: `executePriceFeedUpdate` riesce solo se `executableAt <= block.timestamp <= executableAt + PRICE_FEED_UPDATE_EXECUTION_WINDOW`; il feed proposto viene ri-validato all'esecuzione. Dopo execute o cancel la proposta è azzerata.
 
-5. **Autorizzazioni**: register/propose/execute/cancel richiedono `ASSET_MANAGER_ROLE` sull'IndexManager (owner); `upgradeToAndCall` solo l'owner (IndexManager, tramite il suo timelock).
+5. **Autorizzazioni**: register/propose/execute/cancel richiedono `ASSET_MANAGER_ROLE` sull'IndexManager (owner); `upgradeToAndCall` solo l'upgrader (`TimelockController`).
 
 6. **Prezzi normalizzati**: `getPrice` restituisce sempre il prezzo a 18 decimali.
 

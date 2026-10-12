@@ -264,11 +264,13 @@ contract IndexMintTest is BaseTest {
                     uint256 logShares,
                     uint256 logToken0,
                     uint256 logToken1,
-                    uint256 logUsdcOut
+                    uint256 logUsdcOut,
+                    uint256 logFee
                 ) = abi.decode(
                         logs[i].data,
-                        (uint256, uint256, uint256, uint256)
+                        (uint256, uint256, uint256, uint256, uint256)
                     );
+                assertGt(logFee, 0, "event must log non-zero fee amount");
 
                 assertEq(
                     logShares,

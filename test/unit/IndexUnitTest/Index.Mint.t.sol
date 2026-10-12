@@ -186,14 +186,20 @@ contract IndexMintTest is BaseTest {
                 assertEq(_to, user1, "event must log user1 as minter");
 
                 (
-                    uint256 usdcAmountIn,
                     uint256 sharesMinted,
                     uint256 token0,
-                    uint256 token1
+                    uint256 token1,
+                    uint256 usdcAmountIn,
+                    uint256 feeAmount
                 ) = abi.decode(
                         logs[i].data,
-                        (uint256, uint256, uint256, uint256)
+                        (uint256, uint256, uint256, uint256, uint256)
                     );
+                assertGt(
+                    feeAmount,
+                    0,
+                    "event must log a non-zero fee amount"
+                );
                 assertEq(
                     usdcAmountIn,
                     VALID_USDC_AMOUNT,
@@ -216,6 +222,7 @@ contract IndexMintTest is BaseTest {
                 );
             }
         }
+        assertTrue(eventFound, "SharesMinted event was not emitted");
     }
 
     // =========================================================================

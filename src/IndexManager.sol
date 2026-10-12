@@ -8,21 +8,13 @@ import {IIndexManager} from "./Interface/IIndexManager.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {SwapManager} from "./SwapManager.sol";
 import {IPriceFeedManager} from "./Interface/IPriceFeedManager.sol";
+import {IRouter} from "./Interface/IRouter.sol";
 import {
     ERC1967Proxy
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {
-    ERC1967Utils
-} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {
-    IERC1822Proxiable
-} from "@openzeppelin/contracts/interfaces/draft-IERC1822.sol";
-import {
-    UUPSUpgradeable
-} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import "./errors/IndexManagerErrors.sol";
 import "./events/IndexManagerEvents.sol";
-import {IndexAsset, SwapRoute, PendingUpgrade} from "./types.sol";
+import {IndexAsset, SwapRoute, IndexAction} from "./types.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -56,6 +48,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     address internal immutable i_swapManager;
     // PriceFeedManager ERC1967 proxy, deployed in the constructor. Same address for every index.
     address internal immutable i_priceFeedManager;
+    // Router ERC1967 proxy, deployed in the constructor. Every index grants ROUTER_ROLE to this address.
+    address internal immutable i_router;
 
     address[] private s_deployedIndexes;
     address[] private s_initializedIndexes;
@@ -66,11 +60,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     mapping(address => bool) private s_isIndex;
     mapping(address => bool) private s_isInitialized;
 
-    address internal s_router;
     uint256 private s_totalFeesCollected;
-
-    /// @dev Mapping from an owned UUPS proxy (SwapManager, PriceFeedManager) to its pending timelocked upgrade
-    mapping(address => PendingUpgrade) private s_proxyToPendingUpgrade;
 
     modifier isIndexInitialized(address indexAddress) {
         _isIndexInitialized(indexAddress);
@@ -87,31 +77,58 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @param _uniswapUniversalRouter The Uniswap Universal Router address.
      * @param _swapManagerImplementation The SwapManager implementation; the constructor deploys its proxy, owned by this contract.
      * @param _priceFeedManagerImplementation The PriceFeedManager implementation; the constructor deploys its proxy, owned by this contract.
+     * @param _routerImplementation The Router implementation; the constructor deploys its proxy, bound to this contract.
+     * @param _upgrader The only account allowed to upgrade the three proxies (the TimelockController). Must be non-zero.
      */
     constructor(
         address _usdcAddress,
         address _uniswapUniversalRouter,
         address _swapManagerImplementation,
-        address _priceFeedManagerImplementation
+        address _priceFeedManagerImplementation,
+        address _routerImplementation,
+        address _upgrader
     ) {
+        if (_upgrader == address(0)) revert IndexManager__ZeroAddress();
         if (_swapManagerImplementation.code.length == 0) {
-            revert IndexManager__InvalidSwapManagerImplementation();
+            revert IndexManager__InvalidImplementation(
+                _swapManagerImplementation
+            );
         }
         if (_priceFeedManagerImplementation.code.length == 0) {
-            revert IndexManager__InvalidPriceFeedManagerImplementation();
+            revert IndexManager__InvalidImplementation(
+                _priceFeedManagerImplementation
+            );
+        }
+        if (_routerImplementation.code.length == 0) {
+            revert IndexManager__InvalidImplementation(_routerImplementation);
         }
         i_usdc = _usdcAddress;
         i_uniswapUniversalRouter = _uniswapUniversalRouter;
         i_swapManager = address(
             new ERC1967Proxy(
                 _swapManagerImplementation,
-                abi.encodeCall(SwapManager.initialize, (address(this)))
+                abi.encodeCall(
+                    SwapManager.initialize,
+                    (address(this), _upgrader)
+                )
             )
         );
         i_priceFeedManager = address(
             new ERC1967Proxy(
                 _priceFeedManagerImplementation,
-                abi.encodeCall(IPriceFeedManager.initialize, (address(this)))
+                abi.encodeCall(
+                    IPriceFeedManager.initialize,
+                    (address(this), _upgrader)
+                )
+            )
+        );
+        i_router = address(
+            new ERC1967Proxy(
+                _routerImplementation,
+                abi.encodeCall(
+                    IRouter.initialize,
+                    (address(this), _usdcAddress, _upgrader)
+                )
             )
         );
 
@@ -119,97 +136,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         _grantRole(ASSET_MANAGER_ROLE, msg.sender);
         _grantRole(FEE_COLLECTOR_ROLE, msg.sender);
         _grantRole(REBALANCER_ROLE, msg.sender);
-    }
-
-    /**
-     * @notice Sets the address of the router contract.
-     * @param _newRouter The address of the new router contract.
-     */
-    function setRouterAddress(
-        address _newRouter
-    ) public onlyRole(ASSET_MANAGER_ROLE) {
-        s_router = _newRouter;
-
-        emit RouterAddressSet(_newRouter, msg.sender);
-    }
-
-    /**
-     * @notice Proposes an upgrade of the SwapManager implementation, executable after PROXY_UPGRADE_DELAY.
-     * @param _newImplementation The new UUPS-compatible SwapManager implementation.
-     * @param _data Optional calldata executed on the proxy after the upgrade (e.g. a reinitializer). Empty for none.
-     * @return executableAt Timestamp from which the upgrade can be executed.
-     */
-    function proposeSwapManagerUpgrade(
-        address _newImplementation,
-        bytes calldata _data
-    ) public onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256 executableAt) {
-        executableAt = _proposeUpgrade(i_swapManager, _newImplementation, _data);
-
-        emit SwapManagerUpgradeProposed(
-            _newImplementation,
-            executableAt,
-            msg.sender
-        );
-    }
-
-    /**
-     * @notice Executes the pending SwapManager upgrade.
-     * @dev Executable only within PROXY_UPGRADE_EXECUTION_WINDOW after the delay; after that the proposal is expired.
-     */
-    function executeSwapManagerUpgrade() public onlyRole(DEFAULT_ADMIN_ROLE) {
-        address newImplementation = _executeUpgrade(i_swapManager);
-
-        emit SwapManagerUpgraded(newImplementation, msg.sender);
-    }
-
-    /**
-     * @notice Cancels the pending SwapManager upgrade, whether it is still in its delay, executable or expired.
-     */
-    function cancelSwapManagerUpgrade() public onlyRole(DEFAULT_ADMIN_ROLE) {
-        address pendingImplementation = _cancelUpgrade(i_swapManager);
-
-        emit SwapManagerUpgradeCancelled(pendingImplementation, msg.sender);
-    }
-
-    /// @dev Inherit from IIndexManager. See interface for details.
-    function proposePriceFeedManagerUpgrade(
-        address _newImplementation,
-        bytes calldata _data
-    ) public onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256 executableAt) {
-        executableAt = _proposeUpgrade(
-            i_priceFeedManager,
-            _newImplementation,
-            _data
-        );
-
-        emit PriceFeedManagerUpgradeProposed(
-            _newImplementation,
-            executableAt,
-            msg.sender
-        );
-    }
-
-    /// @dev Inherit from IIndexManager. See interface for details.
-    function executePriceFeedManagerUpgrade()
-        public
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        address newImplementation = _executeUpgrade(i_priceFeedManager);
-
-        emit PriceFeedManagerUpgraded(newImplementation, msg.sender);
-    }
-
-    /// @dev Inherit from IIndexManager. See interface for details.
-    function cancelPriceFeedManagerUpgrade()
-        public
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        address pendingImplementation = _cancelUpgrade(i_priceFeedManager);
-
-        emit PriceFeedManagerUpgradeCancelled(
-            pendingImplementation,
-            msg.sender
-        );
     }
 
     /**
@@ -230,9 +156,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         onlyRole(ASSET_MANAGER_ROLE)
         returns (address index, address token0, address token1)
     {
-        if (s_router == address(0)) {
-            revert IndexManager__RouterAddressNotSet();
-        }
         if (_assetA.asset == _assetB.asset) {
             revert IndexManager__InvalidIndexAssetsAddress();
         }
@@ -247,17 +170,17 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         }
 
         // 1. Sort TokenA and TokenB
-        (address tokenAsset0, ) = sortAssets(_assetA.asset, _assetB.asset);
-
         IndexAsset memory asset0;
         IndexAsset memory asset1;
-
-        if (tokenAsset0 == _assetA.asset) {
-            asset0 = _assetA;
-            asset1 = _assetB;
-        } else {
-            asset0 = _assetB;
-            asset1 = _assetA;
+        {
+            (address tokenAsset0, ) = sortAssets(_assetA.asset, _assetB.asset);
+            if (tokenAsset0 == _assetA.asset) {
+                asset0 = _assetA;
+                asset1 = _assetB;
+            } else {
+                asset0 = _assetB;
+                asset1 = _assetA;
+            }
         }
 
         // 2. Check that the index does not already exist.
@@ -300,8 +223,16 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         s_isIndex[index] = true;
         s_deployedIndexes.push(index);
 
-        // 8. Emit event with the index address and its assets addresses.
-        emit IndexCreated(index, asset0.asset, asset1.asset, msg.sender);
+        // 8. Emit event with the index address, its assets, weights and fee.
+        emit IndexCreated(
+            index,
+            asset0.asset,
+            asset1.asset,
+            asset0.weightPercentage,
+            asset1.weightPercentage,
+            _feePercentage,
+            msg.sender
+        );
 
         // 9. Return the index address and its assets addresses.
         return (index, asset0.asset, asset1.asset);
@@ -344,8 +275,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         );
 
         IIndex(_indexAddress).initialize(_depositor, _underlyingAmount0);
-
-        emit IndexInitialized(_indexAddress, msg.sender);
+        emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.INITIALIZE);
     }
 
     /**
@@ -406,11 +336,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
             _indexAddress
         );
-        if (!success) {
-            emit IndexRebalanceFailed(_indexAddress, reasonBytes);
-        } else {
-            emit IndexRebalanced(_indexAddress, msg.sender);
-        }
+        if (!success) emit IndexRebalanceFailed(_indexAddress, reasonBytes);
     }
 
     /**
@@ -431,11 +357,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
                 _indexAddresses[i]
             );
-            if (!success) {
+            if (!success)
                 emit IndexRebalanceFailed(_indexAddresses[i], reasonBytes);
-            } else {
-                emit IndexRebalanced(_indexAddresses[i], msg.sender);
-            }
         }
     }
 
@@ -453,11 +376,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
                 indexAddress
             );
-            if (!success) {
-                emit IndexRebalanceFailed(indexAddress, reasonBytes);
-            } else {
-                emit IndexRebalanced(indexAddress, msg.sender);
-            }
+            if (!success) emit IndexRebalanceFailed(indexAddress, reasonBytes);
         }
     }
 
@@ -470,25 +389,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         address _indexAddress,
         uint128 _newWeightAsset0 // With 4 decimals, e.g. 50000 = 5%
     ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
-        // The weight of asset1 is implicitly calculated as 100% - weight of asset0.
-        IIndex index = IIndex(_indexAddress);
-        (uint128 oldWeightAsset0, uint128 oldWeightAsset1) = index
-            .getAssetsWeights();
-        uint128 newWeightAsset1 = MAX_PERCENTAGE - _newWeightAsset0;
-
-        uint256 implementationTimestamp = index.proposeUpdateWeights(
-            _newWeightAsset0
-        );
-
-        emit NewIndexWeightsProposed(
-            _indexAddress,
-            msg.sender,
-            oldWeightAsset0,
-            oldWeightAsset1,
-            _newWeightAsset0,
-            newWeightAsset1,
-            implementationTimestamp
-        );
+        // The weight of asset1 is implicitly calculated by the index as 100% - weight of asset0.
+        IIndex(_indexAddress).proposeUpdateWeights(_newWeightAsset0);
+        emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.PROPOSE_WEIGHTS);
     }
 
     /**
@@ -505,11 +408,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         (bool success, bytes memory reasonBytes) = _executeSingleWeightUpdate(
             _indexAddress
         );
-        if (!success) {
-            emit WeightUpdateFailed(_indexAddress, reasonBytes);
-        } else {
-            emit WeightUpdateExecuted(_indexAddress);
-        }
+        if (!success) emit WeightsUpdateFailed(_indexAddress, reasonBytes);
     }
 
     /**
@@ -520,7 +419,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         address _indexAddress
     ) public isIndexInitialized(_indexAddress) onlyRole(ASSET_MANAGER_ROLE) {
         IIndex(_indexAddress).cancelWeightUpdate();
-        emit WeightUpdateCancelled(_indexAddress, msg.sender);
+        emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.CANCEL_WEIGHTS);
     }
 
     /**
@@ -541,11 +440,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
                 bool success,
                 bytes memory reasonBytes
             ) = _executeSingleWeightUpdate(_indexAddresses[i]);
-            if (!success) {
-                emit WeightUpdateFailed(_indexAddresses[i], reasonBytes);
-            } else {
-                emit WeightUpdateExecuted(_indexAddresses[i]);
-            }
+            if (!success)
+                emit WeightsUpdateFailed(_indexAddresses[i], reasonBytes);
         }
     }
 
@@ -563,11 +459,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
                 bool success,
                 bytes memory reasonBytes
             ) = _executeSingleWeightUpdate(s_initializedIndexes[i]);
-            if (!success) {
-                emit WeightUpdateFailed(s_initializedIndexes[i], reasonBytes);
-            } else {
-                emit WeightUpdateExecuted(s_initializedIndexes[i]);
-            }
+            if (!success)
+                emit WeightsUpdateFailed(s_initializedIndexes[i], reasonBytes);
         }
     }
 
@@ -582,10 +475,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             uint256 feeAmount,
             bool success,
             bytes memory reasonBytes
-        ) = _collectFeesFroSingleIndex(_indexAddress, msg.sender);
+        ) = _collectFeesFromSingleIndex(_indexAddress, msg.sender);
         if (success) {
             s_totalFeesCollected += feeAmount;
-            emit FeesCollected(_indexAddress, msg.sender, feeAmount);
         } else {
             emit FeesCollectionFailed(_indexAddress, msg.sender, reasonBytes);
         }
@@ -611,10 +503,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
                 uint256 feeAmount,
                 bool success,
                 bytes memory reasonBytes
-            ) = _collectFeesFroSingleIndex(indexAddress, msg.sender);
+            ) = _collectFeesFromSingleIndex(indexAddress, msg.sender);
             if (success) {
                 totalFeesCollected += feeAmount;
-                emit FeesCollected(indexAddress, msg.sender, feeAmount);
             } else {
                 emit FeesCollectionFailed(
                     indexAddress,
@@ -639,10 +530,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
                 uint256 feeAmount,
                 bool success,
                 bytes memory reasonBytes
-            ) = _collectFeesFroSingleIndex(indexAddress, msg.sender);
+            ) = _collectFeesFromSingleIndex(indexAddress, msg.sender);
             if (success) {
                 totalFeesCollected += feeAmount;
-                emit FeesCollected(indexAddress, msg.sender, feeAmount);
             } else {
                 emit FeesCollectionFailed(
                     indexAddress,
@@ -698,144 +588,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @notice Stores a timelocked upgrade proposal for an owned UUPS proxy.
-     * @dev Reverts with the proxy-specific "UpgradePending" error if a proposal is still within its delay,
-     *      and with the proxy-specific "InvalidImplementation" error if the implementation has no code,
-     *      equals the current one or does not return the ERC-1967 slot from proxiableUUID().
-     *      An executable or expired proposal is overwritten.
-     * @param _proxy The proxy to upgrade (i_swapManager or i_priceFeedManager).
-     * @param _newImplementation The new UUPS-compatible implementation.
-     * @param _data Optional calldata executed on the proxy after the upgrade.
-     * @return executableAt Timestamp from which the upgrade can be executed.
-     */
-    function _proposeUpgrade(
-        address _proxy,
-        address _newImplementation,
-        bytes calldata _data
-    ) internal returns (uint256 executableAt) {
-        PendingUpgrade storage pending = s_proxyToPendingUpgrade[_proxy];
-
-        // 1. Check there is no proposal still within its delay.
-        if (
-            pending.executableAt != 0 && block.timestamp < pending.executableAt
-        )
-            _revertForProxy(
-                _proxy,
-                IndexManager__SwapManagerUpgradePending.selector,
-                IndexManager__PriceFeedManagerUpgradePending.selector
-            );
-
-        // 2. Check the implementation is a different UUPS contract.
-        // SwapManager and PriceFeedManager expose the same getImplementation() selector.
-        bool invalidImplementation = _newImplementation.code.length == 0 ||
-            _newImplementation == ISwapManager(_proxy).getImplementation();
-        if (!invalidImplementation) {
-            try
-                IERC1822Proxiable(_newImplementation).proxiableUUID()
-            returns (bytes32 slot) {
-                invalidImplementation = slot != ERC1967Utils.IMPLEMENTATION_SLOT;
-            } catch {
-                invalidImplementation = true;
-            }
-        }
-        if (invalidImplementation)
-            _revertForProxy(
-                _proxy,
-                IndexManager__InvalidSwapManagerImplementation.selector,
-                IndexManager__InvalidPriceFeedManagerImplementation.selector
-            );
-
-        // 3. Store the pending upgrade.
-        executableAt = block.timestamp + PROXY_UPGRADE_DELAY;
-        pending.implementation = _newImplementation;
-        pending.data = _data;
-        pending.executableAt = executableAt;
-    }
-
-    /**
-     * @notice Executes the pending timelocked upgrade of an owned UUPS proxy.
-     * @dev Reverts with the proxy-specific "NoPending" error if there is no proposal or its delay has not elapsed,
-     *      and with the proxy-specific "Expired" error after PROXY_UPGRADE_EXECUTION_WINDOW.
-     *      The pending upgrade is cleared before the external call.
-     * @param _proxy The proxy to upgrade (i_swapManager or i_priceFeedManager).
-     * @return newImplementation The implementation the proxy was upgraded to.
-     */
-    function _executeUpgrade(
-        address _proxy
-    ) internal returns (address newImplementation) {
-        PendingUpgrade memory pending = s_proxyToPendingUpgrade[_proxy];
-
-        // 1. Check there is a pending upgrade past its delay and not expired.
-        if (pending.executableAt == 0 || block.timestamp < pending.executableAt)
-            _revertForProxy(
-                _proxy,
-                IndexManager__NoPendingSwapManagerUpgrade.selector,
-                IndexManager__NoPendingPriceFeedManagerUpgrade.selector
-            );
-        if (
-            block.timestamp >
-            pending.executableAt + PROXY_UPGRADE_EXECUTION_WINDOW
-        )
-            _revertForProxy(
-                _proxy,
-                IndexManager__SwapManagerUpgradeExpired.selector,
-                IndexManager__PriceFeedManagerUpgradeExpired.selector
-            );
-
-        // 2. Reset the pending upgrade before the external call.
-        delete s_proxyToPendingUpgrade[_proxy];
-
-        // 3. Upgrade the proxy. Only this contract (owner) is authorized.
-        newImplementation = pending.implementation;
-        UUPSUpgradeable(_proxy).upgradeToAndCall(
-            newImplementation,
-            pending.data
-        );
-    }
-
-    /**
-     * @notice Cancels the pending timelocked upgrade of an owned UUPS proxy, in any state (delay, executable, expired).
-     * @dev Reverts with the proxy-specific "NoPending" error if there is no proposal.
-     * @param _proxy The proxy whose pending upgrade is cancelled.
-     * @return cancelledImplementation The implementation of the cancelled proposal.
-     */
-    function _cancelUpgrade(
-        address _proxy
-    ) internal returns (address cancelledImplementation) {
-        PendingUpgrade storage pending = s_proxyToPendingUpgrade[_proxy];
-        if (pending.executableAt == 0)
-            _revertForProxy(
-                _proxy,
-                IndexManager__NoPendingSwapManagerUpgrade.selector,
-                IndexManager__NoPendingPriceFeedManagerUpgrade.selector
-            );
-
-        cancelledImplementation = pending.implementation;
-        delete s_proxyToPendingUpgrade[_proxy];
-    }
-
-    /**
-     * @notice Reverts with the parameterless custom error matching the proxy.
-     * @dev Keeps the SwapManager errors unchanged while sharing the upgrade logic with the PriceFeedManager.
-     * @param _proxy The proxy the error refers to.
-     * @param _swapManagerError Selector used when `_proxy` is the SwapManager.
-     * @param _priceFeedManagerError Selector used otherwise (PriceFeedManager).
-     */
-    function _revertForProxy(
-        address _proxy,
-        bytes4 _swapManagerError,
-        bytes4 _priceFeedManagerError
-    ) internal view {
-        bytes4 selector = _proxy == i_swapManager
-            ? _swapManagerError
-            : _priceFeedManagerError;
-        assembly {
-            mstore(0x00, selector)
-            revert(0x00, 0x04)
-        }
-    }
-
-    /**
      * @notice Checks that an asset has a price feed registered in the PriceFeedManager.
      * @dev Reverts with IndexManager__PriceFeedNotRegistered otherwise.
      * @param _asset The asset to check.
@@ -873,7 +625,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             abi.encode(
                 name,
                 symbol,
-                s_router,
+                i_router,
                 i_usdc,
                 i_priceFeedManager,
                 i_swapManager,
@@ -932,38 +684,34 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @notice This function is used internally by rebalanceMultipleIndexes and rebalanceAllIndexes to handle rebalance for each index, allowing for error handling
      * on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
      * @dev Rebalances a single index and returns whether it was successful and the reason if it failed.
+     * @dev Emits IndexActionTriggered (REBALANCE) on success.
      * @param _indexAddress The address of the index to rebalance.
      * @return success A boolean indicating whether the rebalance was successful.
-     * @return reasonBytes A bytes array containing the reason for failure if the rebalance was not successful, or "Unknown error" if the reason could not be determined.
+     * @return reasonBytes Raw revert data of the rebalance call, unchanged (may be empty); empty on success.
      */
     function _rebalanceSingleIndex(
         address _indexAddress
     ) internal returns (bool success, bytes memory reasonBytes) {
         try IIndex(_indexAddress).rebalanceIndex() {
+            emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.REBALANCE);
             return (true, "");
-        } catch Error(string memory _reason) {
-            success = false;
-            reasonBytes = bytes(_reason);
-        } catch (bytes memory _lowLevelData) {
-            success = false;
-            reasonBytes = _lowLevelData.length > 0
-                ? _lowLevelData
-                : bytes("Unknown error");
+        } catch (bytes memory reason) {
+            return (false, reason);
         }
-        return (success, reasonBytes);
     }
 
     /**
      * @notice Collects fees from a single index and transfers them to the specified fee collector address.
      * @notice This function is used internally by collectFeesFromMultipleIndexes and collectFeesFromAllIndexes to handle fee collection for each index, allowing for error handling on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
      * @param _indexAddress The address of the index from which to collect fees.
+     * @dev Emits IndexActionTriggered (COLLECT_FEES) on success, with `_feeCollector` (always msg.sender) as caller.
      * @param _feeCollector The address to which the collected fees should be transferred.
      * @return feeAmount The amount of fees collected from the index.
      * @return success A boolean indicating whether the fee collection and transfer were successful.
-     * @return reasonBytes A bytes containing the reason for failure if the fee collection or transfer was not successful, or "Unknown error" if the reason could not be determined.
+     * @return reasonBytes Raw revert data of the collectFees call, unchanged (may be empty); empty on success.
      */
-    // @audit-info: document the try/catch and revert pattern later
-    function _collectFeesFroSingleIndex(
+    // @audit-info : document the try/catch and revert pattern later
+    function _collectFeesFromSingleIndex(
         address _indexAddress,
         address _feeCollector
     )
@@ -974,24 +722,22 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         try index.collectFees(_feeCollector) returns (uint256 collectedFees) {
             feeAmount = collectedFees;
             success = true;
+            emit IndexActionTriggered(_indexAddress, _feeCollector, IndexAction.COLLECT_FEES);
             reasonBytes = "";
-        } catch Error(string memory _reason) {
+        } catch (bytes memory reason) {
             feeAmount = 0;
             success = false;
-            reasonBytes = bytes(_reason);
-        } catch {
-            feeAmount = 0;
-            success = false;
-            reasonBytes = _getErrorData();
+            reasonBytes = reason;
         }
     }
 
     /**
      * @dev Executes the weight update for a single index and returns whether it was successful and the reason if it failed.
+     * @dev Emits IndexActionTriggered (EXECUTE_WEIGHTS) on success.
      * @param _indexAddress The address of the index to execute the weight update for.
      * @return success A boolean indicating whether the weight update was successful.
-     * @return reasonBytes A bytes containing the reason for failure if the weight update was not successful, or "Unknown error" if the reason could not be determined.
-     * @notice This function uses try-catch to handle potential errors during the execution of the weight update. If an error occurs, it captures the error message and returns it along with a success flag set to false. If the call succeeds, it returns true with an empty reason.
+     * @return reasonBytes Raw revert data of the executeWeightUpdate call, unchanged (may be empty); empty on success.
+     * @notice This function uses try-catch to handle potential errors during the execution of the weight update. If an error occurs, it returns the raw revert data along with a success flag set to false. If the call succeeds, it returns true with an empty reason.
      * @notice This approach allows the contract to attempt weight updates on multiple indexes without reverting the entire transaction if one of them fails, while still providing feedback on which updates were successful and which were not.
      */
     function _executeSingleWeightUpdate(
@@ -1000,35 +746,12 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         IIndex index = IIndex(_indexAddress);
         try index.executeWeightUpdate() {
             success = true;
+            emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.EXECUTE_WEIGHTS);
             reasonBytes = "";
-        } catch Error(string memory _reason) {
-            reasonBytes = bytes(_reason);
-            success = false;
-        } catch {
-            reasonBytes = _getErrorData();
+        } catch (bytes memory reason) {
+            reasonBytes = reason;
             success = false;
         }
-    }
-
-    /**
-     * @dev Extracts custom error data from the last low-level call.
-     * When a custom error is reverted, it encodes the error selector (4 bytes) followed by parameters.
-     * This function retrieves the entire encoded error data.
-     * @return errorData The ABI-encoded error data including the 4-byte selector.
-     */
-    function _getErrorData() internal pure returns (bytes memory) {
-        uint256 len;
-        assembly {
-            len := returndatasize()
-        }
-        if (len > 0) {
-            bytes memory data = new bytes(len);
-            assembly {
-                returndatacopy(add(data, 32), 0, len)
-            }
-            return data;
-        }
-        return bytes("Unknown error");
     }
 
     // =========================================================================
@@ -1089,12 +812,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         index = s_getIndex[asset0][asset1];
     }
 
-    /**
-     * @dev Returns the address of the router used by the index manager
-     * @return address The address of the router
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function getRouterAddress() public view returns (address) {
-        return s_router;
+        return i_router;
     }
 
     /**
@@ -1105,36 +825,9 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         return i_swapManager;
     }
 
-    /**
-     * @notice Returns the pending SwapManager upgrade.
-     * @return implementation The proposed implementation (address(0) if none).
-     * @return data The calldata executed after the upgrade.
-     * @return executableAt Timestamp from which the upgrade can be executed (0 if none).
-     */
-    function getPendingSwapManagerUpgrade()
-        public
-        view
-        returns (address implementation, bytes memory data, uint256 executableAt)
-    {
-        PendingUpgrade memory pending = s_proxyToPendingUpgrade[i_swapManager];
-        return (pending.implementation, pending.data, pending.executableAt);
-    }
-
     /// @dev Inherit from IIndexManager. See interface for details.
     function getPriceFeedManagerAddress() public view returns (address) {
         return i_priceFeedManager;
-    }
-
-    /// @dev Inherit from IIndexManager. See interface for details.
-    function getPendingPriceFeedManagerUpgrade()
-        public
-        view
-        returns (address implementation, bytes memory data, uint256 executableAt)
-    {
-        PendingUpgrade memory pending = s_proxyToPendingUpgrade[
-            i_priceFeedManager
-        ];
-        return (pending.implementation, pending.data, pending.executableAt);
     }
 
     /**

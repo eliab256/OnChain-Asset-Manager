@@ -7,9 +7,7 @@ import {
 import {
     OwnableUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {
-    UUPSUpgradeable
-} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {UpgraderAuth} from "./UpgraderAuth.sol";
 import {
     ERC1967Utils
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -42,8 +40,8 @@ import {
 /**
  * @title PriceFeedManager
  * @notice Shared registry of Chainlink price feeds (asset => feed + maxDelay) used by every Index.
- * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager, which is
- *      the owner and the only account allowed to upgrade it (through its own timelock).
+ * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager, which is the owner.
+ *      Only the upgrader (the TimelockController) can upgrade it, see UpgraderAuth.
  *      Feed operations are restricted to the ASSET_MANAGER_ROLE holders of the IndexManager.
  *      Storage follows ERC-7201 namespaced layout.
  */
@@ -51,7 +49,7 @@ contract PriceFeedManager is
     IPriceFeedManager,
     Initializable,
     OwnableUpgradeable,
-    UUPSUpgradeable,
+    UpgraderAuth,
     ContractCodeConstants
 {
     ////////////////////////////////////////////////////////////////////
@@ -92,8 +90,12 @@ contract PriceFeedManager is
     }
 
     /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function initialize(address _indexManager) external initializer {
+    function initialize(
+        address _indexManager,
+        address _upgrader
+    ) external initializer {
         __Ownable_init(_indexManager);
+        __UpgraderAuth_init(_upgrader);
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -143,8 +145,8 @@ contract PriceFeedManager is
             revert PriceFeedManager__PriceFeedNotSet(_asset);
 
         // 2. Check there is no proposal still within its delay.
-        uint64 pendingExecutableAt = $.assetToPendingFeed[_asset].executableAt;
-        if (pendingExecutableAt != 0 && block.timestamp < pendingExecutableAt)
+        PendingFeed memory pending = $.assetToPendingFeed[_asset];
+        if (pending.executableAt != 0 && block.timestamp < pending.executableAt)
             revert PriceFeedManager__PriceFeedUpdatePending();
 
         // 3. Check the configuration changes and is valid.
@@ -152,7 +154,15 @@ contract PriceFeedManager is
             revert PriceFeedManager__SamePriceFeedConfig();
         _validatePriceFeed(_feed, _maxDelay);
 
-        // 4. Store the pending update.
+        // 4. Close an executable or expired proposal that is about to be overwritten.
+        if (pending.executableAt != 0)
+            emit PriceFeedManagerEvents.PriceFeedUpdateCancelled(
+                _asset,
+                pending.feed,
+                pending.maxDelay
+            );
+
+        // 5. Store the pending update.
         uint256 executableAt = block.timestamp + PRICE_FEED_UPDATE_DELAY;
         $.assetToPendingFeed[_asset] = PendingFeed({
             feed: _feed,
@@ -328,12 +338,6 @@ contract PriceFeedManager is
             revert PriceFeedManager__InvalidPriceFeed(_feed);
         }
     }
-
-    /**
-     * @notice Authorizes a UUPS upgrade.
-     * @dev Only the owner (IndexManager) can upgrade the implementation, through its own timelock.
-     */
-    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     /**
      * @notice Returns the ERC-7201 namespaced storage struct.

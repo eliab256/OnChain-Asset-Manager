@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../script/DeployPeriphery.s.sol";
 import {
@@ -21,8 +22,15 @@ import {
     MockV3Aggregator
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {UniversalRouterMock} from "../mocks/UniversalRouterMock.sol";
-import {IndexAsset, AssetAvailable} from "../../src/types.sol";
+import {IndexAsset, AssetAvailable, IndexAction} from "../../src/types.sol";
+import {IndexActionTriggered} from "../../src/events/IndexManagerEvents.sol";
 import {ContractCodeConstants} from "../../src/ContractCodeConstants.sol";
+import {
+    TimelockController
+} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {
+    UUPSUpgradeable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 abstract contract BaseTest is Test, ContractCodeConstants {
     MultiSigWallet public multiSigWallet;
@@ -42,6 +50,8 @@ abstract contract BaseTest is Test, ContractCodeConstants {
 
     SwapManager public swapManager;
     PriceFeedManager public priceFeedManager;
+    // Sole upgrader of the SwapManager, PriceFeedManager and Router proxies; the MultiSigWallet is proposer/executor/canceller.
+    TimelockController public timelock;
 
     // Mocks
     MockUSDC public mockUsdc;
@@ -107,6 +117,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             helperConfig,
             swapManager,
             multiSigWallet,
+            timelock,
             deployer
         ) = deployerPeriphery.run();
 
@@ -271,6 +282,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         vm.label(address(router), "Router");
         vm.label(address(indexManager), "IndexManager");
         vm.label(address(swapManager), "SwapManager");
+        vm.label(address(timelock), "TimelockController");
         vm.label(address(initializedIndex), "InitializedIndex");
         vm.label(address(nonInitializedIndex), "NonInitializedIndex");
 
@@ -456,6 +468,32 @@ abstract contract BaseTest is Test, ContractCodeConstants {
      * @dev Registers `_feed` for `_asset` in the PriceFeedManager as `deployer`
      *      (ASSET_MANAGER_ROLE holder) when the asset has no feed yet.
      */
+    /**
+     * @dev Upgrades `_proxy` to `_newImpl` through the timelock: the MultiSigWallet (proposer) schedules
+     *      upgradeToAndCall with the minimum delay, time is warped past it and the MultiSigWallet (executor) executes it.
+     *      Uses a salt derived from the inputs, so the same upgrade can be repeated with different data.
+     */
+    function _scheduleAndExecuteUpgrade(
+        address _proxy,
+        address _newImpl,
+        bytes memory _data
+    ) internal {
+        bytes memory payload = abi.encodeCall(
+            UUPSUpgradeable.upgradeToAndCall,
+            (_newImpl, _data)
+        );
+        bytes32 salt = keccak256(abi.encode(_proxy, _newImpl, _data, block.timestamp));
+        uint256 delay = timelock.getMinDelay();
+
+        vm.prank(address(multiSigWallet));
+        timelock.schedule(_proxy, 0, payload, bytes32(0), salt, delay);
+
+        vm.warp(block.timestamp + delay);
+
+        vm.prank(address(multiSigWallet));
+        timelock.execute(_proxy, 0, payload, bytes32(0), salt);
+    }
+
     function _registerPriceFeedIfMissing(
         address _asset,
         address _feed,
@@ -677,6 +715,110 @@ abstract contract BaseTest is Test, ContractCodeConstants {
         }
 
         _refreshExchangeRates();
+    }
+
+    // =========================================================================
+    //  Helpers — IndexManager IndexActionTriggered logs
+    // =========================================================================
+
+    /// @dev Number of logs emitted by the IndexManager with signature `_sig`.
+    function _countManagerEvents(
+        Vm.Log[] memory _logs,
+        bytes32 _sig
+    ) internal view returns (uint256 count) {
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (
+                _logs[i].emitter == address(indexManager) &&
+                _logs[i].topics[0] == _sig
+            ) count++;
+        }
+    }
+
+    /// @dev Number of logs emitted by the IndexManager with signature `_sig`
+    ///      whose first indexed topic is `_index`.
+    function _countManagerEvents(
+        Vm.Log[] memory _logs,
+        bytes32 _sig,
+        address _index
+    ) internal view returns (uint256 count) {
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (
+                _logs[i].emitter == address(indexManager) &&
+                _logs[i].topics[0] == _sig &&
+                address(uint160(uint256(_logs[i].topics[1]))) == _index
+            ) count++;
+        }
+    }
+
+    /// @dev Asserts the IndexManager emitted exactly one IndexActionTriggered for `_index`,
+    ///      with `_caller` and `_action` as topics and no data. Returns its position in `_logs`.
+    function _assertSingleActionTriggeredFor(
+        Vm.Log[] memory _logs,
+        address _index,
+        address _caller,
+        IndexAction _action
+    ) internal view returns (uint256 position) {
+        uint256 count;
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (
+                _logs[i].emitter != address(indexManager) ||
+                _logs[i].topics[0] != IndexActionTriggered.selector ||
+                address(uint160(uint256(_logs[i].topics[1]))) != _index
+            ) continue;
+
+            count++;
+            position = i;
+            assertEq(
+                _logs[i].topics.length,
+                4,
+                "IndexActionTriggered must have 3 indexed params"
+            );
+            assertEq(
+                address(uint160(uint256(_logs[i].topics[2]))),
+                _caller,
+                "IndexActionTriggered must log the caller"
+            );
+            assertEq(
+                uint256(_logs[i].topics[3]),
+                uint256(_action),
+                "IndexActionTriggered must log the action"
+            );
+            assertEq(
+                _logs[i].data.length,
+                0,
+                "IndexActionTriggered has no data"
+            );
+        }
+        assertEq(
+            count,
+            1,
+            "IndexActionTriggered must be emitted exactly once for the index"
+        );
+    }
+
+    /// @dev Asserts the only log emitted by the IndexManager is
+    ///      IndexActionTriggered(_index, _caller, _action). Returns its position in `_logs`.
+    function _assertOnlyActionTriggered(
+        Vm.Log[] memory _logs,
+        address _index,
+        address _caller,
+        IndexAction _action
+    ) internal view returns (uint256 position) {
+        position = _assertSingleActionTriggeredFor(
+            _logs,
+            _index,
+            _caller,
+            _action
+        );
+        uint256 managerLogCount;
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (_logs[i].emitter == address(indexManager)) managerLogCount++;
+        }
+        assertEq(
+            managerLogCount,
+            1,
+            "IndexManager must emit only IndexActionTriggered"
+        );
     }
 
     // =========================================================================

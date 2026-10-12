@@ -2,8 +2,9 @@
 pragma solidity ^0.8.0;
 
 import {SwapType, SwapRoute} from "../types.sol";
+import {IUpgraderAuth} from "./IUpgraderAuth.sol";
 
-interface ISwapManager {
+interface ISwapManager is IUpgraderAuth {
     function registerIndex(
         address _indexAddress,
         SwapRoute memory _routeAsset0Usdc,
@@ -17,7 +18,14 @@ interface ISwapManager {
         SwapRoute memory _newRoute
     ) external;
 
-    function initialize(address _indexManager) external;
+    /**
+     * @notice Initializes the proxy storage.
+     * @dev Called once by the IndexManager constructor through the ERC1967Proxy deployment.
+     *      Reverts with UpgraderAuth__ZeroAddress if `_upgrader` is zero.
+     * @param _indexManager The IndexManager address, set as owner (only account allowed to register and update routes).
+     * @param _upgrader The only account allowed to upgrade the proxy (the TimelockController).
+     */
+    function initialize(address _indexManager, address _upgrader) external;
 
     function getImplementation() external view returns (address);
 

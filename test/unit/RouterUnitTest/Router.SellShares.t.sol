@@ -239,9 +239,9 @@ contract RouterTest is BaseTest {
                     "event must log user1 as redeemer"
                 );
 
-                (uint256 logShares, , , uint256 logUsdcOut) = abi.decode(
+                (uint256 logShares, , , uint256 logUsdcOut, ) = abi.decode(
                     logs[i].data,
-                    (uint256, uint256, uint256, uint256)
+                    (uint256, uint256, uint256, uint256, uint256)
                 );
                 assertEq(logShares, sharesBought, "logged shares mismatch");
                 assertGt(logUsdcOut, 0, "logged USDC out must be > 0");

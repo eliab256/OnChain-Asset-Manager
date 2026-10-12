@@ -15,6 +15,10 @@ import {CodeConstants} from "../../../script/CodeConstants.sol";
 import {
     ERC1967Utils
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {
+    TimelockController
+} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {IUpgraderAuth} from "../../../src/Interface/IUpgraderAuth.sol";
 
 contract DeployPeripheryTest is Test, CodeConstants {
     MultiSigWallet public multiSigWallet;
@@ -22,6 +26,7 @@ contract DeployPeripheryTest is Test, CodeConstants {
     Router public mainnetRouter;
     SwapManager public mainnetSwapManager;
     HelperConfig public isolatedHelperConfig;
+    TimelockController public timelock;
     address public mainnetDeployer;
 
     modifier selectFork(string memory rpcAlias) {
@@ -41,6 +46,7 @@ contract DeployPeripheryTest is Test, CodeConstants {
             isolatedHelperConfig,
             mainnetSwapManager,
             multiSigWallet,
+            timelock,
             mainnetDeployer
         ) = mainnetDeployerPeriphery.run();
 
@@ -90,6 +96,7 @@ contract DeployPeripheryTest is Test, CodeConstants {
             isolatedHelperConfig,
             mainnetSwapManager,
             multiSigWallet,
+            timelock,
             mainnetDeployer
         ) = mainnetDeployerPeriphery.run();
         PriceFeedManager priceFeedManager = mainnetDeployerPeriphery
@@ -155,5 +162,100 @@ contract DeployPeripheryTest is Test, CodeConstants {
         );
     }
 
+    ////////////////////////////////////////////////////////////////////
+    ////////////////////////// TimelockController //////////////////////
+    ////////////////////////////////////////////////////////////////////
 
+    function testDeployPeripheryDeploysTimelockOnMainnet()
+        public
+        selectFork("mainnet")
+    {
+        DeployPeriphery deployPeriphery = new DeployPeriphery();
+        (
+            mainnetIndexManager,
+            mainnetRouter,
+            isolatedHelperConfig,
+            mainnetSwapManager,
+            multiSigWallet,
+            timelock,
+            mainnetDeployer
+        ) = deployPeriphery.run();
+
+        _assertTimelockSetup(deployPeriphery);
+    }
+
+    function testDeployPeripheryDeploysTimelockOnAnvil() public {
+        DeployPeriphery deployPeriphery = new DeployPeriphery();
+        (
+            mainnetIndexManager,
+            mainnetRouter,
+            isolatedHelperConfig,
+            mainnetSwapManager,
+            multiSigWallet,
+            timelock,
+            mainnetDeployer
+        ) = deployPeriphery.run();
+
+        _assertTimelockSetup(deployPeriphery);
+    }
+
+    /// @dev Shared assertions on the TimelockController wiring produced by DeployPeriphery.run().
+    function _assertTimelockSetup(DeployPeriphery _deployPeriphery) internal view {
+        assertTrue(address(timelock) != address(0), "timelock must be deployed");
+        assertTrue(address(timelock).code.length > 0, "timelock must have code");
+        assertEq(
+            address(_deployPeriphery.timelock()),
+            address(timelock),
+            "script must expose the returned timelock"
+        );
+        assertEq(timelock.getMinDelay(), TIMELOCK_MIN_DELAY, "min delay");
+        assertEq(timelock.getMinDelay(), 2 days, "min delay must be 2 days");
+
+        bytes32 proposerRole = timelock.PROPOSER_ROLE();
+        bytes32 executorRole = timelock.EXECUTOR_ROLE();
+        bytes32 cancellerRole = timelock.CANCELLER_ROLE();
+        bytes32 adminRole = timelock.DEFAULT_ADMIN_ROLE();
+        address multiSig = address(multiSigWallet);
+
+        assertTrue(timelock.hasRole(proposerRole, multiSig), "multisig must be proposer");
+        assertTrue(timelock.hasRole(executorRole, multiSig), "multisig must be executor");
+        assertTrue(timelock.hasRole(cancellerRole, multiSig), "multisig must be canceller");
+        assertFalse(timelock.hasRole(adminRole, multiSig), "multisig must not be timelock admin");
+
+        assertFalse(timelock.hasRole(proposerRole, mainnetDeployer), "deployer must not be proposer");
+        assertFalse(timelock.hasRole(executorRole, mainnetDeployer), "deployer must not be executor");
+        assertFalse(timelock.hasRole(cancellerRole, mainnetDeployer), "deployer must not be canceller");
+        assertFalse(timelock.hasRole(adminRole, mainnetDeployer), "deployer must not be timelock admin");
+
+        // Open executor role (address(0)) must not be granted: only the multisig can execute.
+        assertFalse(timelock.hasRole(executorRole, address(0)), "executor role must not be open");
+        // OZ v5 grants DEFAULT_ADMIN_ROLE to the timelock itself; with admin = address(0) nobody else holds it.
+        assertTrue(timelock.hasRole(adminRole, address(timelock)), "timelock must self-administer");
+        assertFalse(timelock.hasRole(adminRole, address(0)), "address(0) must not be admin");
+        assertFalse(
+            timelock.hasRole(adminRole, address(mainnetIndexManager)),
+            "IndexManager must not be timelock admin"
+        );
+        assertFalse(
+            timelock.hasRole(adminRole, address(_deployPeriphery)),
+            "script contract must not be timelock admin"
+        );
+
+        // The timelock is the only upgrader of the three proxies.
+        assertEq(
+            IUpgraderAuth(address(mainnetSwapManager)).getUpgrader(),
+            address(timelock),
+            "SwapManager upgrader"
+        );
+        assertEq(
+            IUpgraderAuth(mainnetIndexManager.getPriceFeedManagerAddress()).getUpgrader(),
+            address(timelock),
+            "PriceFeedManager upgrader"
+        );
+        assertEq(
+            IUpgraderAuth(address(mainnetRouter)).getUpgrader(),
+            address(timelock),
+            "Router upgrader"
+        );
+    }
 }

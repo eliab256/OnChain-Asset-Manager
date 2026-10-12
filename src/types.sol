@@ -42,18 +42,6 @@ struct PendingFeed {
 }
 
 /**
- * @notice Timelocked upgrade of a UUPS proxy owned by the IndexManager.
- * @param implementation The proposed implementation address.
- * @param data           Calldata executed on the proxy after the upgrade (empty for none).
- * @param executableAt   Timestamp from which the upgrade can be executed (0 if no pending upgrade).
- */
-struct PendingUpgrade {
-    address implementation;
-    bytes data;
-    uint256 executableAt;
-}
-
-/**
  * @notice Snapshot of prices, reserves, and USD values captured at the start of
  *         a mint or redeem operation to avoid repeated storage reads and external
  *         price-feed calls throughout the function.
@@ -89,6 +77,24 @@ enum AssetAvailable {
     WBTC,
     LINK,
     COMP
+}
+
+/**
+ * @notice Action triggered on an index through the IndexManager, logged by IndexActionTriggered.
+ * @param INITIALIZE      Index initialization with the first deposit.
+ * @param REBALANCE       Rebalance of the index reserves towards the target weights.
+ * @param PROPOSE_WEIGHTS Proposal of a timelocked target weights update.
+ * @param EXECUTE_WEIGHTS Execution of the pending target weights update.
+ * @param CANCEL_WEIGHTS  Cancellation of the pending target weights update.
+ * @param COLLECT_FEES    Collection of the accrued fees.
+ */
+enum IndexAction {
+    INITIALIZE,
+    REBALANCE,
+    PROPOSE_WEIGHTS,
+    EXECUTE_WEIGHTS,
+    CANCEL_WEIGHTS,
+    COLLECT_FEES
 }
 
 /**

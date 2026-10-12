@@ -79,6 +79,8 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
         }
 
         i_requiredConfirmations = _required;
+
+        emit MultiSigInitialized(_owners, _required);
     }
 
     // =========================================================================
@@ -339,5 +341,7 @@ contract MultiSigWallet is IMultiSigWallet,EIP712 {
         return s_isConfirmed[_txId][_owner];
     }
 
-    receive() external payable {}
+    receive() external payable {
+        if (msg.value > 0) emit Deposit(msg.sender, msg.value);
+    }
 }

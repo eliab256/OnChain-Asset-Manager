@@ -5,8 +5,10 @@ import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
 import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
+import {Router} from "../../../src/Router.sol";
+import {Index} from "../../../src/Index.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute} from "../../../src/types.sol";
+import {IndexAsset, SwapRoute, IndexAction} from "../../../src/types.sol";
 import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -59,12 +61,15 @@ contract IndexManagerTest is BaseTest {
     {
         SwapManager swapManagerImplementation = new SwapManager();
         PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        Router routerImplementation = new Router();
         vm.prank(deployer);
         freshIndexManager = new IndexManager(
             address(mockUsdc),
             address(mockUniRouter),
             address(swapManagerImplementation),
-            address(priceFeedManagerImplementation)
+            address(priceFeedManagerImplementation),
+            address(routerImplementation),
+            address(timelock)
         );
     }
 
@@ -178,16 +183,40 @@ contract IndexManagerTest is BaseTest {
             bytes32 topic1 = fullEvent.topics[1]; //is indexed
             bytes32 topic2 = fullEvent.topics[2]; //is indexed
             bytes32 topic3 = fullEvent.topics[3]; //is indexed
-            bytes memory data = fullEvent.data; //is not indexed
 
             testIndex = address(uint160(uint256(topic1)));
             testToken0 = address(uint160(uint256(topic2)));
             testToken1 = address(uint160(uint256(topic3)));
-            testCaller = abi.decode(data, (address));
         }
+        {
+            (
+                uint128 testWeight0,
+                uint128 testWeight1,
+                uint32 testFee,
+                address caller
+            ) = abi.decode(
+                    fullEvent.data,
+                    (uint128, uint128, uint32, address)
+                );
+            testCaller = caller;
+            uint128 expectedWeight0 = sortedToken0 == address(mockWeth)
+                ? wethAsset60.weightPercentage
+                : linkAsset40.weightPercentage;
+            assertEq(testWeight0, expectedWeight0, "asset0 weight mismatch");
+            assertEq(
+                testWeight1,
+                MAX_WEIGHT - expectedWeight0,
+                "asset1 weight mismatch"
+            );
+            assertEq(testFee, validFeePercentage, "fee percentage mismatch");
+        }
+
+        assertEq(fullEvent.emitter, address(indexManager));
         assertEq(
             eventSignature,
-            keccak256("IndexCreated(address,address,address,address)")
+            keccak256(
+                "IndexCreated(address,address,address,uint128,uint128,uint32,address)"
+            )
         );
         assertEq(
             testIndex,
@@ -377,7 +406,6 @@ contract IndexManagerTest is BaseTest {
 
         // Register both index assets but not USDC, so only the USDC check can fail.
         vm.startPrank(deployer);
-        freshIndexManager.setRouterAddress(address(router));
         freshPriceFeedManager.registerPriceFeed(
             address(mockWeth),
             address(mockWethPriceFeed),
@@ -458,14 +486,40 @@ contract IndexManagerTest is BaseTest {
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
     }
 
-    function testCreateIndexRevertIfRouterNotSet() public {
-        // Remove the router so the guard triggers.
-        vm.prank(deployer);
-        indexManager.setRouterAddress(address(0));
+    function testCreateIndexGrantsRouterRoleToRouterProxy() public {
+        address routerProxy = indexManager.getRouterAddress();
 
-        vm.prank(deployer);
-        vm.expectRevert(IndexManager__RouterAddressNotSet.selector);
-        indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
+        (address indexAddress, , ) = _createDefaultIndex(
+            address(mockWeth),
+            address(mockLink)
+        );
+
+        Index newIndex = Index(indexAddress);
+        assertTrue(
+            newIndex.hasRole(newIndex.ROUTER_ROLE(), routerProxy),
+            "new index must grant ROUTER_ROLE to the router proxy"
+        );
+        assertTrue(
+            initializedIndex.hasRole(
+                initializedIndex.ROUTER_ROLE(),
+                routerProxy
+            ),
+            "initialized index must grant ROUTER_ROLE to the router proxy"
+        );
+        assertTrue(
+            nonInitializedIndex.hasRole(
+                nonInitializedIndex.ROUTER_ROLE(),
+                routerProxy
+            ),
+            "non initialized index must grant ROUTER_ROLE to the router proxy"
+        );
+        assertFalse(
+            newIndex.hasRole(
+                newIndex.ROUTER_ROLE(),
+                Router(routerProxy).getImplementation()
+            ),
+            "the router implementation must not hold ROUTER_ROLE"
+        );
     }
 
     function testCreateIndexRevertIfCallerNotAssetManager() public {
@@ -538,31 +592,44 @@ contract IndexManagerTest is BaseTest {
         );
 
         Vm.Log[] memory vmLogs = vm.getRecordedLogs();
+        // Initialization data is logged by the Index, with the depositor;
+        // the IndexManager only logs IndexActionTriggered(INITIALIZE).
         bytes32 expectedSignature = keccak256(
-            "IndexInitialized(address,address)"
+            "IndexInitialized(address,uint256,uint256,uint256,uint256,uint256)"
         );
 
         bool found;
         for (uint256 i = 0; i < vmLogs.length; i++) {
             if (
-                vmLogs[i].emitter == address(indexManager) &&
+                vmLogs[i].emitter == address(nonInitializedIndex) &&
                 vmLogs[i].topics[0] == expectedSignature
             ) {
                 found = true;
-                address indexAddressFromEvent = address(
+                address depositorFromEvent = address(
                     uint160(uint256(vmLogs[i].topics[1]))
                 );
-                address callerFromEvent = address(
-                    uint160(uint256(vmLogs[i].topics[2]))
-                );
+                (uint256 amount0FromEvent, , , , uint256 sharesFromEvent) = abi
+                    .decode(
+                        vmLogs[i].data,
+                        (uint256, uint256, uint256, uint256, uint256)
+                    );
 
-                assertEq(indexAddressFromEvent, address(nonInitializedIndex));
-                assertEq(callerFromEvent, deployer);
-                break;
+                assertEq(depositorFromEvent, deployer);
+                assertEq(amount0FromEvent, initAmount);
+                assertEq(
+                    sharesFromEvent,
+                    nonInitializedIndex.balanceOf(deployer)
+                );
             }
         }
 
-        assertTrue(found, "IndexInitialized not emitted by IndexManager");
+        assertTrue(found, "IndexInitialized not emitted by Index");
+        _assertOnlyActionTriggered(
+            vmLogs,
+            address(nonInitializedIndex),
+            deployer,
+            IndexAction.INITIALIZE
+        );
     }
 
     function testInitializeIndexRevertIfAmountIsZero() public {

@@ -19,6 +19,7 @@ import {
 
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/events/IndexManagerEvents.sol";
+import "../../../src/events/IndexEvents.sol";
 import "../../../src/errors/IndexErrors.sol";
 
 contract IndexManagerTest is BaseTest {
@@ -150,7 +151,10 @@ contract IndexManagerTest is BaseTest {
 
         for (uint256 i = 0; i < logs.length; i++) {
             Vm.Log memory log = logs[i];
-            if (log.topics[0] == FeesCollectionFailed.selector) {
+            if (
+                log.emitter == address(indexManager) &&
+                log.topics[0] == FeesCollectionFailed.selector
+            ) {
                 feesCollectedFailsEmitted = true;
                 indexFromEvent = address(uint160(uint256(log.topics[1])));
                 collectorFromEvent = address(uint160(uint256(log.topics[2])));
@@ -169,9 +173,9 @@ contract IndexManagerTest is BaseTest {
         );
         assertEq(collectorFromEvent, feeCollector, "Wrong collector in event");
         assertEq(
-            bytes4(reasonFromEvent),
-            Index__NoFeesToCollect.selector,
-            "Wrong reason in event"
+            reasonFromEvent,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
+            "Reason must be the raw Index__NoFeesToCollect revert data"
         );
     }
 
@@ -196,10 +200,11 @@ contract IndexManagerTest is BaseTest {
         uint256 amountFromEvent;
         for (uint256 i = 0; i < logs.length; i++) {
             Vm.Log memory log = logs[i];
+            // FeesCollected is emitted by the Index (the IndexManager duplicate was removed)
             if (log.topics[0] == FeesCollected.selector) {
                 feesCollectedEmitted = true;
-                indexFromEvent = address(uint160(uint256(log.topics[1])));
-                collectorFromEvent = address(uint160(uint256(log.topics[2])));
+                indexFromEvent = log.emitter;
+                collectorFromEvent = address(uint160(uint256(log.topics[1])));
                 amountFromEvent = abi.decode(log.data, (uint256));
                 break;
             }
@@ -312,11 +317,10 @@ contract IndexManagerTest is BaseTest {
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].topics[0] == expectedSuccessSig) {
-                indexesFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
-                );
+                // FeesCollected comes from the Index itself: index = emitter, collector = topics[1]
+                indexesFromEvent[totalFeesEventCount] = logs[i].emitter;
                 collectorFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[2]))
+                    uint160(uint256(logs[i].topics[1]))
                 );
                 amountFromEvent[feesCollectedCount] = abi.decode(
                     logs[i].data,
@@ -365,8 +369,8 @@ contract IndexManagerTest is BaseTest {
             "Wrong amount in event"
         );
         assertEq(
-            bytes4(reasonFromEvent),
-            Index__NoFeesToCollect.selector,
+            reasonFromEvent,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
             "Wrong reason in event"
         );
     }
@@ -432,11 +436,10 @@ contract IndexManagerTest is BaseTest {
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].topics[0] == expectedSuccessSig) {
-                indexesFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
-                );
+                // FeesCollected comes from the Index itself: index = emitter, collector = topics[1]
+                indexesFromEvent[totalFeesEventCount] = logs[i].emitter;
                 collectorFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[2]))
+                    uint160(uint256(logs[i].topics[1]))
                 );
                 amountFromEvent[feesCollectedCount] = abi.decode(
                     logs[i].data,
@@ -460,8 +463,8 @@ contract IndexManagerTest is BaseTest {
         assertEq(feesCollectedCount, 2);
 
         assertEq(
-            bytes4(reasonFromEvent),
-            Index__NoFeesToCollect.selector,
+            reasonFromEvent,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
             "Wrong reason in event"
         );
         assertEq(collectorFromEvent[0], deployer, "Wrong collector in event");

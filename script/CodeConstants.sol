@@ -17,6 +17,9 @@ abstract contract CodeConstants {
     //Multisig configuration
     uint256 public constant MULTISIG_REQUIRED_CONFIRMATIONS = 2;
 
+    // Minimum delay of the TimelockController that upgrades the SwapManager, PriceFeedManager and Router proxies
+    uint256 public constant TIMELOCK_MIN_DELAY = 2 days;
+
     ////////////////////////////
     ////////// MAINNET /////////
     ////////////////////////////

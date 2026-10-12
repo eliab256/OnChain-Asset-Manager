@@ -2,13 +2,17 @@
 pragma solidity ^0.8.0;
 
 import {FeedConfig, PendingFeed} from "../types.sol";
+import {IUpgraderAuth} from "./IUpgraderAuth.sol";
 
-interface IPriceFeedManager {
+interface IPriceFeedManager is IUpgraderAuth {
     /**
      * @notice Initializes the proxy storage.
-     * @param _indexManager The IndexManager address, set as owner (only account allowed to upgrade).
+     * @dev Called once by the IndexManager constructor through the ERC1967Proxy deployment.
+     *      Reverts with UpgraderAuth__ZeroAddress if `_upgrader` is zero.
+     * @param _indexManager The IndexManager address, set as owner; its ASSET_MANAGER_ROLE holders manage the feeds.
+     * @param _upgrader The only account allowed to upgrade the proxy (the TimelockController).
      */
-    function initialize(address _indexManager) external;
+    function initialize(address _indexManager, address _upgrader) external;
 
     /**
      * @notice Registers the first Chainlink price feed of an asset. Effective immediately.
@@ -29,7 +33,8 @@ interface IPriceFeedManager {
      * @notice Proposes the replacement of the price feed configuration of an asset, executable after PRICE_FEED_UPDATE_DELAY.
      * @dev Callable only by ASSET_MANAGER_ROLE holders on the IndexManager. Reverts if the asset has no feed,
      *      if a proposal is still within its delay, if (feed, maxDelay) equals the current configuration,
-     *      or if the new configuration is invalid. Overwrites an executable or expired proposal.
+     *      or if the new configuration is invalid. Overwrites an executable or expired proposal,
+     *      emitting PriceFeedUpdateCancelled for it first.
      * @param _asset The asset whose feed configuration is replaced.
      * @param _feed The new Chainlink price feed address.
      * @param _maxDelay The new maximum age, in seconds, of the latest answer.

@@ -22,6 +22,9 @@ import {SwapManager} from "../../../src/SwapManager.sol";
 import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
+    TimelockController
+} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
@@ -36,6 +39,7 @@ contract IntegrationBase is Test {
     SwapManager swapManager;
     PriceFeedManager priceFeedManager;
     Router router;
+    TimelockController timelock;
 
     /**
      * @notice Ierc20 interface for weth is ok because we only interact with it for transfers and
@@ -73,6 +77,7 @@ contract IntegrationBase is Test {
             helperConfig,
             swapManager,
             multiSigWallet,
+            timelock,
             deployer
         ) = deployScript.run();
 

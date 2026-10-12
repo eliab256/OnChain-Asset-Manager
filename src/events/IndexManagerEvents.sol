@@ -1,81 +1,65 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-event RouterAddressSet(address indexed newRouter, address indexed setter);
+import {IndexAction} from "../types.sol";
 
-event SwapManagerUpgradeProposed(
-    address indexed newImplementation,
-    uint256 executableAt,
-    address indexed proposer
-);
-
-event SwapManagerUpgraded(
-    address indexed newImplementation,
-    address indexed executor
-);
-
-event SwapManagerUpgradeCancelled(
-    address indexed cancelledImplementation,
-    address indexed canceller
-);
-
-event PriceFeedManagerUpgradeProposed(
-    address indexed newImplementation,
-    uint256 executableAt,
-    address indexed proposer
-);
-
-event PriceFeedManagerUpgraded(
-    address indexed newImplementation,
-    address indexed executor
-);
-
-event PriceFeedManagerUpgradeCancelled(
-    address indexed cancelledImplementation,
-    address indexed canceller
-);
-
+/**
+ * @notice Emitted when a new index is deployed.
+ * @param indexAddress Address of the deployed index.
+ * @param asset0 Address of asset0 (the lower of the two sorted asset addresses).
+ * @param asset1 Address of asset1 (the higher of the two sorted asset addresses).
+ * @param asset0Weight Initial asset0 target weight, in weight units (1_000_000 = 100%).
+ * @param asset1Weight Initial asset1 target weight, in weight units (1_000_000 = 100%).
+ * @param feePercentage Fee charged on mint and redeem, in percentage units (1_000_000 = 100%).
+ * @param assetManager Address that created the index.
+ */
 event IndexCreated(
     address indexed indexAddress,
     address indexed asset0,
     address indexed asset1,
+    uint128 asset0Weight,
+    uint128 asset1Weight,
+    uint32 feePercentage,
     address assetManager
 );
 
-event IndexInitialized(
-    address indexed indexAddress,
-    address indexed assetManager
-);
-event IndexRebalanced(address indexed indexAddress, address indexed rebalancer);
-
+/**
+ * @notice Emitted when a rebalance triggered by the manager reverts; the batch continues.
+ * @param indexAddress Address of the index whose rebalance failed.
+ * @param reasonData Raw revert data of the rebalance call, unchanged (may be empty).
+ */
 event IndexRebalanceFailed(address indexed indexAddress, bytes reasonData);
 
-event NewIndexWeightsProposed(
-    address indexed indexAddress,
-    address indexed assetManager,
-    uint128 oldWeightAsset0,
-    uint128 oldWeightAsset1,
-    uint128 newWeightAsset0,
-    uint128 newWeightAsset1,
-    uint256 implementationTimestamp
-);
-event FeesCollected(
-    address indexed indexAddress,
-    address indexed feeCollector,
-    uint256 feeAmount
-);
-
+/**
+ * @notice Emitted when a fee collection triggered by the manager reverts; the batch continues.
+ * @param indexAddress Address of the index whose fee collection failed.
+ * @param feeCollector Address that would have received the fees.
+ * @param reasonData Raw revert data of the collectFees call, unchanged (may be empty).
+ */
 event FeesCollectionFailed(
     address indexed indexAddress,
     address indexed feeCollector,
     bytes reasonData
 );
 
-event WeightUpdateExecuted(address indexed indexAddress);
+/**
+ * @notice Emitted when a weights update execution triggered by the manager reverts; the batch continues.
+ * @param indexAddress Address of the index whose weights update failed.
+ * @param reasonData Raw revert data of the executeWeightUpdate call, unchanged (may be empty).
+ */
+event WeightsUpdateFailed(address indexed indexAddress, bytes reasonData);
 
-event WeightUpdateCancelled(
+/**
+ * @notice Emitted when an action triggered through the manager on an index succeeds.
+ * @dev Not emitted when the call to the index reverts (see IndexRebalanceFailed, WeightsUpdateFailed, FeesCollectionFailed).
+ *      Carries no state data: amounts, weights, reserves and fees are in the event emitted by the index in the same transaction.
+ *      For EXECUTE_WEIGHTS the rebalance outcome is in the Index events WeightsUpdateRebalanceFailed, WeightsUpdateRebalanceSkipped or IndexRebalanced.
+ * @param indexAddress Address of the index the action was triggered on.
+ * @param caller msg.sender of the IndexManager call (the multisig or the EOA holding the required role).
+ * @param action Action triggered on the index.
+ */
+event IndexActionTriggered(
     address indexed indexAddress,
-    address indexed assetManager
+    address indexed caller,
+    IndexAction indexed action
 );
-
-event WeightUpdateFailed(address indexed indexAddress, bytes reasonData);

@@ -133,9 +133,13 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
     }
 
     function testProposeUpdateWeightsEmitsEvent() public {
+        (uint128 oldWeight0, uint128 oldWeight1) = initializedIndex
+            .getAssetsWeights();
         vm.prank(address(indexManager));
-        vm.expectEmit(true, true, true, true);
+        vm.expectEmit(true, true, true, true, address(initializedIndex));
         emit WeightsUpdateProposed(
+            oldWeight0,
+            oldWeight1,
             weight70,
             weight30,
             block.timestamp + WEIGHT_UPDATE_DELAY
@@ -219,25 +223,29 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         initializedIndex.executeWeightUpdate();
         vm.stopPrank();
 
-        bytes32 expectedRebalanceFailedEventSig = WeightUpdateRebalanceFailed
+        bytes32 expectedRebalanceSkippedEventSig = WeightsUpdateRebalanceSkipped
             .selector;
-        bytes32 expectedWeightUpdateExecutedEventSig = IndexWeightsUpdated
+        bytes32 rebalanceFailedEventSig = WeightsUpdateRebalanceFailed
             .selector;
+        bytes32 expectedWeightUpdateExecutedEventSig = WeightsUpdated.selector;
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool rebalanceSkippedEventEmitted;
         bool rebalanceFailedEventEmitted;
         bool weightUpdateExecutedEventEmitted;
 
-        uint256 rebalanceFaildeIndex;
         uint256 weightUpdateExecutedIndex;
         for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(initializedIndex)) continue;
             if (logs[i].topics[0] == expectedWeightUpdateExecutedEventSig) {
                 weightUpdateExecutedEventEmitted = true;
                 weightUpdateExecutedIndex = i;
             }
-            if (logs[i].topics[0] == expectedRebalanceFailedEventSig) {
+            if (logs[i].topics[0] == expectedRebalanceSkippedEventSig) {
+                rebalanceSkippedEventEmitted = true;
+            }
+            if (logs[i].topics[0] == rebalanceFailedEventSig) {
                 rebalanceFailedEventEmitted = true;
-                rebalanceFaildeIndex = i;
             }
         }
 
@@ -246,25 +254,17 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
             "Weights update executed event should be emitted"
         );
         assertTrue(
+            rebalanceSkippedEventEmitted,
+            "Rebalance skipped event should be emitted"
+        );
+        assertFalse(
             rebalanceFailedEventEmitted,
-            "Rebalance failed event should be emitted"
+            "Rebalance failed event must not be emitted when rebalance is not needed"
         );
 
-        // bytes memory reason = logs[rebalanceFaildeIndex].data;
-        // bytes4 expectedReason = Index__RebalanceNotNeeded.selector;
-        // assertEq(reason, expectedReason, "Rebalance failed reason should be Index__RebalanceNotNeeded");
-
-        uint256 updateTimestampFromEvent = uint256(
-            logs[weightUpdateExecutedIndex].topics[1]
-        );
         (uint128 newWeight0FromEvent, uint128 newWeight1FromEvent) = abi.decode(
             logs[weightUpdateExecutedIndex].data,
             (uint128, uint128)
-        );
-        assertEq(
-            updateTimestampFromEvent,
-            block.timestamp,
-            "Weights update executed event timestamp should be current block timestamp"
         );
         assertEq(
             newWeight0FromEvent,
@@ -300,8 +300,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         vm.stopPrank();
 
         bytes32 expectedRebalanceEventSig = IndexRebalanced.selector;
-        bytes32 expectedWeightUpdateExecutedEventSig = IndexWeightsUpdated
-            .selector;
+        bytes32 expectedWeightUpdateExecutedEventSig = WeightsUpdated.selector;
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bool rebalanceEventEmitted;
@@ -310,6 +309,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         uint256 rebalanceEventIndex;
         uint256 weightUpdateExecutedIndex;
         for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(initializedIndex)) continue;
             if (logs[i].topics[0] == expectedWeightUpdateExecutedEventSig) {
                 weightUpdateExecutedEventEmitted = true;
                 weightUpdateExecutedIndex = i;
@@ -328,18 +328,15 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
             "Weights update executed event should be emitted"
         );
         assertTrue(rebalanceEventEmitted, "Rebalance event should be emitted");
-
-        uint256 updateTimestampFromEvent = uint256(
-            logs[weightUpdateExecutedIndex].topics[1]
+        assertLt(
+            weightUpdateExecutedIndex,
+            rebalanceEventIndex,
+            "WeightsUpdated must be emitted before IndexRebalanced"
         );
+
         (uint128 newWeight0FromEvent, uint128 newWeight1FromEvent) = abi.decode(
             logs[weightUpdateExecutedIndex].data,
             (uint128, uint128)
-        );
-        assertEq(
-            updateTimestampFromEvent,
-            block.timestamp,
-            "Weights update executed event timestamp should be current block timestamp"
         );
         assertEq(
             newWeight0FromEvent,
@@ -608,7 +605,10 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         bool rebalanceFailedEmitted;
         bytes memory reasonData;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == WeightUpdateRebalanceFailed.selector) {
+            if (
+                logs[i].emitter == address(initializedIndex) &&
+                logs[i].topics[0] == WeightsUpdateRebalanceFailed.selector
+            ) {
                 rebalanceFailedEmitted = true;
                 reasonData = abi.decode(logs[i].data, (bytes));
             }
@@ -674,7 +674,11 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
                 logs[i].topics[0] == expectedSig
             ) {
                 found = true;
-                uint256 logTs = uint256(logs[i].topics[1]);
+                assertEq(
+                    logs[i].topics.length,
+                    1,
+                    "IndexRebalanced must have no indexed parameters"
+                );
                 (
                     uint256 logPrevR0,
                     uint256 logPrevR1,
@@ -705,7 +709,6 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
                     reserveAfter1,
                     "logged newReserve1 mismatch"
                 );
-                assertEq(logTs, block.timestamp, "logged timestamp mismatch");
                 break;
             }
         }

@@ -10,16 +10,60 @@ import {
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IRouter} from "./Interface/IRouter.sol";
-import "./errors/RouterErrors.sol";
+import {
+    Router__InvalidAmounts,
+    Router__InvalidIndexAddress,
+    Router__InvalidTolerance,
+    Router__InsufficientUsdcBalance,
+    Router__InsufficientSharesBalance,
+    Router__ZeroAddress
+} from "./errors/RouterErrors.sol";
 import {
     ReentrancyGuard
 } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {
+    Initializable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UpgraderAuth} from "./UpgraderAuth.sol";
+import {
+    ERC1967Utils
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
-contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
-    IIndexManager private immutable i_IndexManager;
-    IERC20 private immutable i_usdc;
-
+/**
+ * @title Router
+ * @notice Entry point for users to buy and sell shares of every Index.
+ * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager.
+ *      Only the upgrader (the TimelockController) can upgrade it, see UpgraderAuth.
+ *      Every Index grants ROUTER_ROLE to the proxy address, so an upgrade applies to all indexes.
+ *      Storage follows ERC-7201 namespaced layout. ReentrancyGuard (OZ 5.x) keeps its status in its own
+ *      ERC-7201 slot; on the proxy the status starts at 0, which is treated as not entered.
+ */
+contract Router is
+    IRouter,
+    Initializable,
+    UpgraderAuth,
+    ReentrancyGuard,
+    ContractCodeConstants
+{
     using SafeERC20 for IERC20;
+
+    ////////////////////////////////////////////////////////////////////
+    ///////////////////////////// storage //////////////////////////////
+    ////////////////////////////////////////////////////////////////////
+
+    /// @custom:storage-location erc7201:onchainassetmanager.storage.Router
+    struct RouterStorage {
+        IIndexManager indexManager;
+        IERC20 usdc;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("onchainassetmanager.storage.Router")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ROUTER_STORAGE_LOCATION =
+        0x1951d9b676cbf01f1a8948ead5c25acf648eb31d2c1dddaf6ed23e4243124c00;
+
+    ////////////////////////////////////////////////////////////////////
+    //////////////////////////// modifiers /////////////////////////////
+    ////////////////////////////////////////////////////////////////////
 
     modifier validIndex(address _indexAddress) {
         _validIndex(_indexAddress);
@@ -44,10 +88,33 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         _;
     }
 
-    constructor(address _indexManager) {
-        i_IndexManager = IIndexManager(_indexManager);
-        i_usdc = IERC20(IIndexManager(_indexManager).getUsdc());
+    ////////////////////////////////////////////////////////////////////
+    ///////////////////// constructor / initializer ////////////////////
+    ////////////////////////////////////////////////////////////////////
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
+
+    /// @dev Inherit from IRouter. See interface for details.
+    function initialize(
+        address _indexManager,
+        address _usdc,
+        address _upgrader
+    ) external initializer {
+        if (_indexManager == address(0) || _usdc == address(0))
+            revert Router__ZeroAddress();
+        __UpgraderAuth_init(_upgrader);
+
+        RouterStorage storage $ = _getRouterStorage();
+        $.indexManager = IIndexManager(_indexManager);
+        $.usdc = IERC20(_usdc);
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    ////////////////////////// buy / sell shares ///////////////////////
+    ////////////////////////////////////////////////////////////////////
 
     /**
      * @notice Set Allowance to the index contract to spend Usdc
@@ -94,7 +161,7 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         validInputs(_indexAddress, _usdcAmount, _maxTolerance, true)
         nonReentrant
     {
-        IERC20Permit(address(i_usdc)).permit(
+        IERC20Permit(address(_getRouterStorage().usdc)).permit(
             msg.sender,
             _indexAddress,
             _usdcAmount,
@@ -243,7 +310,9 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
         bool isBuying
     ) internal view {
         if (isBuying) {
-            uint256 userUsdcBalance = i_usdc.balanceOf(msg.sender);
+            uint256 userUsdcBalance = _getRouterStorage().usdc.balanceOf(
+                msg.sender
+            );
             if (userUsdcBalance < _amount) {
                 revert Router__InsufficientUsdcBalance(
                     userUsdcBalance,
@@ -267,7 +336,11 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
      * @param _indexAddress The address of the index to validate.
      */
     function _validIndex(address _indexAddress) internal view {
-        if (!i_IndexManager.checkIsIndexInitialized(_indexAddress)) {
+        if (
+            !_getRouterStorage().indexManager.checkIsIndexInitialized(
+                _indexAddress
+            )
+        ) {
             revert Router__InvalidIndexAddress();
         }
     }
@@ -310,7 +383,7 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
      * @return The address of the IndexManager contract.
      */
     function getIndexManager() external view returns (address) {
-        return address(i_IndexManager);
+        return address(_getRouterStorage().indexManager);
     }
 
     function getMaxTolerance() external pure returns (uint256) {
@@ -322,6 +395,29 @@ contract Router is IRouter, ReentrancyGuard, ContractCodeConstants {
      * @return The address of the USDC token.
      */
     function getUsdc() external view returns (address) {
-        return address(i_usdc);
+        return address(_getRouterStorage().usdc);
+    }
+
+    /// @dev Inherit from IRouter. See interface for details.
+    function getImplementation() external view returns (address) {
+        return ERC1967Utils.getImplementation();
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    ////////////////////////////// storage /////////////////////////////
+    ////////////////////////////////////////////////////////////////////
+
+    /**
+     * @notice Returns the ERC-7201 namespaced storage struct of the Router.
+     * @return $ Storage pointer at ROUTER_STORAGE_LOCATION.
+     */
+    function _getRouterStorage()
+        internal
+        pure
+        returns (RouterStorage storage $)
+    {
+        assembly {
+            $.slot := ROUTER_STORAGE_LOCATION
+        }
     }
 }

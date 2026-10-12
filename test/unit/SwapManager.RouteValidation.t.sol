@@ -93,7 +93,7 @@ contract SwapManagerRouteValidationTest is BaseTest {
             address(
                 new ERC1967Proxy(
                     address(new SwapManagerHarness()),
-                    abi.encodeCall(SwapManager.initialize, (address(this)))
+                    abi.encodeCall(SwapManager.initialize, (address(this), address(this)))
                 )
             )
         );

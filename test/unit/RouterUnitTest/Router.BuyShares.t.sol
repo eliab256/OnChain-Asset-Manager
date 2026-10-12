@@ -339,9 +339,9 @@ contract RouterBuySharesTest is BaseTest {
                     "event must log user1 as depositor"
                 );
 
-                (uint256 logUsdcIn, uint256 logShares, , ) = abi.decode(
+                (uint256 logShares, , , uint256 logUsdcIn, ) = abi.decode(
                     logs[i].data,
-                    (uint256, uint256, uint256, uint256)
+                    (uint256, uint256, uint256, uint256, uint256)
                 );
                 assertEq(logUsdcIn, usdcAmount, "logged USDC amount mismatch");
                 assertGt(logShares, 0, "logged shares must be > 0");
@@ -917,9 +917,9 @@ contract RouterBuySharesTest is BaseTest {
                     "event must log permitUser as depositor"
                 );
 
-                (uint256 logUsdcIn, uint256 logShares, , ) = abi.decode(
+                (uint256 logShares, , , uint256 logUsdcIn, ) = abi.decode(
                     logs[i].data,
-                    (uint256, uint256, uint256, uint256)
+                    (uint256, uint256, uint256, uint256, uint256)
                 );
                 assertEq(logUsdcIn, usdcAmount, "logged USDC amount mismatch");
                 assertGt(logShares, 0, "logged shares must be > 0");
