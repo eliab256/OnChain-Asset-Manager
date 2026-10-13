@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
+import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
 import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {
@@ -65,7 +66,7 @@ contract IntegrationBase is Test {
     address deployer;
 
     function setUp() public virtual {
-        vm.createSelectFork("mainnet");
+        vm.createSelectFork("mainnet", MAINNET_FORK_BLOCK);
 
         deployScript = new DeployPeriphery();
         helperConfig = new HelperConfig();

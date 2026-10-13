@@ -23,7 +23,10 @@ import {
 } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {UniversalRouterMock} from "../mocks/UniversalRouterMock.sol";
 import {IndexAsset, AssetAvailable, IndexAction} from "../../src/types.sol";
-import {IndexActionTriggered} from "../../src/events/IndexManagerEvents.sol";
+import {
+    IndexActionTriggered,
+    IndexActionFailed
+} from "../../src/events/IndexManagerEvents.sol";
 import {ContractCodeConstants} from "../../src/ContractCodeConstants.sol";
 import {
     TimelockController
@@ -718,7 +721,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     }
 
     // =========================================================================
-    //  Helpers — IndexManager IndexActionTriggered logs
+    //  Helpers — IndexManager IndexActionTriggered / IndexActionFailed logs
     // =========================================================================
 
     /// @dev Number of logs emitted by the IndexManager with signature `_sig`.
@@ -818,6 +821,81 @@ abstract contract BaseTest is Test, ContractCodeConstants {
             managerLogCount,
             1,
             "IndexManager must emit only IndexActionTriggered"
+        );
+    }
+
+    /// @dev Asserts the IndexManager emitted exactly one IndexActionFailed for `_index`,
+    ///      with `_caller` and `_action` as topics and `_reason` as the raw reasonData.
+    ///      Returns its position in `_logs`.
+    function _assertSingleActionFailedFor(
+        Vm.Log[] memory _logs,
+        address _index,
+        address _caller,
+        IndexAction _action,
+        bytes memory _reason
+    ) internal view returns (uint256 position) {
+        uint256 count;
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (
+                _logs[i].emitter != address(indexManager) ||
+                _logs[i].topics[0] != IndexActionFailed.selector ||
+                address(uint160(uint256(_logs[i].topics[1]))) != _index
+            ) continue;
+
+            count++;
+            position = i;
+            assertEq(
+                _logs[i].topics.length,
+                4,
+                "IndexActionFailed must have 3 indexed params"
+            );
+            assertEq(
+                address(uint160(uint256(_logs[i].topics[2]))),
+                _caller,
+                "IndexActionFailed must log the caller"
+            );
+            assertEq(
+                uint256(_logs[i].topics[3]),
+                uint256(_action),
+                "IndexActionFailed must log the action"
+            );
+            assertEq(
+                abi.decode(_logs[i].data, (bytes)),
+                _reason,
+                "IndexActionFailed must log the raw revert data"
+            );
+        }
+        assertEq(
+            count,
+            1,
+            "IndexActionFailed must be emitted exactly once for the index"
+        );
+    }
+
+    /// @dev Asserts the only log emitted by the IndexManager is
+    ///      IndexActionFailed(_index, _caller, _action, _reason). Returns its position in `_logs`.
+    function _assertOnlyActionFailed(
+        Vm.Log[] memory _logs,
+        address _index,
+        address _caller,
+        IndexAction _action,
+        bytes memory _reason
+    ) internal view returns (uint256 position) {
+        position = _assertSingleActionFailedFor(
+            _logs,
+            _index,
+            _caller,
+            _action,
+            _reason
+        );
+        uint256 managerLogCount;
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (_logs[i].emitter == address(indexManager)) managerLogCount++;
+        }
+        assertEq(
+            managerLogCount,
+            1,
+            "IndexManager must emit only IndexActionFailed"
         );
     }
 

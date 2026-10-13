@@ -39,7 +39,7 @@ contract IndexManagerRebalanceTest is BaseTest {
             weightA: 60 * WEIGHT_PRECISION,
             weightB: 40 * WEIGHT_PRECISION,
             feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
-            initialAssetADeposit: 0, // computed by the script via retrieveAmountFromAmount
+            initialAssetADeposit: 0, // computed by the script via UnderlyingMath.calculateComplementaryAssetAmount
             initialAssetBDeposit: 1000 * 10 ** 18 // 1000 units of assetB
         });
 
@@ -98,48 +98,18 @@ contract IndexManagerRebalanceTest is BaseTest {
         indexManager.rebalanceSingleIndex(address(initializedIndex));
     }
 
-    function testRebalanceIndexEmitsIndexRebalanceFailedWhenBalanced() public {
+    function testRebalanceIndexEmitsIndexActionFailedWhenBalanced() public {
         vm.prank(deployer);
         vm.recordLogs();
         indexManager.rebalanceSingleIndex(address(initializedIndex));
 
-        bytes32 expectedSig = IndexRebalanceFailed.selector;
-        bytes memory expectedReason = abi.encodeWithSelector(
-            Index__RebalanceNotNeeded.selector
-        );
-
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bool rebalanceFailedEmitted = false;
-        bytes memory reason;
-        address indexEmitter;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (
-                logs[i].emitter == address(indexManager) &&
-                logs[i].topics[0] == expectedSig
-            ) {
-                rebalanceFailedEmitted = true;
-                indexEmitter = address(uint160(uint256(logs[i].topics[1])));
-                reason = logs[i].data;
-                break;
-            }
-        }
-
-        assertTrue(
-            rebalanceFailedEmitted,
-            "IndexRebalanceFailed event not emitted"
-        );
-        assertEq(
-            indexEmitter,
+        _assertOnlyActionFailed(
+            logs,
             address(initializedIndex),
-            "Event emitted by wrong index"
-        );
-        // `reason` is the raw log data, which ABI-encodes the `bytes` field
-        // (offset + length + value). Decode it first to get the raw bytes.
-        bytes memory decodedReason = abi.decode(reason, (bytes));
-        assertEq(
-            decodedReason,
-            expectedReason,
-            "Event must carry the raw Index__RebalanceNotNeeded revert data"
+            deployer,
+            IndexAction.REBALANCE,
+            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
     }
 
@@ -215,21 +185,28 @@ contract IndexManagerRebalanceTest is BaseTest {
         vm.recordLogs();
         indexManager.rebalanceMultipleIndexes(indexes);
 
-        bytes32 expectedSig = IndexRebalanceFailed.selector;
-
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        uint256 rebalanceFailedCount = 0;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSig) {
-                rebalanceFailedCount++;
-            }
-        }
 
-        // Both indexes are balanced, so both emit IndexRebalanceFailed with reason Index__RebalanceNotNeeded but the transaction does not revert
+        // Both indexes are balanced: each gets IndexActionFailed(Index__RebalanceNotNeeded)
+        // and the transaction does not revert.
+        for (uint256 i = 0; i < indexes.length; i++) {
+            _assertSingleActionFailedFor(
+                logs,
+                indexes[i],
+                deployer,
+                IndexAction.REBALANCE,
+                abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
+            );
+        }
         assertEq(
-            rebalanceFailedCount,
+            _countManagerEvents(logs, IndexActionFailed.selector),
             indexes.length,
-            "IndexRebalanceFailed event should be emitted for both balanced indexes"
+            "IndexActionFailed must be emitted for both balanced indexes"
+        );
+        assertEq(
+            _countManagerEvents(logs, IndexActionTriggered.selector),
+            0,
+            "no IndexActionTriggered when every rebalance fails"
         );
     }
 
@@ -268,7 +245,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         vm.recordLogs();
         indexManager.rebalanceMultipleIndexes(indexes);
 
-        bytes32 rebalanceFailedSig = IndexRebalanceFailed.selector;
+        bytes32 rebalanceFailedSig = IndexActionFailed.selector;
         bytes32 rebalanceSuccessSig = IndexRebalanced.selector;
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -293,7 +270,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         assertEq(
             rebalanceFailedCount,
             0,
-            "IndexRebalanceFailed event should not be emitted"
+            "IndexActionFailed event should not be emitted"
         );
         assertEq(
             indexesFromEvent[0],
@@ -324,82 +301,57 @@ contract IndexManagerRebalanceTest is BaseTest {
             "one IndexActionTriggered per successfully rebalanced index"
         );
         assertEq(
-            _countManagerEvents(logs, IndexRebalanceFailed.selector),
+            _countManagerEvents(logs, IndexActionFailed.selector),
             0,
-            "IndexManager must not emit IndexRebalanceFailed when every rebalance succeeds"
+            "IndexManager must not emit IndexActionFailed when every rebalance succeeds"
         );
     }
 
-    // =========================================================================
-    //  rebalanceAllIndexes
-    // =========================================================================
-
-    function testRebalanceAllIndexesEmitEventForEveryIndex() public {
-        uint256 indexAmount = indexManager.getInitializedIndexes().length;
-
-        vm.prank(deployer);
-        vm.recordLogs();
-        indexManager.rebalanceAllIndexes();
-
-        bytes32 rebalanceFailedSig = IndexRebalanceFailed.selector;
-        bytes32 rebalanceSuccessSig = IndexRebalanced.selector;
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        uint256 rebalanceFailedCount = 0;
-        uint256 rebalanceSuccessCount = 0;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == rebalanceFailedSig) {
-                rebalanceFailedCount++;
-            } else if (logs[i].topics[0] == rebalanceSuccessSig) {
-                rebalanceSuccessCount++;
-            }
-        }
-
-        assertEq(
-            rebalanceFailedCount + rebalanceSuccessCount,
-            indexAmount,
-            "Event count does not match initialized index count"
-        );
-    }
-
-    function testRebalanceAllIndexesWorksAndEmitsEvents() public {
-        // change price of unerlying assets to make indexes unbalanced and trigger rebalance logic
+    function testRebalanceMultipleIndexesOnInitializedIndexesContinuesPastFailingIndex()
+        public
+    {
+        // Only WETH moves: the two WETH indexes become unbalanced, WBTC/COMP stays balanced.
         vm.warp(block.timestamp + 3600);
         _refreshPriceFeeds();
-        int256 newWethPrice = WETH_INITIAL_PRICE * 6; // $12000
-        mockWethPriceFeed.updateAnswer(newWethPrice);
-        int256 newCompPrice = COMP_INITIAL_PRICE * 3; // $150
-        mockCompPriceFeed.updateAnswer(newCompPrice);
+        mockWethPriceFeed.updateAnswer(WETH_INITIAL_PRICE * 6); // $12000
         _refreshExchangeRates();
+
+        address[] memory indexes = indexManager.getInitializedIndexes();
+        assertEq(indexes.length, 3, "three initialized indexes expected");
 
         vm.prank(deployer);
         vm.recordLogs();
-        indexManager.rebalanceAllIndexes();
-
-        bytes32 rebalanceFailedSig = IndexRebalanceFailed.selector;
-        bytes32 rebalanceSuccessSig = IndexRebalanced.selector;
-
+        indexManager.rebalanceMultipleIndexes(indexes);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        uint256 rebalanceFailedCount = 0;
-        uint256 rebalanceSuccessCount = 0;
 
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == rebalanceFailedSig) {
-                rebalanceFailedCount++;
-            } else if (logs[i].topics[0] == rebalanceSuccessSig) {
-                rebalanceSuccessCount++;
-            }
-        }
-
-        assertEq(
-            rebalanceSuccessCount,
-            indexManager.getInitializedIndexes().length,
-            "IndexRebalanced event should be emitted for all initialized indexes"
+        _assertSingleActionTriggeredFor(
+            logs,
+            address(initializedIndex),
+            deployer,
+            IndexAction.REBALANCE
+        );
+        _assertSingleActionTriggeredFor(
+            logs,
+            address(newIndexLinkWeth),
+            deployer,
+            IndexAction.REBALANCE
+        );
+        _assertSingleActionFailedFor(
+            logs,
+            address(newIndexWbtcComp),
+            deployer,
+            IndexAction.REBALANCE,
+            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
         assertEq(
-            rebalanceFailedCount,
-            0,
-            "IndexRebalanceFailed event should not be emitted"
+            _countManagerEvents(logs, IndexActionTriggered.selector),
+            2,
+            "IndexActionTriggered only for the two rebalanced indexes"
+        );
+        assertEq(
+            _countManagerEvents(logs, IndexActionFailed.selector),
+            1,
+            "IndexActionFailed only for the balanced index"
         );
     }
 }

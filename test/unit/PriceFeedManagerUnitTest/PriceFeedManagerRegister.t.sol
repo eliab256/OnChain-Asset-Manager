@@ -6,15 +6,64 @@ import {PriceFeedManagerEvents} from "../../../src/events/PriceFeedManagerEvents
 import {
     PriceFeedManager__CallerNotAssetManager,
     PriceFeedManager__InvalidAsset,
+    PriceFeedManager__InvalidAssetDecimals,
     PriceFeedManager__InvalidPriceFeed,
     PriceFeedManager__InvalidMaxDelay,
     PriceFeedManager__PriceFeedAlreadySet
 } from "../../../src/errors/PriceFeedManagerErrors.sol";
 import {Vm} from "forge-std/Vm.sol";
+import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
+import {
+    DecimalsRevertingTokenMock,
+    NoDecimalsTokenMock,
+    ShortDecimalsReturnTokenMock,
+    NoSymbolTokenMock,
+    EmptySymbolReturnTokenMock
+} from "../../mocks/DecimalsTokenMocks.sol";
 
 contract PriceFeedManagerRegisterTest is BasePriceFeedManagerTest {
+    // =========================================================================
+    //  Constants
+    // =========================================================================
+
+    /// Asset decimals accepted below the standard: USDC-like and WBTC-like tokens
+    uint8 internal constant USDC_LIKE_DECIMALS = 6;
+    uint8 internal constant WBTC_LIKE_DECIMALS = 8;
+
+    // =========================================================================
+    //  Values derived from the contracts
+    // =========================================================================
+
+    /// Largest accepted asset decimals (DECIMALS_STANDARD)
+    uint8 internal s_maxValidAssetDecimals;
+
+    // =========================================================================
+    //  setUp
+    // =========================================================================
+
     function setUp() public override {
         super.setUp();
+        s_maxValidAssetDecimals = DECIMALS_STANDARD;
+    }
+
+    // =========================================================================
+    //  Helpers
+    // =========================================================================
+
+    /// @dev Deploys an AssetTokenMock with `_decimals`, registers s_feed8Decimals for it and
+    ///      asserts the stored configuration.
+    function _assertRegistersAssetWithDecimals(uint8 _decimals) internal {
+        address token = address(
+            new AssetTokenMock("Decimals Asset", "DEC", _decimals)
+        );
+        assertFalse(priceFeedManager.hasPriceFeed(token), "no feed before");
+        _assertConfig(token, address(0), 0);
+
+        _register(token, address(s_feed8Decimals), s_validMaxDelay);
+
+        assertTrue(priceFeedManager.hasPriceFeed(token), "feed registered");
+        _assertConfig(token, address(s_feed8Decimals), s_validMaxDelay);
+        _assertPendingCleared(token);
     }
 
     // =========================================================================
@@ -70,6 +119,128 @@ contract PriceFeedManagerRegisterTest is BasePriceFeedManagerTest {
             address(s_feed8Decimals),
             s_validMaxDelay
         );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetHasNoCode() public {
+        address noCodeAsset = makeAddr("noCodeAsset");
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(PriceFeedManager__InvalidAsset.selector);
+        priceFeedManager.registerPriceFeed(
+            noCodeAsset,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetHasNoSymbol() public {
+        address token = address(new NoSymbolTokenMock());
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(PriceFeedManager__InvalidAsset.selector);
+        priceFeedManager.registerPriceFeed(
+            token,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetSymbolReturnsNoData() public {
+        address token = address(new EmptySymbolReturnTokenMock());
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(PriceFeedManager__InvalidAsset.selector);
+        priceFeedManager.registerPriceFeed(
+            token,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetDecimalsAboveStandard() public {
+        address token = address(
+            new AssetTokenMock("Too Many Decimals", "TMD", s_decimalsAboveStandard)
+        );
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PriceFeedManager__InvalidAssetDecimals.selector,
+                token
+            )
+        );
+        priceFeedManager.registerPriceFeed(
+            token,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetDecimalsReverts() public {
+        address token = address(new DecimalsRevertingTokenMock());
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PriceFeedManager__InvalidAssetDecimals.selector,
+                token
+            )
+        );
+        priceFeedManager.registerPriceFeed(
+            token,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetHasSymbolButNoDecimals()
+        public
+    {
+        address token = address(new NoDecimalsTokenMock());
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PriceFeedManager__InvalidAssetDecimals.selector,
+                token
+            )
+        );
+        priceFeedManager.registerPriceFeed(
+            token,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedRevertsIfAssetDecimalsReturnsLessThanOneWord()
+        public
+    {
+        address token = address(new ShortDecimalsReturnTokenMock());
+
+        vm.prank(s_assetManager);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PriceFeedManager__InvalidAssetDecimals.selector,
+                token
+            )
+        );
+        priceFeedManager.registerPriceFeed(
+            token,
+            address(s_feed8Decimals),
+            s_validMaxDelay
+        );
+    }
+
+    function testRegisterPriceFeedAcceptsAssetWithSixDecimals() public {
+        _assertRegistersAssetWithDecimals(USDC_LIKE_DECIMALS);
+    }
+
+    function testRegisterPriceFeedAcceptsAssetWithEightDecimals() public {
+        _assertRegistersAssetWithDecimals(WBTC_LIKE_DECIMALS);
+    }
+
+    function testRegisterPriceFeedAcceptsAssetWithStandardDecimals() public {
+        _assertRegistersAssetWithDecimals(s_maxValidAssetDecimals);
     }
 
     function testRegisterPriceFeedRevertsIfAlreadySet() public {

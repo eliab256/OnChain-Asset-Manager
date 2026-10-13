@@ -36,7 +36,7 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `IndexManager.sol` | Governance executor — creates and initialises indexes, orchestrates rebalancing, fee collection and weight updates |
 | `Index.sol`        | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance                          |
-| `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index. UUPS proxy (ERC-7201 storage) deployed by IndexManager; every index grants `ROUTER_ROLE` to the same proxy, so its logic can be upgraded for all indexes (only by the `TimelockController`, after a 2-day delay) without migrating roles |
+| `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index. UUPS proxy (ERC-7201 storage) deployed by IndexManager; every index stores the same proxy as its immutable router, so its logic can be upgraded for all indexes (only by the `TimelockController`, after a 2-day delay) without touching the indexes |
 | `PriceFeedManager.sol` | Oracle registry — one Chainlink feed per asset with its own staleness limit (`maxDelay`), shared by all indexes. Feed replacement is timelocked (2 days + 3-day window). UUPS proxy (ERC-7201 storage) deployed by IndexManager (owner), upgradeable only by the `TimelockController` after a 2-day delay |
 | `SwapManager.sol`  | Swap abstraction — builds Uniswap V3/V4 swap parameters for the Universal Router. UUPS proxy (ERC-7201 storage) deployed by IndexManager; one proxy shared by all indexes; IndexManager is the owner, upgrades only by the `TimelockController` after a 2-day delay |
 | `UpgraderAuth.sol` | Abstract UUPS authorization shared by the three proxies — stores a single `upgrader` (ERC-7201, set once in `initialize`, no setter) and lets only that address call `upgradeToAndCall`, independently of the owner |
@@ -54,7 +54,7 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 
 ## 2. Actors and Roles
 
-The protocol uses **OpenZeppelin `AccessControl`** to enforce role-based permissions across two contract layers.
+The IndexManager uses **OpenZeppelin `AccessControl`** for role-based permissions. The Index has no roles: it checks its caller against two immutable addresses.
 
 ### IndexManager roles
 
@@ -63,18 +63,18 @@ These roles are defined in `IndexManager.sol`. The deployer receives all three r
 | Role                 | What it **can** do                                                                                                                  | What it **cannot** do                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | `DEFAULT_ADMIN_ROLE` | Grant and revoke any role on IndexManager | Cannot call any other operational function directly; cannot upgrade the proxies (only the `TimelockController` can) |
-| `ASSET_MANAGER_ROLE` | Create and initialise indexes, propose, execute (single, multiple, all) and cancel weight updates; register price feeds and propose/execute/cancel feed replacements on the PriceFeedManager | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
-| `REBALANCER_ROLE`    | Trigger rebalancing on a single index, on a list of indexes, or on all indexes at once                                              | Cannot create indexes, change weights, collect fees, or modify contract addresses |
-| `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees from a single index, from a list of indexes, or from all indexes                                     | Cannot rebalance, create indexes, change weights, or modify contract addresses    |
+| `ASSET_MANAGER_ROLE` | Create and initialise indexes, propose, execute (single or a list of indexes) and cancel weight updates; register price feeds (the PriceFeedManager also validates the asset: `symbol()` and `decimals() <= 18`) and propose/execute/cancel feed replacements on the PriceFeedManager | Cannot rebalance indexes, cannot collect fees, cannot mint or redeem shares       |
+| `REBALANCER_ROLE`    | Trigger rebalancing on a single index or on a list of indexes (pass `getInitializedIndexes()` to cover all); a failing index emits `IndexActionFailed` instead of reverting | Cannot create indexes, change weights, collect fees, or modify contract addresses |
+| `FEE_COLLECTOR_ROLE` | Withdraw accrued protocol fees from a single index or from a list of indexes (pass `getInitializedIndexes()` to cover all)                                     | Cannot rebalance, create indexes, change weights, or modify contract addresses    |
 
-### Index roles
+### Index access control
 
-These roles are defined in `Index.sol` and are assigned automatically during deployment and initialisation.
+`Index.sol` sets two immutable addresses in its constructor (readable with `getIndexManager()` and `getRouter()`). They never change: there is no role administration on an Index.
 
-| Role                 | Holder                                       | What it does                                                                        |
-| -------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `INDEX_MANAGER_ROLE` | IndexManager contract (and the Index itself) | Initialise the index, execute rebalancing, execute and cancel weight updates, collect fees     |
-| `ROUTER_ROLE`        | Router proxy (the same address for every index) | Call `mintShares` and `redeem` — the only entry points for user buy/sell operations |
+| Modifier           | Allowed caller                                                  | Functions                                                                                 | Revert error                   |
+| ------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------ |
+| `onlyIndexManager` | The deploying IndexManager, and the Index itself (self-call used by `executeWeightUpdate` to try the rebalance) | `initialize`, `proposeUpdateWeights`, `executeWeightUpdate`, `cancelWeightUpdate`, `collectFees`, `rebalanceIndex` | `Index__CallerNotIndexManager` |
+| `onlyRouter`       | Router proxy (the same address for every index)                 | `mintShares`, `redeem` (after the `isInitialized` check): the only entry points for user buy/sell operations | `Index__CallerNotRouter`       |
 
 ### User (no role required)
 
@@ -87,7 +87,7 @@ Any externally-owned account can interact with the protocol through the **Router
 | Preview buy  | `getMinMintPreview`              | Estimate the minimum shares received for a given USDC amount             |
 | Preview sell | `getMinRedeemPreview`            | Estimate the minimum USDC received for a given shares amount             |
 
-Users **cannot** bypass the Router to call Index directly (the `ROUTER_ROLE` check will revert), and they **cannot** rebalance, collect fees, or change weights.
+Users **cannot** bypass the Router to call Index directly (the `onlyRouter` check reverts with `Index__CallerNotRouter`), and they **cannot** rebalance, collect fees, or change weights.
 
 > **Trust note.** Users approve USDC to the **Index**, and `Index.redeem` burns shares without an allowance, so whoever controls the Router logic can mint with any user's approved USDC (choosing the tolerance) or force a redeem. Router upgrades therefore go through the same 2-day `TimelockController` as the other proxies, and its `CallScheduled` event carries the full `upgradeToAndCall` calldata, giving users time to revoke approvals or exit.
 
@@ -307,7 +307,7 @@ Weight proposals are subject to `WEIGHT_UPDATE_DELAY` (2 days) before execution.
 
 ### Role separation
 
-Three distinct roles are enforced via OpenZeppelin `AccessControl`:
+Three distinct roles are enforced on the IndexManager via OpenZeppelin `AccessControl`:
 
 | Role                 | Allowed operations                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------ |
@@ -366,6 +366,8 @@ Integration tests run against an **Ethereum mainnet fork** created via `vm.creat
 - **Real Uniswap Universal Router** — the mainnet Universal Router V2 (`0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af`) executes actual V3 pool swaps.
 
 `IntegrationBase.t.sol` sets up the fork, deploys the protocol contracts on top of it, and funds the deployer with tokens via `deal()`.
+
+All mainnet forks are pinned to block `MAINNET_FORK_BLOCK` (`test/integration/ForkConstants.sol`), so results do not depend on live market prices. This requires an archive-capable `MAINNET_RPC_URL`. When bumping the block, pick one where the WBTC/WETH pool price is within 1% of Chainlink, otherwise the rebalance tests revert with `V3TooLittleReceived`.
 
 | Suite                         | Scope                                                                                                                                              |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |

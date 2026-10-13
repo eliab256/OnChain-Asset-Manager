@@ -162,18 +162,21 @@ contract IndexManagerTest is BaseTest {
     }
 
     function testCreateIndexEmitsIndexCreatedEvent() public {
-        (address sortedToken0, address sortedToken1) = indexManager.sortAssets(
-            address(mockWeth),
+        // sortAssets is internal in the IndexManager: sort locally (asset0 = lower address).
+        (address sortedToken0, address sortedToken1) = address(mockWeth) <
             address(mockLink)
-        );
+            ? (address(mockWeth), address(mockLink))
+            : (address(mockLink), address(mockWeth));
 
         vm.recordLogs();
         vm.prank(deployer);
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset40);
 
         Vm.Log[] memory entries = vm.getRecordedLogs();
-        assertEq(entries.length, 5);
-        Vm.Log memory fullEvent = entries[4];
+        // The Index constructor emits no events (no AccessControl RoleGranted):
+        // IndexCreated is the only log of createIndex.
+        assertEq(entries.length, 1);
+        Vm.Log memory fullEvent = entries[0];
         bytes32 eventSignature = fullEvent.topics[0]; //event signature hashed
         address testIndex;
         address testToken0;
@@ -437,7 +440,14 @@ contract IndexManagerTest is BaseTest {
         });
 
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
+        // No feed can be registered for it (PriceFeedManager validates the asset), so the
+        // feed check rejects it.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                address(mockWbtcPriceFeed)
+            )
+        );
         indexManager.createIndex(validFeePercentage, wethAsset, linkAsset40);
     }
 
@@ -448,7 +458,14 @@ contract IndexManagerTest is BaseTest {
         });
 
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
+        // No feed can be registered for it (PriceFeedManager validates the asset), so the
+        // feed check rejects it.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                address(0)
+            )
+        );
         indexManager.createIndex(validFeePercentage, wethAsset, linkAsset40);
     }
 
@@ -459,7 +476,14 @@ contract IndexManagerTest is BaseTest {
         });
 
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
+        // No feed can be registered for it (PriceFeedManager validates the asset), so the
+        // feed check rejects it.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                address(mockWethPriceFeed)
+            )
+        );
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
     }
 
@@ -482,11 +506,18 @@ contract IndexManagerTest is BaseTest {
         });
 
         vm.prank(deployer);
-        vm.expectRevert(IndexManager__InvalidIndexAssetsAddress.selector);
+        // No feed can be registered for it (PriceFeedManager validates the asset), so the
+        // feed check rejects it.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IndexManager__PriceFeedNotRegistered.selector,
+                address(0)
+            )
+        );
         indexManager.createIndex(validFeePercentage, wethAsset60, linkAsset);
     }
 
-    function testCreateIndexGrantsRouterRoleToRouterProxy() public {
+    function testCreateIndexSetsRouterProxyAsIndexRouter() public {
         address routerProxy = indexManager.getRouterAddress();
 
         (address indexAddress, , ) = _createDefaultIndex(
@@ -495,30 +526,48 @@ contract IndexManagerTest is BaseTest {
         );
 
         Index newIndex = Index(indexAddress);
-        assertTrue(
-            newIndex.hasRole(newIndex.ROUTER_ROLE(), routerProxy),
-            "new index must grant ROUTER_ROLE to the router proxy"
+        assertEq(
+            newIndex.getRouter(),
+            routerProxy,
+            "new index router must be the router proxy"
         );
-        assertTrue(
-            initializedIndex.hasRole(
-                initializedIndex.ROUTER_ROLE(),
-                routerProxy
-            ),
-            "initialized index must grant ROUTER_ROLE to the router proxy"
+        assertEq(
+            initializedIndex.getRouter(),
+            routerProxy,
+            "initialized index router must be the router proxy"
         );
-        assertTrue(
-            nonInitializedIndex.hasRole(
-                nonInitializedIndex.ROUTER_ROLE(),
-                routerProxy
-            ),
-            "non initialized index must grant ROUTER_ROLE to the router proxy"
+        assertEq(
+            nonInitializedIndex.getRouter(),
+            routerProxy,
+            "non initialized index router must be the router proxy"
         );
-        assertFalse(
-            newIndex.hasRole(
-                newIndex.ROUTER_ROLE(),
-                Router(routerProxy).getImplementation()
-            ),
-            "the router implementation must not hold ROUTER_ROLE"
+        assertNotEq(
+            newIndex.getRouter(),
+            Router(routerProxy).getImplementation(),
+            "the router implementation must not be the index router"
+        );
+    }
+
+    function testCreateIndexSetsIndexManagerAsIndexManagerOfIndex() public {
+        (address indexAddress, , ) = _createDefaultIndex(
+            address(mockWeth),
+            address(mockLink)
+        );
+
+        assertEq(
+            Index(indexAddress).getIndexManager(),
+            address(indexManager),
+            "new index manager must be the deploying IndexManager"
+        );
+        assertEq(
+            initializedIndex.getIndexManager(),
+            address(indexManager),
+            "initialized index manager must be the deploying IndexManager"
+        );
+        assertEq(
+            nonInitializedIndex.getIndexManager(),
+            address(indexManager),
+            "non initialized index manager must be the deploying IndexManager"
         );
     }
 

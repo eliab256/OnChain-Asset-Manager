@@ -18,9 +18,6 @@ import {
     RunParams
 } from "../../../script/DeployAndInitNewIndex.s.sol";
 import {console2} from "forge-std/console2.sol";
-import {
-    IAccessControl
-} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import "../../../src/errors/IndexErrors.sol";
 import {
@@ -60,15 +57,31 @@ contract IndexMintTest is BaseTest {
     }
 
     function testRedeemRevertsIfCallerIsNotRouter() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                keccak256("ROUTER_ROLE")
-            )
-        );
+        vm.expectRevert(Index__CallerNotRouter.selector);
         vm.prank(user1);
         initializedIndex.redeem(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testRedeemRevertsIfCalledByIndexManager() public {
+        // The IndexManager is privileged for manager functions only, not for redeem.
+        vm.expectRevert(Index__CallerNotRouter.selector);
+        vm.prank(address(indexManager));
+        initializedIndex.redeem(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testRedeemRevertsIfCalledByIndexItself() public {
+        // The self-call allowance of onlyIndexManager does not extend to onlyRouter.
+        vm.expectRevert(Index__CallerNotRouter.selector);
+        vm.prank(address(initializedIndex));
+        initializedIndex.redeem(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testRedeemChecksInitializationBeforeRouter() public {
+        // Modifier order is isInitialized then onlyRouter: a non-router caller on a
+        // non-initialized index gets Index__NotInitialized, not Index__CallerNotRouter.
+        vm.expectRevert(Index__NotInitialized.selector);
+        vm.prank(address(indexManager));
+        nonInitializedIndex.redeem(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
     }
 
     function testRedeemRevertsIfPriceIsStale() public {

@@ -26,6 +26,33 @@ interface IRouter is IUpgraderAuth {
         uint256 _maxTolerance
     ) external;
 
+    /**
+     * @notice Buys index shares with an exact USDC amount, approving the index through a USDC EIP-2612 permit
+     *         signature in the same transaction.
+     * @dev The permit is signed by `msg.sender` with the index as spender and `_usdcAmount` as value.
+     *      The tolerance protects the caller from front-running and price manipulation: if the shares
+     *      received are fewer than the minimum computed with `_maxTolerance`, the transaction reverts.
+     *      Reverts with Router__InvalidIndexAddress (index not initialized), Router__InvalidAmounts (zero amount),
+     *      Router__InvalidTolerance (zero or >= MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION) or
+     *      Router__InsufficientUsdcBalance, and with the USDC permit error if the signature is invalid or expired.
+     * @param _indexAddress The address of the index.
+     * @param _usdcAmount The amount of USDC to spend, in USDC token decimals (6).
+     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
+     * @param _deadline The permit signature deadline, as a Unix timestamp in seconds.
+     * @param _v The v component of the permit signature.
+     * @param _r The r component of the permit signature.
+     * @param _s The s component of the permit signature.
+     */
+    function buyExactUsdcAmountOfSharesWithPermit(
+        address _indexAddress,
+        uint256 _usdcAmount,
+        uint256 _maxTolerance,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external;
+
     function sellExactAmountOfSharesForUsdc(
         address _indexAddress,
         uint256 _sharesAmount,

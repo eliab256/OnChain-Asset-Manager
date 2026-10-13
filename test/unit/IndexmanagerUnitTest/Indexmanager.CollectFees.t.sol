@@ -4,7 +4,12 @@ pragma solidity ^0.8.0;
 import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
+import {
+    IndexAsset,
+    SwapRoute,
+    AssetAvailable,
+    IndexAction
+} from "../../../src/types.sol";
 import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {
     DeployAndInitNewIndex,
@@ -35,7 +40,7 @@ contract IndexManagerTest is BaseTest {
             weightA: 60 * WEIGHT_PRECISION,
             weightB: 40 * WEIGHT_PRECISION,
             feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
-            initialAssetADeposit: 0, // computed by the script via retrieveAmountFromAmount
+            initialAssetADeposit: 0, // computed by the script via UnderlyingMath.calculateComplementaryAssetAmount
             initialAssetBDeposit: 1000 * 10 ** 18 // 1000 units of assetB
         });
 
@@ -144,38 +149,12 @@ contract IndexManagerTest is BaseTest {
         indexManager.collectFeesFromSingleIndex(address(initializedIndex));
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bool feesCollectedFailsEmitted = false;
-        address indexFromEvent;
-        address collectorFromEvent;
-        bytes memory reasonFromEvent;
-
-        for (uint256 i = 0; i < logs.length; i++) {
-            Vm.Log memory log = logs[i];
-            if (
-                log.emitter == address(indexManager) &&
-                log.topics[0] == FeesCollectionFailed.selector
-            ) {
-                feesCollectedFailsEmitted = true;
-                indexFromEvent = address(uint160(uint256(log.topics[1])));
-                collectorFromEvent = address(uint160(uint256(log.topics[2])));
-                reasonFromEvent = abi.decode(log.data, (bytes));
-                break;
-            }
-        }
-        assertTrue(
-            feesCollectedFailsEmitted,
-            "FeesCollectedFail event not emitted"
-        );
-        assertEq(
-            indexFromEvent,
+        _assertOnlyActionFailed(
+            logs,
             address(initializedIndex),
-            "Wrong index in event"
-        );
-        assertEq(collectorFromEvent, feeCollector, "Wrong collector in event");
-        assertEq(
-            reasonFromEvent,
-            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
-            "Reason must be the raw Index__NoFeesToCollect revert data"
+            feeCollector,
+            IndexAction.COLLECT_FEES,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector)
         );
     }
 
@@ -294,6 +273,8 @@ contract IndexManagerTest is BaseTest {
     {
         _generateFees(address(initializedIndex));
         _generateFees(address(newIndexWbtcComp));
+        (, uint128 fees0) = initializedIndex.getFeesInfo();
+        (, uint128 fees2) = newIndexWbtcComp.getFeesInfo();
 
         address[] memory indexes = new address[](3);
         indexes[0] = address(initializedIndex);
@@ -303,175 +284,117 @@ contract IndexManagerTest is BaseTest {
         vm.recordLogs();
         indexManager.collectFeesFromMultipleIndexes(indexes);
 
-        bytes32 expectedSuccessSig = FeesCollected.selector;
-        bytes32 expectedFailSig = FeesCollectionFailed.selector;
-        uint256 feesCollectedCount;
-        uint256 feesCollectionFailedCount;
-        uint256 totalFeesEventCount;
-        address[] memory indexesFromEvent = new address[](3);
-        address[] memory collectorFromEvent = new address[](3);
-        uint256[] memory amountFromEvent = new uint256[](2);
-        bytes memory reasonFromEvent;
-
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSuccessSig) {
-                // FeesCollected comes from the Index itself: index = emitter, collector = topics[1]
-                indexesFromEvent[totalFeesEventCount] = logs[i].emitter;
-                collectorFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
-                );
-                amountFromEvent[feesCollectedCount] = abi.decode(
-                    logs[i].data,
-                    (uint256)
-                );
-                feesCollectedCount++;
-                totalFeesEventCount++;
-            } else if (logs[i].topics[0] == expectedFailSig) {
-                indexesFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
-                );
-                collectorFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[2]))
-                );
-                reasonFromEvent = abi.decode(logs[i].data, (bytes));
-                feesCollectionFailedCount++;
-                totalFeesEventCount++;
-            }
-        }
-
-        // Both indexes are balanced, so both emit IndexRebalanceFailed with reason Index__RebalanceNotNeeded but the transaction does not revert
-        assertEq(
-            totalFeesEventCount,
-            indexes.length,
-            "FeesCollected or FeesCollectionFailed event should be emitted for each index"
-        );
-        assertEq(
-            feesCollectedCount,
-            2,
-            "FeesCollected event should be emitted for 2 indexes"
-        );
-        assertEq(
-            feesCollectionFailedCount,
-            1,
-            "FeesCollectionFailed event should be emitted for 1 index"
-        );
-        assertEq(
-            indexesFromEvent[0],
+        _assertSingleActionTriggeredFor(
+            logs,
             address(initializedIndex),
-            "Wrong index in event"
+            deployer,
+            IndexAction.COLLECT_FEES
         );
-        assertEq(collectorFromEvent[0], deployer, "Wrong collector in event");
+        _assertSingleActionFailedFor(
+            logs,
+            address(newIndexLinkWeth),
+            deployer,
+            IndexAction.COLLECT_FEES,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector)
+        );
+        _assertSingleActionTriggeredFor(
+            logs,
+            address(newIndexWbtcComp),
+            deployer,
+            IndexAction.COLLECT_FEES
+        );
         assertEq(
-            amountFromEvent[0] + amountFromEvent[1],
+            _countManagerEvents(logs, IndexActionTriggered.selector),
+            2,
+            "IndexActionTriggered must be emitted for the 2 indexes with fees"
+        );
+        assertEq(
+            _countManagerEvents(logs, IndexActionFailed.selector),
+            1,
+            "IndexActionFailed must be emitted only for the index without fees"
+        );
+        assertEq(
             indexManager.getTotalFeesCollected(),
-            "Wrong amount in event"
-        );
-        assertEq(
-            reasonFromEvent,
-            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
-            "Wrong reason in event"
+            uint256(fees0) + uint256(fees2),
+            "Total fees collected must be the sum of the succeeding indexes"
         );
     }
 
-    // =========================================================================
-    //  collectFeesFromAllIndexes
-    // =========================================================================
-
-    function testCollectFeesFromAllIndexesEmitEventForEveryIndex() public {
-        _generateFees(address(initializedIndex));
-        _generateFees(address(newIndexWbtcComp));
-        uint256 indexAmount = indexManager.getInitializedIndexes().length;
-
-        vm.prank(deployer);
-        vm.recordLogs();
-        indexManager.collectFeesFromAllIndexes();
-
-        bytes32 expectedSuccessSig = FeesCollected.selector;
-        bytes32 expectedFailSig = FeesCollectionFailed.selector;
-        uint256 feesCollectedCount;
-        uint256 feesCollectionFailedCount;
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSuccessSig) {
-                feesCollectedCount++;
-            } else if (logs[i].topics[0] == expectedFailSig) {
-                feesCollectionFailedCount++;
-            }
-        }
-
-        // Both indexes are balanced, so both emit IndexRebalanceFailed with reason Index__RebalanceNotNeeded but the transaction does not revert
-        assertEq(
-            feesCollectedCount + feesCollectionFailedCount,
-            indexAmount,
-            "FeesCollected or FeesCollectionFailed event should be emitted for each index"
-        );
-    }
-
-    function testCollectFeesFromAllIndexesEmitEventsForFailureAndSuccess()
+    function testCollectFeesFromMultipleIndexesOnInitializedIndexesSumsIntoTotalFeesCollected()
         public
     {
         _generateFees(address(initializedIndex));
         _generateFees(address(newIndexWbtcComp));
-        uint256 indexAmount = indexManager.getInitializedIndexes().length;
+        address[] memory indexes = indexManager.getInitializedIndexes();
+        assertEq(indexes.length, 3, "three initialized indexes expected");
+
+        uint256 expectedTotal;
+        for (uint256 i = 0; i < indexes.length; i++) {
+            (, uint128 fees) = IIndex(indexes[i]).getFeesInfo();
+            expectedTotal += fees;
+        }
+        (, uint128 noFees) = newIndexLinkWeth.getFeesInfo();
+        assertEq(noFees, 0, "newIndexLinkWeth must have no fees");
+        assertGt(expectedTotal, 0, "fees must have accrued");
+        uint256 totalBefore = indexManager.getTotalFeesCollected();
+        uint256 collectorBalanceBefore = mockUsdc.balanceOf(deployer);
+
+        vm.prank(deployer);
+        indexManager.collectFeesFromMultipleIndexes(indexes);
+
+        assertEq(
+            indexManager.getTotalFeesCollected(),
+            totalBefore + expectedTotal,
+            "Total fees collected must grow by the sum of every index's fees"
+        );
+        assertEq(
+            mockUsdc.balanceOf(deployer) - collectorBalanceBefore,
+            expectedTotal,
+            "Collector must receive the sum of every index's fees"
+        );
+        for (uint256 i = 0; i < indexes.length; i++) {
+            (, uint128 feesAfter) = IIndex(indexes[i]).getFeesInfo();
+            assertEq(feesAfter, 0, "Fees not reset after collection");
+        }
+    }
+
+    function testCollectFeesFromMultipleIndexesOnInitializedIndexesEmitsOneEventPerIndex()
+        public
+    {
+        _generateFees(address(initializedIndex));
+        _generateFees(address(newIndexWbtcComp));
+        address[] memory indexes = indexManager.getInitializedIndexes();
 
         vm.prank(deployer);
         vm.recordLogs();
-        indexManager.collectFeesFromAllIndexes();
-
-        bytes32 expectedSuccessSig = FeesCollected.selector;
-        bytes32 expectedFailSig = FeesCollectionFailed.selector;
-        uint256 feesCollectedCount;
-        uint256 feesCollectionFailedCount;
-        uint256 totalFeesEventCount;
-        address[] memory indexesFromEvent = new address[](indexAmount);
-        address[] memory collectorFromEvent = new address[](indexAmount);
-        uint256[] memory amountFromEvent = new uint256[](indexAmount);
-        bytes memory reasonFromEvent;
-
+        indexManager.collectFeesFromMultipleIndexes(indexes);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSuccessSig) {
-                // FeesCollected comes from the Index itself: index = emitter, collector = topics[1]
-                indexesFromEvent[totalFeesEventCount] = logs[i].emitter;
-                collectorFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
+        for (uint256 i = 0; i < indexes.length; i++) {
+            if (indexes[i] == address(newIndexLinkWeth)) {
+                _assertSingleActionFailedFor(
+                    logs,
+                    indexes[i],
+                    deployer,
+                    IndexAction.COLLECT_FEES,
+                    abi.encodeWithSelector(Index__NoFeesToCollect.selector)
                 );
-                amountFromEvent[feesCollectedCount] = abi.decode(
-                    logs[i].data,
-                    (uint256)
+            } else {
+                _assertSingleActionTriggeredFor(
+                    logs,
+                    indexes[i],
+                    deployer,
+                    IndexAction.COLLECT_FEES
                 );
-                feesCollectedCount++;
-                totalFeesEventCount++;
-            } else if (logs[i].topics[0] == expectedFailSig) {
-                indexesFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[1]))
-                );
-                collectorFromEvent[totalFeesEventCount] = address(
-                    uint160(uint256(logs[i].topics[2]))
-                );
-                reasonFromEvent = abi.decode(logs[i].data, (bytes));
-                feesCollectionFailedCount++;
-                totalFeesEventCount++;
             }
         }
-
-        assertEq(feesCollectedCount, 2);
-
         assertEq(
-            reasonFromEvent,
-            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
-            "Wrong reason in event"
-        );
-        assertEq(collectorFromEvent[0], deployer, "Wrong collector in event");
-        assertEq(
-            amountFromEvent[0] + amountFromEvent[1],
-            indexManager.getTotalFeesCollected(),
-            "Wrong amount in event"
+            _countManagerEvents(logs, IndexActionTriggered.selector) +
+                _countManagerEvents(logs, IndexActionFailed.selector),
+            indexes.length,
+            "one manager event per initialized index"
         );
     }
 }

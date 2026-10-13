@@ -1,3 +1,0 @@
-- implementare multiasig negli script
-- testare multisig
-- creare backend con Node.js API design e indexing

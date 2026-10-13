@@ -241,6 +241,35 @@ library UnderlyingMath {
         }
     }
 
+    /**
+     * @notice Computes the amount of one index asset that matches, at the given target weights, a known amount of the other.
+     * @dev amountInUsd = _amountIn * _priceIn / 10**_decimalsIn;
+     *      amountOutUsd = amountInUsd * _weightOut / _weightIn;
+     *      amountOut = amountOutUsd * 10**_decimalsOut / _priceOut.
+     *      Rounds down at each step. Reverts on division by zero if `_weightIn` or `_priceOut` is 0.
+     * @param _amountIn The known amount, in the native decimals of the input asset.
+     * @param _priceIn The USD price of the input asset, with 18 decimals.
+     * @param _priceOut The USD price of the output asset, with 18 decimals.
+     * @param _decimalsIn The decimals of the input asset.
+     * @param _decimalsOut The decimals of the output asset.
+     * @param _weightIn The target weight of the input asset, in weight units (1_000_000 = 100%).
+     * @param _weightOut The target weight of the output asset, in weight units (1_000_000 = 100%).
+     * @return The required amount of the output asset, in its native decimals.
+     */
+    function calculateComplementaryAssetAmount(
+        uint256 _amountIn,
+        uint256 _priceIn,
+        uint256 _priceOut,
+        uint8 _decimalsIn,
+        uint8 _decimalsOut,
+        uint128 _weightIn,
+        uint128 _weightOut
+    ) internal pure returns (uint256) {
+        uint256 amountInUsd = (_amountIn * _priceIn) / (10 ** _decimalsIn);
+        uint256 amountOutUsd = (amountInUsd * _weightOut) / _weightIn;
+        return (amountOutUsd * (10 ** _decimalsOut)) / _priceOut;
+    }
+
     function calculateEffectiveWeights(
         uint256 _token0UsdValue,
         uint256 _totalAssetsUsdValue,

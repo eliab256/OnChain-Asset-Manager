@@ -24,6 +24,7 @@ import {PriceFeedManagerEvents} from "./events/PriceFeedManagerEvents.sol";
 import {
     PriceFeedManager__CallerNotAssetManager,
     PriceFeedManager__InvalidAsset,
+    PriceFeedManager__InvalidAssetDecimals,
     PriceFeedManager__InvalidPriceFeed,
     PriceFeedManager__InvalidMaxDelay,
     PriceFeedManager__PriceFeedAlreadySet,
@@ -110,8 +111,9 @@ contract PriceFeedManager is
     ) external onlyAssetManager {
         PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
 
-        // 1. Check the asset is valid and has no feed yet.
+        // 1. Check the asset is a valid ERC20 and has no feed yet.
         if (_asset == address(0)) revert PriceFeedManager__InvalidAsset();
+        _validateAsset(_asset);
         if ($.assetToFeedConfig[_asset].feed != address(0))
             revert PriceFeedManager__PriceFeedAlreadySet(_asset);
 
@@ -337,6 +339,31 @@ contract PriceFeedManager is
         } catch {
             revert PriceFeedManager__InvalidPriceFeed(_feed);
         }
+    }
+
+    /**
+     * @notice Validates that an asset exposes the ERC20 metadata used by the indexes.
+     * @dev Reverts with PriceFeedManager__InvalidAsset if symbol() reverts or returns no data (the index name and
+     *      symbol are built from it). Reverts with PriceFeedManager__InvalidAssetDecimals if decimals() reverts,
+     *      returns less than 32 bytes or a value above DECIMALS_STANDARD, since the index decimal conversions
+     *      would revert or truncate to 0.
+     * @param _asset The asset to validate, already checked to be non-zero.
+     */
+    function _validateAsset(address _asset) internal view {
+        (bool success, bytes memory result) = _asset.staticcall(
+            abi.encodeWithSignature("symbol()")
+        );
+        if (!success || result.length == 0)
+            revert PriceFeedManager__InvalidAsset();
+
+        (success, result) = _asset.staticcall(
+            abi.encodeWithSignature("decimals()")
+        );
+        if (
+            !success ||
+            result.length < 32 ||
+            abi.decode(result, (uint256)) > DECIMALS_STANDARD
+        ) revert PriceFeedManager__InvalidAssetDecimals(_asset);
     }
 
     /**

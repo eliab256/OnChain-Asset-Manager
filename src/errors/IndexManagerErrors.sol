@@ -15,7 +15,6 @@ error IndexManager__InvalidFeePercentage();
 error IndexManager__UsdcCannotBeIndexAsset();
 error IndexManager__PriceFeedNotRegistered(address asset);
 error IndexManager__IndexDeployFailed();
-error IndexManager__InvalidAssetDecimals(address asset);
 // Raised by the constructor when a SwapManager, PriceFeedManager or Router implementation has no code.
 error IndexManager__InvalidImplementation(address implementation);
 error IndexManager__ZeroAddress();

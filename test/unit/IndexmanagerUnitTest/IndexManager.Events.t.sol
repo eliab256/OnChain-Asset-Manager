@@ -13,7 +13,7 @@ import "../../../src/events/IndexManagerEvents.sol";
 
 /**
  * @dev Event-only tests for the IndexManager after the event refactor:
- *      raw reasonData in the batch failure events, IndexActionTriggered as the only
+ *      IndexActionFailed with the raw reasonData on failed actions, IndexActionTriggered as the only
  *      manager event on successful actions and IndexCreated payloads.
  *      Proxy-upgrade events are covered by ProxyUpgradeViaTimelock.t.sol (TimelockController + IERC1967.Upgraded).
  */
@@ -139,63 +139,46 @@ contract IndexManagerEventsTest is BaseTest {
     }
 
     // =========================================================================
-    //  Batch failure events — raw reasonData
+    //  Failure events — IndexActionFailed with raw reasonData
     // =========================================================================
 
-    function testFeesCollectionFailedReasonIsRawNoFeesToCollect() public {
+    function testCollectFeesFromSingleIndexFailureEmitsActionFailedWithNoFeesToCollect()
+        public
+    {
         vm.recordLogs();
         vm.prank(deployer);
         indexManager.collectFeesFromSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (uint256 count, uint256 eventIndex) = _findLogs(
+        _assertOnlyActionFailed(
             logs,
-            address(indexManager),
-            FeesCollectionFailed.selector
-        );
-        assertEq(count, 1, "FeesCollectionFailed was not emitted");
-        assertEq(
-            _topicToAddress(logs[eventIndex].topics[1]),
             address(initializedIndex),
-            "index address"
-        );
-        assertEq(
-            _topicToAddress(logs[eventIndex].topics[2]),
             deployer,
-            "fee collector"
-        );
-        assertEq(
-            abi.decode(logs[eventIndex].data, (bytes)),
-            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
-            "reasonData must be exactly the Index__NoFeesToCollect selector"
+            IndexAction.COLLECT_FEES,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector)
         );
     }
 
-    function testIndexRebalanceFailedReasonIsRawRebalanceNotNeeded() public {
+    function testRebalanceSingleIndexFailureEmitsActionFailedWithRebalanceNotNeeded()
+        public
+    {
         vm.recordLogs();
         vm.prank(deployer);
         indexManager.rebalanceSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (uint256 count, uint256 eventIndex) = _findLogs(
+        _assertOnlyActionFailed(
             logs,
-            address(indexManager),
-            IndexRebalanceFailed.selector
-        );
-        assertEq(count, 1, "IndexRebalanceFailed was not emitted");
-        assertEq(
-            _topicToAddress(logs[eventIndex].topics[1]),
             address(initializedIndex),
-            "index address"
-        );
-        assertEq(
-            abi.decode(logs[eventIndex].data, (bytes)),
-            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
-            "reasonData must be exactly the Index__RebalanceNotNeeded selector"
+            deployer,
+            IndexAction.REBALANCE,
+            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
     }
 
-    function testIndexRebalanceFailedReasonIsRawCustomErrorWithArgs() public {
+    function testRebalanceSingleIndexFailureEmitsActionFailedWithCustomErrorArgs()
+        public
+    {
         bytes memory expectedReason = _breakRebalanceSwap();
 
         vm.recordLogs();
@@ -203,20 +186,16 @@ contract IndexManagerEventsTest is BaseTest {
         indexManager.rebalanceSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (uint256 count, uint256 eventIndex) = _findLogs(
+        _assertOnlyActionFailed(
             logs,
-            address(indexManager),
-            IndexRebalanceFailed.selector
-        );
-        assertEq(count, 1, "IndexRebalanceFailed was not emitted");
-        assertEq(
-            abi.decode(logs[eventIndex].data, (bytes)),
-            expectedReason,
-            "reasonData must be the raw custom error (selector + args)"
+            address(initializedIndex),
+            deployer,
+            IndexAction.REBALANCE,
+            expectedReason
         );
     }
 
-    function testWeightsUpdateFailedReasonIsRawNotPendingWeightUpdate()
+    function testExecuteSingleWeightUpdateFailureEmitsActionFailedWithNotPendingWeightUpdate()
         public
     {
         vm.recordLogs();
@@ -224,21 +203,29 @@ contract IndexManagerEventsTest is BaseTest {
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (uint256 count, uint256 eventIndex) = _findLogs(
+        _assertOnlyActionFailed(
             logs,
-            address(indexManager),
-            WeightsUpdateFailed.selector
-        );
-        assertEq(count, 1, "WeightsUpdateFailed was not emitted");
-        assertEq(
-            _topicToAddress(logs[eventIndex].topics[1]),
             address(initializedIndex),
-            "index address"
+            deployer,
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
-        assertEq(
-            abi.decode(logs[eventIndex].data, (bytes)),
-            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
-            "reasonData must be exactly the Index__NotPendingWeightUpdate selector"
+    }
+
+    function testExecuteSingleWeightUpdateFailureViaMultiSigLogsMultiSigAsCaller()
+        public
+    {
+        vm.recordLogs();
+        vm.prank(address(multiSigWallet));
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        _assertOnlyActionFailed(
+            logs,
+            address(initializedIndex),
+            address(multiSigWallet),
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
     }
 

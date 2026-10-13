@@ -48,7 +48,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     address internal immutable i_swapManager;
     // PriceFeedManager ERC1967 proxy, deployed in the constructor. Same address for every index.
     address internal immutable i_priceFeedManager;
-    // Router ERC1967 proxy, deployed in the constructor. Every index grants ROUTER_ROLE to this address.
+    // Router ERC1967 proxy, deployed in the constructor. Every index stores this address as its router.
     address internal immutable i_router;
 
     address[] private s_deployedIndexes;
@@ -173,7 +173,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         IndexAsset memory asset0;
         IndexAsset memory asset1;
         {
-            (address tokenAsset0, ) = sortAssets(_assetA.asset, _assetB.asset);
+            (address tokenAsset0, ) = _sortAssets(_assetA.asset, _assetB.asset);
             if (tokenAsset0 == _assetA.asset) {
                 asset0 = _assetA;
                 asset1 = _assetB;
@@ -202,19 +202,16 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             revert IndexManager__InvalidIndexAssetsPercentages();
         }
 
-        // 4. Check that the underlying assets implement ERC20 metadata.
-        _validateAssetIsERC20(asset0.asset);
-        _validateAssetIsERC20(asset1.asset);
-
-        // 5. Check that the underlying assets and USDC have a price feed registered in the PriceFeedManager.
+        // 4. Check that the underlying assets and USDC have a price feed registered in the PriceFeedManager.
+        //    ERC20 metadata (symbol, decimals <= 18) is validated by the PriceFeedManager at feed registration.
         _checkPriceFeedRegistered(asset0.asset);
         _checkPriceFeedRegistered(asset1.asset);
         _checkPriceFeedRegistered(i_usdc);
 
-        // 6. Deploy the index contract
+        // 5. Deploy the index contract
         index = _deployIndex(asset0, asset1, _feePercentage);
 
-        // 7. Store its address in the mappings and arrays.
+        // 6. Store its address in the mappings and arrays.
         s_getIndex[asset0.asset][asset1.asset] = index;
         s_indexAssets[index] = IndexAssets({
             asset0: asset0.asset,
@@ -223,7 +220,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         s_isIndex[index] = true;
         s_deployedIndexes.push(index);
 
-        // 8. Emit event with the index address, its assets, weights and fee.
+        // 7. Emit event with the index address, its assets, weights and fee.
         emit IndexCreated(
             index,
             asset0.asset,
@@ -234,7 +231,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             msg.sender
         );
 
-        // 9. Return the index address and its assets addresses.
+        // 8. Return the index address and its assets addresses.
         return (index, asset0.asset, asset1.asset);
     }
 
@@ -278,54 +275,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.INITIALIZE);
     }
 
-    /**
-     * @notice Calculates the required deposit amount of one asset given a known amount of the other, using the index's current target weights and Chainlink prices.
-     * @dev Uses the ratio: amountOut_USD = amountIn_USD * weightOut / weightIn, then converts the resulting USD value back to token units via the price feed.
-     * @param _amount The known token amount, expressed in the asset's native token decimals.
-     * @param _indexAddress  The address of the index whose weights and price feeds are used.
-     * @param _zeroToOne Direction flag:
-     *                   - true  → `_amount` is denominated in asset0; returns the proportional asset1 amount required.
-     *                   - false → `_amount` is denominated in asset1; returns the proportional asset0 amount required.
-     * @return amountToDeposit The required amount of the complementary asset, expressed in that asset's native token decimals.
-     */
-    function retrieveAmountFromAmount(
-        uint256 _amount,
-        address _indexAddress,
-        bool _zeroToOne
-    ) public view returns (uint256 amountToDeposit) {
-        (uint128 weight0, uint128 weight1) = IIndex(_indexAddress)
-            .getAssetsWeights();
-        IndexAssets memory indexAssets = s_indexAssets[_indexAddress];
-        uint256 asset0Price = IIndex(_indexAddress).getLatestPrice(
-            indexAssets.asset0
-        );
-        uint256 asset1Price = IIndex(_indexAddress).getLatestPrice(
-            indexAssets.asset1
-        );
-        if (_zeroToOne) {
-            uint256 amount0InUsd = (_amount * asset0Price) /
-                (10 ** IERC20Metadata(indexAssets.asset0).decimals());
-            uint256 amount1InUsd = (amount0InUsd * weight1) / weight0;
-            amountToDeposit =
-                (amount1InUsd *
-                    (10 ** IERC20Metadata(indexAssets.asset1).decimals())) /
-                asset1Price;
-        } else {
-            uint256 amount1InUsd = (_amount * asset1Price) /
-                (10 ** IERC20Metadata(indexAssets.asset1).decimals());
-            uint256 amount0InUsd = (amount1InUsd * weight0) / weight1;
-            amountToDeposit =
-                (amount0InUsd *
-                    (10 ** IERC20Metadata(indexAssets.asset0).decimals())) /
-                asset0Price;
-        }
-    }
-
-    /**
-     * @notice Rebalances a single index.
-     * @dev This function doesn't revert if rebalance fails but emit an event with the failure reason.
-     * @param _indexAddress The address of the index to rebalance.
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function rebalanceSingleIndex(
         address _indexAddress
     )
@@ -333,18 +283,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         isIndexInitialized(_indexAddress)
         onlyRole(REBALANCER_ROLE)
     {
-        (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
-            _indexAddress
-        );
-        if (!success) emit IndexRebalanceFailed(_indexAddress, reasonBytes);
+        _tryIndexAction(_indexAddress, IndexAction.REBALANCE);
     }
 
-    /**
-     * @notice Allows to rebalance multiple indexes in a single transaction, instead of having to call rebalanceIndex multiple times.
-     * @notice Less Gas efficient than rebalanceAllIndexes, because check if is initialized for each index.
-     * @dev If one of the call fails, the entire transaction will revert
-     * @param _indexAddresses An array of index addresses to rebalance.
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function rebalanceMultipleIndexes(
         address[] calldata _indexAddresses
     )
@@ -352,32 +294,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         onlyRole(REBALANCER_ROLE)
         areIndexesInitialized(_indexAddresses)
     {
-        uint256 length = _indexAddresses.length;
-        for (uint256 i = 0; i < length; i++) {
-            (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
-                _indexAddresses[i]
-            );
-            if (!success)
-                emit IndexRebalanceFailed(_indexAddresses[i], reasonBytes);
-        }
-    }
-
-    /**
-     * @notice Rebalances all initialized indexes.
-     * @dev Less Gas efficient than rebalanceMultipleIndexes, because check if is initialized for each index.
-     */
-    function rebalanceAllIndexes()
-        public
-        onlyRole(REBALANCER_ROLE)
-    {
-        uint256 length = s_initializedIndexes.length;
-        for (uint256 i = 0; i < length; i++) {
-            address indexAddress = s_initializedIndexes[i];
-            (bool success, bytes memory reasonBytes) = _rebalanceSingleIndex(
-                indexAddress
-            );
-            if (!success) emit IndexRebalanceFailed(indexAddress, reasonBytes);
-        }
+        _tryIndexActions(_indexAddresses, IndexAction.REBALANCE);
     }
 
     /**
@@ -394,10 +311,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.PROPOSE_WEIGHTS);
     }
 
-    /**
-     * @notice Executes the weight update for the specified index.
-     * @param _indexAddress The address of the index to execute the weight update for.
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function executeSingleWeightUpdate(
         address _indexAddress
     )
@@ -405,10 +319,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         isIndexInitialized(_indexAddress)
         onlyRole(ASSET_MANAGER_ROLE)
     {
-        (bool success, bytes memory reasonBytes) = _executeSingleWeightUpdate(
-            _indexAddress
-        );
-        if (!success) emit WeightsUpdateFailed(_indexAddress, reasonBytes);
+        _tryIndexAction(_indexAddress, IndexAction.EXECUTE_WEIGHTS);
     }
 
     /**
@@ -422,11 +333,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.CANCEL_WEIGHTS);
     }
 
-    /**
-     * @notice Executes the weight update for multiple indexes.
-     * @dev If one of the call fails, the entire transaction will not revert
-     * @param _indexAddresses An array of index addresses to execute the weight update for.
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function executeWeightUpdateForMultipleIndexes(
         address[] calldata _indexAddresses
     )
@@ -434,60 +341,20 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         onlyRole(ASSET_MANAGER_ROLE)
         areIndexesInitialized(_indexAddresses)
     {
-        uint256 length = _indexAddresses.length;
-        for (uint256 i = 0; i < length; i++) {
-            (
-                bool success,
-                bytes memory reasonBytes
-            ) = _executeSingleWeightUpdate(_indexAddresses[i]);
-            if (!success)
-                emit WeightsUpdateFailed(_indexAddresses[i], reasonBytes);
-        }
+        _tryIndexActions(_indexAddresses, IndexAction.EXECUTE_WEIGHTS);
     }
 
-    /**
-     * @notice Executes the weight update for all initialized indexes.
-     * @dev If one of the call fails, the entire transaction will not revert
-     */
-    function executeWeightUpdateForAllIndexes()
-        public
-        onlyRole(ASSET_MANAGER_ROLE)
-    {
-        uint256 length = s_initializedIndexes.length;
-        for (uint256 i = 0; i < length; i++) {
-            (
-                bool success,
-                bytes memory reasonBytes
-            ) = _executeSingleWeightUpdate(s_initializedIndexes[i]);
-            if (!success)
-                emit WeightsUpdateFailed(s_initializedIndexes[i], reasonBytes);
-        }
-    }
-
-    /**
-     * @dev Collects fees from the specified index and transfers them to the caller.
-     * @param _indexAddress The address of the index from which to collect fees
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function collectFeesFromSingleIndex(
         address _indexAddress
     ) public isIndexInitialized(_indexAddress) onlyRole(FEE_COLLECTOR_ROLE) {
-        (
-            uint256 feeAmount,
-            bool success,
-            bytes memory reasonBytes
-        ) = _collectFeesFromSingleIndex(_indexAddress, msg.sender);
-        if (success) {
-            s_totalFeesCollected += feeAmount;
-        } else {
-            emit FeesCollectionFailed(_indexAddress, msg.sender, reasonBytes);
-        }
+        s_totalFeesCollected += _tryIndexAction(
+            _indexAddress,
+            IndexAction.COLLECT_FEES
+        );
     }
 
-    /**
-     * @notice Allows to collect fees from specific indexes in a single transaction, instead of having to call collectFees multiple times.
-     * @notice Less Gas efficient than collectFeesFromAllIndexes, because check if is initialized for each index.
-     * @dev If one of the call fails, the entire transaction will revert
-     */
+    /// @dev Inherit from IIndexManager. See interface for details.
     function collectFeesFromMultipleIndexes(
         address[] calldata _indexAddresses
     )
@@ -495,66 +362,24 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         onlyRole(FEE_COLLECTOR_ROLE)
         areIndexesInitialized(_indexAddresses)
     {
-        uint256 length = _indexAddresses.length;
-        uint256 totalFeesCollected = 0;
-        for (uint256 i = 0; i < length; i++) {
-            address indexAddress = _indexAddresses[i];
-            (
-                uint256 feeAmount,
-                bool success,
-                bytes memory reasonBytes
-            ) = _collectFeesFromSingleIndex(indexAddress, msg.sender);
-            if (success) {
-                totalFeesCollected += feeAmount;
-            } else {
-                emit FeesCollectionFailed(
-                    indexAddress,
-                    msg.sender,
-                    reasonBytes
-                );
-            }
-        }
-        s_totalFeesCollected += totalFeesCollected;
+        s_totalFeesCollected += _tryIndexActions(
+            _indexAddresses,
+            IndexAction.COLLECT_FEES
+        );
     }
 
     /**
-     * @notice Collects fees from all initialized indexes and transfers them to the caller.
-     * @dev If one of the call fails, the entire transaction will not revert
+     * @notice Sorts two asset addresses in ascending order.
+     * @dev Used to keep a consistent asset0/asset1 order in the indexes and in the s_getIndex mapping.
+     * @param _assetAddressA The address of the first asset.
+     * @param _assetAddressB The address of the second asset.
+     * @return The lower of the two addresses (asset0).
+     * @return The higher of the two addresses (asset1).
      */
-    function collectFeesFromAllIndexes() public onlyRole(FEE_COLLECTOR_ROLE) {
-        uint256 length = s_initializedIndexes.length;
-        uint256 totalFeesCollected = 0;
-        for (uint256 i = 0; i < length; i++) {
-            address indexAddress = s_initializedIndexes[i];
-            (
-                uint256 feeAmount,
-                bool success,
-                bytes memory reasonBytes
-            ) = _collectFeesFromSingleIndex(indexAddress, msg.sender);
-            if (success) {
-                totalFeesCollected += feeAmount;
-            } else {
-                emit FeesCollectionFailed(
-                    indexAddress,
-                    msg.sender,
-                    reasonBytes
-                );
-            }
-        }
-        s_totalFeesCollected += totalFeesCollected;
-    }
-
-    /**
-     * @dev Sorts two asset addresses to ensure consistent ordering.
-     * @dev Used to maintain a consistent order of assets in the indexes
-     * @param _assetAddressB The address of the second asset
-     * @return token0 The address of the first asset in sorted order
-     * @return token1 The address of the second asset in sorted order
-     */
-    function sortAssets(
+    function _sortAssets(
         address _assetAddressA,
         address _assetAddressB
-    ) public pure returns (address token0, address token1) {
+    ) internal pure returns (address, address) {
         if (_assetAddressA < _assetAddressB) {
             return (_assetAddressA, _assetAddressB);
         } else {
@@ -647,110 +472,55 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @dev Validates if an address is a valid ERC20 token usable by an index.
-     *      Reverts with `IndexManager__InvalidIndexAssetsAddress` if the asset is address(0) or
-     *      `symbol()` is missing/reverts, and with `IndexManager__InvalidAssetDecimals` if
-     *      `decimals()` is missing/reverts or returns a value above DECIMALS_STANDARD.
-     * @param _asset Address to validate
+     * @notice Triggers a rebalance, a weights update execution or a fee collection on an index without reverting on failure.
+     * @dev Low-level call to the index with the calldata selected by `_action`: rebalanceIndex(), executeWeightUpdate()
+     *      or collectFees(msg.sender) (fees are always sent to the caller of the IndexManager).
+     *      The target is always a registered and initialized index, so it has code.
+     *      On success emits IndexActionTriggered(_index, msg.sender, _action); on failure emits
+     *      IndexActionFailed(_index, msg.sender, _action, reason) with the raw revert data and returns 0.
+     *      Only REBALANCE, EXECUTE_WEIGHTS and COLLECT_FEES are passed by the callers.
+     * @param _index The address of the index to act on.
+     * @param _action The action to trigger (REBALANCE, EXECUTE_WEIGHTS or COLLECT_FEES).
+     * @return feeAmount The fees collected, in USDC units (6 decimals); 0 for other actions or on failure.
      */
-    function _validateAssetIsERC20(address _asset) internal view {
-        if (_asset == address(0)) {
-            revert IndexManager__InvalidIndexAssetsAddress();
+    function _tryIndexAction(
+        address _index,
+        IndexAction _action
+    ) internal returns (uint256 feeAmount) {
+        bytes memory callData;
+        if (_action == IndexAction.REBALANCE) {
+            callData = abi.encodeCall(IIndex.rebalanceIndex, ());
+        } else if (_action == IndexAction.EXECUTE_WEIGHTS) {
+            callData = abi.encodeCall(IIndex.executeWeightUpdate, ());
+        } else {
+            callData = abi.encodeCall(IIndex.collectFees, (msg.sender));
         }
 
-        // Check if contract has symbol() function (ERC20 standard)
-        (bool success, bytes memory result) = _asset.staticcall(
-            abi.encodeWithSignature("symbol()")
-        );
-        if (!(success && result.length > 0)) {
-            revert IndexManager__InvalidIndexAssetsAddress();
+        (bool success, bytes memory result) = _index.call(callData);
+        if (!success) {
+            emit IndexActionFailed(_index, msg.sender, _action, result);
+            return 0;
         }
-
-        // Check that decimals() exists and does not exceed DECIMALS_STANDARD,
-        // otherwise decimal conversions in the Index would revert or truncate to 0.
-        (success, result) = _asset.staticcall(
-            abi.encodeWithSignature("decimals()")
-        );
-        if (
-            !success ||
-            result.length < 32 ||
-            abi.decode(result, (uint256)) > DECIMALS_STANDARD
-        ) {
-            revert IndexManager__InvalidAssetDecimals(_asset);
+        if (_action == IndexAction.COLLECT_FEES) {
+            feeAmount = abi.decode(result, (uint256));
         }
+        emit IndexActionTriggered(_index, msg.sender, _action);
     }
 
     /**
-     * @notice This function is used internally by rebalanceMultipleIndexes and rebalanceAllIndexes to handle rebalance for each index, allowing for error handling
-     * on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
-     * @dev Rebalances a single index and returns whether it was successful and the reason if it failed.
-     * @dev Emits IndexActionTriggered (REBALANCE) on success.
-     * @param _indexAddress The address of the index to rebalance.
-     * @return success A boolean indicating whether the rebalance was successful.
-     * @return reasonBytes Raw revert data of the rebalance call, unchanged (may be empty); empty on success.
+     * @notice Triggers the same action on several indexes, continuing past the ones that fail.
+     * @dev Calls _tryIndexAction for each index; the caller has already checked that all of them are initialized.
+     * @param _indexes The addresses of the indexes to act on.
+     * @param _action The action to trigger (REBALANCE, EXECUTE_WEIGHTS or COLLECT_FEES).
+     * @return totalFees The sum of the fees collected, in USDC units (6 decimals); 0 for other actions.
      */
-    function _rebalanceSingleIndex(
-        address _indexAddress
-    ) internal returns (bool success, bytes memory reasonBytes) {
-        try IIndex(_indexAddress).rebalanceIndex() {
-            emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.REBALANCE);
-            return (true, "");
-        } catch (bytes memory reason) {
-            return (false, reason);
-        }
-    }
-
-    /**
-     * @notice Collects fees from a single index and transfers them to the specified fee collector address.
-     * @notice This function is used internally by collectFeesFromMultipleIndexes and collectFeesFromAllIndexes to handle fee collection for each index, allowing for error handling on a per-index basis without reverting the entire transaction if one index fails to transfer fees.
-     * @param _indexAddress The address of the index from which to collect fees.
-     * @dev Emits IndexActionTriggered (COLLECT_FEES) on success, with `_feeCollector` (always msg.sender) as caller.
-     * @param _feeCollector The address to which the collected fees should be transferred.
-     * @return feeAmount The amount of fees collected from the index.
-     * @return success A boolean indicating whether the fee collection and transfer were successful.
-     * @return reasonBytes Raw revert data of the collectFees call, unchanged (may be empty); empty on success.
-     */
-    // @audit-info : document the try/catch and revert pattern later
-    function _collectFeesFromSingleIndex(
-        address _indexAddress,
-        address _feeCollector
-    )
-        internal
-        returns (uint256 feeAmount, bool success, bytes memory reasonBytes)
-    {
-        IIndex index = IIndex(_indexAddress);
-        try index.collectFees(_feeCollector) returns (uint256 collectedFees) {
-            feeAmount = collectedFees;
-            success = true;
-            emit IndexActionTriggered(_indexAddress, _feeCollector, IndexAction.COLLECT_FEES);
-            reasonBytes = "";
-        } catch (bytes memory reason) {
-            feeAmount = 0;
-            success = false;
-            reasonBytes = reason;
-        }
-    }
-
-    /**
-     * @dev Executes the weight update for a single index and returns whether it was successful and the reason if it failed.
-     * @dev Emits IndexActionTriggered (EXECUTE_WEIGHTS) on success.
-     * @param _indexAddress The address of the index to execute the weight update for.
-     * @return success A boolean indicating whether the weight update was successful.
-     * @return reasonBytes Raw revert data of the executeWeightUpdate call, unchanged (may be empty); empty on success.
-     * @notice This function uses try-catch to handle potential errors during the execution of the weight update. If an error occurs, it returns the raw revert data along with a success flag set to false. If the call succeeds, it returns true with an empty reason.
-     * @notice This approach allows the contract to attempt weight updates on multiple indexes without reverting the entire transaction if one of them fails, while still providing feedback on which updates were successful and which were not.
-     */
-    function _executeSingleWeightUpdate(
-        address _indexAddress
-    ) internal returns (bool success, bytes memory reasonBytes) {
-        IIndex index = IIndex(_indexAddress);
-        try index.executeWeightUpdate() {
-            success = true;
-            emit IndexActionTriggered(_indexAddress, msg.sender, IndexAction.EXECUTE_WEIGHTS);
-            reasonBytes = "";
-        } catch (bytes memory reason) {
-            reasonBytes = reason;
-            success = false;
+    function _tryIndexActions(
+        address[] calldata _indexes,
+        IndexAction _action
+    ) internal returns (uint256 totalFees) {
+        uint256 length = _indexes.length;
+        for (uint256 i = 0; i < length; i++) {
+            totalFees += _tryIndexAction(_indexes[i], _action);
         }
     }
 
@@ -805,7 +575,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         address _assetAddressA,
         address _assetAddressB
     ) public view returns (address index) {
-        (address asset0, address asset1) = sortAssets(
+        (address asset0, address asset1) = _sortAssets(
             _assetAddressA,
             _assetAddressB
         );
@@ -852,22 +622,6 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      */
     function getTotalFeesCollected() public view returns (uint256) {
         return s_totalFeesCollected;
-    }
-
-    /**
-     * @dev Returns the address of the USDC token used by the index manager
-     * @return address The address of the USDC token
-     */
-    function getUsdc() public view returns (address) {
-        return i_usdc;
-    }
-
-    /**
-     * @dev Returns the address of the USDC Chainlink price feed registered in the PriceFeedManager
-     * @return address The address of the USDC Chainlink price feed (address(0) if not registered)
-     */
-    function getUsdcPriceFeed() public view returns (address) {
-        return IPriceFeedManager(i_priceFeedManager).getPriceFeedConfig(i_usdc).feed;
     }
 
     /**

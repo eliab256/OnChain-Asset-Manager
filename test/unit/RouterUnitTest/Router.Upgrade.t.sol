@@ -79,7 +79,6 @@ contract RouterUpgradeTest is BaseTest {
     //  Values derived from the contracts
     // =========================================================================
 
-    bytes32 internal s_routerRole;
     address internal s_initialImplementation;
     bytes internal s_initializeV2Data;
 
@@ -93,7 +92,6 @@ contract RouterUpgradeTest is BaseTest {
         s_newImplementation = new RouterV2Mock();
         s_reentrantIndex = new ReentrantIndexMock(address(router));
 
-        s_routerRole = initializedIndex.ROUTER_ROLE();
         s_initialImplementation = router.getImplementation();
         s_initializeV2Data = abi.encodeCall(
             RouterV2Mock.initializeV2,
@@ -347,13 +345,14 @@ contract RouterUpgradeTest is BaseTest {
         );
     }
 
-    function testAllIndexesGrantRouterRoleToTheProxy() public view {
-        assertTrue(initializedIndex.hasRole(s_routerRole, address(router)));
-        assertTrue(nonInitializedIndex.hasRole(s_routerRole, address(router)));
-        assertTrue(s_secondIndex.hasRole(s_routerRole, address(router)));
-        assertFalse(
-            initializedIndex.hasRole(s_routerRole, s_initialImplementation),
-            "the bare implementation must not hold ROUTER_ROLE"
+    function testAllIndexesUseTheProxyAsRouter() public view {
+        assertEq(initializedIndex.getRouter(), address(router));
+        assertEq(nonInitializedIndex.getRouter(), address(router));
+        assertEq(s_secondIndex.getRouter(), address(router));
+        assertNotEq(
+            initializedIndex.getRouter(),
+            s_initialImplementation,
+            "the bare implementation must not be the index router"
         );
     }
 
@@ -574,9 +573,9 @@ contract RouterUpgradeTest is BaseTest {
     function testIndexesCreatedBeforeUpgradeMintAndRedeemWithNewLogic()
         public
     {
-        // Both indexes exist and grant ROUTER_ROLE to the proxy before the upgrade.
-        assertTrue(initializedIndex.hasRole(s_routerRole, address(router)));
-        assertTrue(s_secondIndex.hasRole(s_routerRole, address(router)));
+        // Both indexes exist and point to the proxy before the upgrade.
+        assertEq(initializedIndex.getRouter(), address(router));
+        assertEq(s_secondIndex.getRouter(), address(router));
         assertEq(router.getImplementation(), s_initialImplementation);
 
         _upgradeRouterTo(address(s_newImplementation), "");
@@ -586,21 +585,20 @@ contract RouterUpgradeTest is BaseTest {
         assertEq(RouterV2Mock(address(router)).version(), V2_VERSION);
         assertEq(_implementationSlotValue(), address(s_newImplementation));
 
-        // No role migration: the proxy still holds ROUTER_ROLE, the new implementation does not.
-        assertTrue(initializedIndex.hasRole(s_routerRole, address(router)));
-        assertTrue(s_secondIndex.hasRole(s_routerRole, address(router)));
-        assertFalse(
-            initializedIndex.hasRole(s_routerRole, address(s_newImplementation))
+        // No migration: the indexes still point to the proxy, not to the new implementation.
+        assertEq(initializedIndex.getRouter(), address(router));
+        assertEq(s_secondIndex.getRouter(), address(router));
+        assertNotEq(
+            initializedIndex.getRouter(),
+            address(s_newImplementation)
         );
-        assertFalse(
-            s_secondIndex.hasRole(s_routerRole, address(s_newImplementation))
-        );
+        assertNotEq(s_secondIndex.getRouter(), address(s_newImplementation));
 
         _assertMintAndRedeemThroughProxy(initializedIndex, user1);
         _assertMintAndRedeemThroughProxy(s_secondIndex, user2);
     }
 
-    function testIndexCreatedAfterUpgradeGrantsRouterRoleToSameProxy() public {
+    function testIndexCreatedAfterUpgradeUsesSameProxyAsRouter() public {
         _upgradeRouterTo(address(s_newImplementation), "");
 
         vm.prank(deployer);
@@ -611,8 +609,8 @@ contract RouterUpgradeTest is BaseTest {
         );
 
         Index newIndex = Index(newIndexAddress);
-        assertTrue(newIndex.hasRole(s_routerRole, address(router)));
-        assertFalse(newIndex.hasRole(s_routerRole, address(s_newImplementation)));
+        assertEq(newIndex.getRouter(), address(router));
+        assertNotEq(newIndex.getRouter(), address(s_newImplementation));
     }
 
     function testRouterPreviewsWorkAfterUpgrade() public {

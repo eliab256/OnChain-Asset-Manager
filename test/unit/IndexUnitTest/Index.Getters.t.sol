@@ -607,4 +607,33 @@ contract IndexGettersTest is BaseTest {
         assertEq(indexSays, indexManagerSays);
         assertFalse(indexSays);
     }
+
+    // =========================================================================
+    //  getIndexManager / getRouter
+    // =========================================================================
+
+    function testGetIndexManagerReturnsDeployingIndexManager() public view {
+        assertEq(initializedIndex.getIndexManager(), address(indexManager));
+        assertEq(nonInitializedIndex.getIndexManager(), address(indexManager));
+    }
+
+    function testGetIndexManagerIsNotTheIndexItself() public view {
+        assertNotEq(
+            initializedIndex.getIndexManager(),
+            address(initializedIndex)
+        );
+    }
+
+    function testGetRouterReturnsRouterProxy() public view {
+        assertEq(initializedIndex.getRouter(), address(router));
+        assertEq(nonInitializedIndex.getRouter(), address(router));
+        assertEq(initializedIndex.getRouter(), indexManager.getRouterAddress());
+    }
+
+    function testGetRouterAndGetIndexManagerAreDistinct() public view {
+        assertNotEq(
+            initializedIndex.getRouter(),
+            initializedIndex.getIndexManager()
+        );
+    }
 }

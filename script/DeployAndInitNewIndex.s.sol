@@ -11,6 +11,11 @@ import {HelperConfig, AssetConfig, NetworkConfig} from "./HelperConfig.s.sol";
 import {IndexAsset, AssetAvailable, SwapRoute} from "../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
+    IERC20Metadata
+} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IIndex} from "../src/Interface/IIndex.sol";
+import {UnderlyingMath} from "../src/libraries/UnderlyingMath.sol";
+import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -221,7 +226,7 @@ contract DeployAndInitNewIndex is Script {
         if (_token0 == assetAConfig.token) {
             asset0Deposit = _params.initialAssetADeposit > 0
                 ? _params.initialAssetADeposit
-                : indexManager.retrieveAmountFromAmount(
+                : _complementaryAmount(
                     _params.initialAssetBDeposit,
                     _newIndex,
                     false
@@ -229,16 +234,52 @@ contract DeployAndInitNewIndex is Script {
         } else {
             asset0Deposit = _params.initialAssetBDeposit > 0
                 ? _params.initialAssetBDeposit
-                : indexManager.retrieveAmountFromAmount(
+                : _complementaryAmount(
                     _params.initialAssetADeposit,
                     _newIndex,
                     false
                 );
         }
-        asset1Deposit = indexManager.retrieveAmountFromAmount(
-            asset0Deposit,
-            _newIndex,
-            true
-        );
+        asset1Deposit = _complementaryAmount(asset0Deposit, _newIndex, true);
+    }
+
+    /**
+     * @dev Computes the amount of one index asset matching a known amount of the other,
+     *      at the index target weights and Chainlink prices.
+     * @param _amount The known amount, in the native decimals of the input asset.
+     * @param _index The index whose assets, weights and prices are used.
+     * @param _zeroToOne True if `_amount` is in asset0 (returns asset1), false if it is in asset1 (returns asset0).
+     * @return The required amount of the other asset, in its native decimals.
+     */
+    function _complementaryAmount(
+        uint256 _amount,
+        address _index,
+        bool _zeroToOne
+    ) internal view returns (uint256) {
+        address assetIn;
+        address assetOut;
+        uint128 weightIn;
+        uint128 weightOut;
+        {
+            address asset0 = IIndex(_index).getAsset0();
+            address asset1 = IIndex(_index).getAsset1();
+            (uint128 weight0, uint128 weight1) = IIndex(_index)
+                .getAssetsWeights();
+            (assetIn, assetOut, weightIn, weightOut) = _zeroToOne
+                ? (asset0, asset1, weight0, weight1)
+                : (asset1, asset0, weight1, weight0);
+        }
+        uint256 priceIn = IIndex(_index).getLatestPrice(assetIn);
+        uint256 priceOut = IIndex(_index).getLatestPrice(assetOut);
+        return
+            UnderlyingMath.calculateComplementaryAssetAmount(
+                _amount,
+                priceIn,
+                priceOut,
+                IERC20Metadata(assetIn).decimals(),
+                IERC20Metadata(assetOut).decimals(),
+                weightIn,
+                weightOut
+            );
     }
 }

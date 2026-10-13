@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {BaseUpgraderAuthTest} from "./BaseUpgraderAuth.t.sol";
 import {IUpgradeV2Mock} from "../../mocks/IUpgradeV2Mock.sol";
 import {AggregatorConfigurableMock} from "../../mocks/AggregatorConfigurableMock.sol";
+import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
 import {SwapType, SwapRoute, FeedConfig} from "../../../src/types.sol";
 import {
     Initializable
@@ -24,11 +25,17 @@ contract UpgraderAuthTimelockUpgradeTest is BaseUpgraderAuthTest {
     /// Price of the feed registered after an upgrade (8 decimals)
     int256 internal constant NEW_FEED_PRICE = 2_000 * 10 ** 8;
     uint8 internal constant NEW_FEED_DECIMALS = 8;
+    /// Decimals of the ERC20 asset registered after an upgrade (like WETH)
+    uint8 internal constant NEW_ASSET_DECIMALS = 18;
 
-    address internal s_newAsset = makeAddr("newAsset");
+    /// ERC20 asset with no feed (registerPriceFeed validates symbol() and decimals())
+    address internal s_newAsset;
 
     function setUp() public override {
         super.setUp();
+        s_newAsset = address(
+            new AssetTokenMock("New Asset", "NEW", NEW_ASSET_DECIMALS)
+        );
     }
 
     // =========================================================================

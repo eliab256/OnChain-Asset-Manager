@@ -17,8 +17,12 @@ interface IPriceFeedManager is IUpgraderAuth {
     /**
      * @notice Registers the first Chainlink price feed of an asset. Effective immediately.
      * @dev Callable only by accounts holding ASSET_MANAGER_ROLE on the IndexManager (owner).
-     *      Reverts if the asset is address(0), already has a feed, or the feed/maxDelay are invalid
-     *      (no code, latestRoundData() failing or answer <= 0, decimals() > 18, maxDelay == 0 or > MAX_FEED_DELAY_LIMIT).
+     *      Reverts with PriceFeedManager__InvalidAsset if the asset is address(0) or its symbol() reverts or returns no data.
+     *      Reverts with PriceFeedManager__InvalidAssetDecimals if the asset decimals() reverts or is above 18.
+     *      Reverts with PriceFeedManager__PriceFeedAlreadySet if the asset already has a feed.
+     *      Reverts if the feed/maxDelay are invalid (no code, latestRoundData() failing or answer <= 0,
+     *      feed decimals() > 18, maxDelay == 0 or > MAX_FEED_DELAY_LIMIT).
+     *      Since every index asset and USDC need a registered feed, this is where their ERC20 metadata is validated.
      * @param _asset The asset whose USD price the feed reports.
      * @param _feed The Chainlink AggregatorV3Interface price feed address.
      * @param _maxDelay Maximum age, in seconds, of the latest answer (feed heartbeat + margin).

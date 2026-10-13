@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import {AggregatorConfigurableMock} from "../../mocks/AggregatorConfigurableMock.sol";
+import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
 import {FeedConfig, PendingFeed} from "../../../src/types.sol";
 
 /**
@@ -19,9 +20,9 @@ abstract contract BasePriceFeedManagerTest is BaseTest {
     AggregatorConfigurableMock internal s_feed18Decimals;
     AggregatorConfigurableMock internal s_newFeed;
 
-    /// Asset with no feed registered (registerPriceFeed does not require code at the asset)
-    address internal s_asset = makeAddr("pfmAsset");
-    address internal s_otherAsset = makeAddr("pfmOtherAsset");
+    /// ERC20 assets with no feed registered (registerPriceFeed validates symbol() and decimals())
+    address internal s_asset;
+    address internal s_otherAsset;
     address internal s_noCodeFeed = makeAddr("noCodeFeed");
     address internal s_assetManager;
 
@@ -31,6 +32,8 @@ abstract contract BasePriceFeedManagerTest is BaseTest {
 
     uint8 internal constant FEED_DECIMALS_8 = 8;
     uint8 internal constant FEED_DECIMALS_18 = 18;
+    /// Decimals of the ERC20 assets registered in the tests (like WETH)
+    uint8 internal constant ASSET_DECIMALS = 18;
     int256 internal constant PRICE_8_DECIMALS = 2_000 * 10 ** 8; // $2000
     int256 internal constant PRICE_18_DECIMALS = 3_000 * 10 ** 18; // $3000
     int256 internal constant NEW_FEED_PRICE = 2_100 * 10 ** 8; // $2100
@@ -73,6 +76,13 @@ abstract contract BasePriceFeedManagerTest is BaseTest {
             NEW_FEED_PRICE
         );
 
+        s_asset = address(
+            new AssetTokenMock("PFM Asset", "PFMA", ASSET_DECIMALS)
+        );
+        s_otherAsset = address(
+            new AssetTokenMock("PFM Other Asset", "PFMO", ASSET_DECIMALS)
+        );
+
         s_assetManager = deployer;
         s_validMaxDelay = assetPriceFeedMaxDelay;
         s_otherValidMaxDelay = usdcPriceFeedMaxDelay;
@@ -82,6 +92,8 @@ abstract contract BasePriceFeedManagerTest is BaseTest {
         s_assetManagerRole = indexManager.ASSET_MANAGER_ROLE();
 
         vm.label(address(priceFeedManager), "PriceFeedManager");
+        vm.label(s_asset, "pfmAsset");
+        vm.label(s_otherAsset, "pfmOtherAsset");
         vm.label(address(s_feed8Decimals), "Feed8Decimals");
         vm.label(address(s_feed18Decimals), "Feed18Decimals");
         vm.label(address(s_newFeed), "NewFeed");

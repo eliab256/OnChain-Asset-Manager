@@ -34,7 +34,7 @@ import {
  * @notice Entry point for users to buy and sell shares of every Index.
  * @dev UUPS upgradeable. Deployed behind an ERC1967Proxy created by the IndexManager.
  *      Only the upgrader (the TimelockController) can upgrade it, see UpgraderAuth.
- *      Every Index grants ROUTER_ROLE to the proxy address, so an upgrade applies to all indexes.
+ *      Every Index stores the proxy address as its router, so an upgrade applies to all indexes.
  *      Storage follows ERC-7201 namespaced layout. ReentrancyGuard (OZ 5.x) keeps its status in its own
  *      ERC-7201 slot; on the proxy the status starts at 0, which is treated as not entered.
  */
@@ -136,18 +136,7 @@ contract Router is
         _buyShares(_indexAddress, _usdcAmount, _maxTolerance);
     }
 
-    /**
-     * @notice Set Allowance to the index contract to spend Usdc using permit
-     * @notice buy exact amount of Usdc and receive shares, tolerance is used to protect users from front-running and price manipulation.
-     * @notice If the amount of shares received is less than the minimum amount calculated with tolerance, the transaction will revert.
-     * @param _indexAddress The address of the index.
-     * @param _usdcAmount The amount of USDC to spend.
-     * @param _maxTolerance The maximum tolerance allowed (e.g. 10_000 = 1%, 50_000 = 5%). Must be < MAX_TOLERANCE * PERCENTAGE_FEE_PRECISION.
-     * @param _deadline The deadline for the permit signature.
-     * @param _v The v component of the permit signature.
-     * @param _r The r component of the permit signature.
-     * @param _s The s component of the permit signature.
-     */
+    /// @dev Inherit from IRouter. See interface for details.
     function buyExactUsdcAmountOfSharesWithPermit(
         address _indexAddress,
         uint256 _usdcAmount,
@@ -157,7 +146,7 @@ contract Router is
         bytes32 _r,
         bytes32 _s
     )
-        public
+        external
         validInputs(_indexAddress, _usdcAmount, _maxTolerance, true)
         nonReentrant
     {

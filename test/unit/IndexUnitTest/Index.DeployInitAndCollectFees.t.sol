@@ -9,9 +9,6 @@ import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
 import {Index} from "../../../src/Index.sol";
 import {
-    IAccessControl
-} from "@openzeppelin/contracts/access/IAccessControl.sol";
-import {
     HelperConfig,
     AssetConfig,
     NetworkConfig
@@ -53,8 +50,12 @@ contract IndexTest is BaseTest {
     //  deployment and constructor
     // =========================================================================
     function testIndexDeployment() public {
-        (address effectiveToken0, address effectiveToken1) = indexManager
-            .sortAssets(address(mockLink), address(mockWbtc));
+        // sortAssets is internal in the IndexManager: sort locally (asset0 = lower address).
+        (address effectiveToken0, address effectiveToken1) = address(
+            mockLink
+        ) < address(mockWbtc)
+            ? (address(mockLink), address(mockWbtc))
+            : (address(mockWbtc), address(mockLink));
 
         assertEq(nonInitializedIndex.getAsset0(), effectiveToken0);
         assertEq(nonInitializedIndex.getAsset1(), effectiveToken1);
@@ -125,18 +126,7 @@ contract IndexTest is BaseTest {
     function testInitializarionRevertIfNotCalledByIndexManager() public {
         uint256 initAmount = 10 * 10 ** mockWeth.decimals();
 
-        bytes32 indexManagerRole = nonInitializedIndex.INDEX_MANAGER_ROLE();
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(
-                    keccak256(
-                        "AccessControlUnauthorizedAccount(address,bytes32)"
-                    )
-                ),
-                user1,
-                indexManagerRole
-            )
-        );
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
         vm.prank(user1);
         nonInitializedIndex.initialize(address(deployer), initAmount);
     }
@@ -315,13 +305,7 @@ contract IndexTest is BaseTest {
     // =========================================================================
 
     function testCollectFeesRevertsIfNotCalledByIndexManager() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                nonInitializedIndex.INDEX_MANAGER_ROLE()
-            )
-        );
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
         vm.prank(user1);
         nonInitializedIndex.collectFees(user1);
     }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
+import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
 import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
@@ -30,7 +31,11 @@ contract DeployPeripheryTest is Test, CodeConstants {
     address public mainnetDeployer;
 
     modifier selectFork(string memory rpcAlias) {
-        vm.createSelectFork(vm.rpcUrl(rpcAlias));
+        if (keccak256(bytes(rpcAlias)) == keccak256(bytes("mainnet"))) {
+            vm.createSelectFork(vm.rpcUrl(rpcAlias), MAINNET_FORK_BLOCK);
+        } else {
+            vm.createSelectFork(vm.rpcUrl(rpcAlias));
+        }
         _;
     }
     
@@ -50,8 +55,14 @@ contract DeployPeripheryTest is Test, CodeConstants {
             mainnetDeployer
         ) = mainnetDeployerPeriphery.run();
 
-        assertEq(mainnetIndexManager.getUsdc(), isolatedHelperConfig.getActiveNetworkConfig().usdcAddress);
-        assertEq(mainnetIndexManager.getUsdcPriceFeed(), isolatedHelperConfig.getActiveNetworkConfig().usdcPriceFeedAddress);
+        // getUsdc/getUsdcPriceFeed were removed from the IndexManager: read them from the Router and the PriceFeedManager.
+        assertEq(mainnetRouter.getUsdc(), isolatedHelperConfig.getActiveNetworkConfig().usdcAddress);
+        assertEq(
+            PriceFeedManager(mainnetIndexManager.getPriceFeedManagerAddress())
+                .getPriceFeedConfig(isolatedHelperConfig.getActiveNetworkConfig().usdcAddress)
+                .feed,
+            isolatedHelperConfig.getActiveNetworkConfig().usdcPriceFeedAddress
+        );
         assertEq(mainnetIndexManager.getUniswapUniversalRouter(), isolatedHelperConfig.getActiveNetworkConfig().uniswapUniversalRouter);
         assertEq(mainnetIndexManager.getRouterAddress(), address(mainnetRouter));
         assertEq(mainnetIndexManager.getSwapManagerAddress(), address(mainnetSwapManager));

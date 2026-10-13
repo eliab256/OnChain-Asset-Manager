@@ -129,13 +129,13 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         indexes[1] = address(s_secondIndex);
     }
 
-    /// @dev Batch outcome: one IndexActionTriggered for the initialized index, `_failedSig`
-    ///      and no IndexActionTriggered for the second index, nothing for the non-initialized one.
+    /// @dev Batch outcome: one IndexActionTriggered for the initialized index, one
+    ///      IndexActionFailed(_failedReason) and no IndexActionTriggered for the second index.
     function _assertBatchOneSuccessOneFailure(
         Vm.Log[] memory _logs,
         address _caller,
         IndexAction _action,
-        bytes32 _failedSig,
+        bytes memory _failedReason,
         bytes32 _indexSuccessSig
     ) internal view {
         uint256 actionPosition = _assertSingleActionTriggeredFor(
@@ -153,11 +153,11 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         assertEq(
             _countManagerEvents(
                 _logs,
-                _failedSig,
+                IndexActionFailed.selector,
                 address(initializedIndex)
             ),
             0,
-            "the succeeding index must not get a Failed event"
+            "the succeeding index must not get IndexActionFailed"
         );
 
         assertEq(
@@ -169,10 +169,12 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             0,
             "the failing index must not get IndexActionTriggered"
         );
-        assertEq(
-            _countManagerEvents(_logs, _failedSig, address(s_secondIndex)),
-            1,
-            "the failing index must get exactly one Failed event"
+        _assertSingleActionFailedFor(
+            _logs,
+            address(s_secondIndex),
+            _caller,
+            _action,
+            _failedReason
         );
 
         assertEq(
@@ -181,9 +183,9 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             "exactly one IndexActionTriggered in the batch"
         );
         assertEq(
-            _countManagerEvents(_logs, _failedSig),
+            _countManagerEvents(_logs, IndexActionFailed.selector),
             1,
-            "exactly one Failed event in the batch"
+            "exactly one IndexActionFailed in the batch"
         );
     }
 
@@ -310,14 +312,12 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             0,
             "a failed rebalance must not emit IndexActionTriggered"
         );
-        assertEq(
-            _countManagerEvents(
-                logs,
-                IndexRebalanceFailed.selector,
-                address(initializedIndex)
-            ),
-            1,
-            "a failed rebalance must emit IndexRebalanceFailed"
+        _assertSingleActionFailedFor(
+            logs,
+            address(initializedIndex),
+            deployer,
+            IndexAction.REBALANCE,
+            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
     }
 
@@ -335,31 +335,7 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             logs,
             deployer,
             IndexAction.REBALANCE,
-            IndexRebalanceFailed.selector,
-            IndexRebalanced.selector
-        );
-    }
-
-    function testRebalanceAllIndexesEmitsActionTriggeredOnlyForSucceedingIndex()
-        public
-    {
-        assertEq(
-            indexManager.getInitializedIndexes().length,
-            2,
-            "the batch must cover exactly the two initialized indexes"
-        );
-        _unbalanceInitializedIndexOnly();
-
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.rebalanceAllIndexes();
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        _assertBatchOneSuccessOneFailure(
-            logs,
-            deployer,
-            IndexAction.REBALANCE,
-            IndexRebalanceFailed.selector,
+            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
             IndexRebalanced.selector
         );
     }
@@ -507,14 +483,12 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             0,
             "a failed weight update must not emit IndexActionTriggered"
         );
-        assertEq(
-            _countManagerEvents(
-                logs,
-                WeightsUpdateFailed.selector,
-                address(initializedIndex)
-            ),
-            1,
-            "a failed weight update must emit WeightsUpdateFailed"
+        _assertSingleActionFailedFor(
+            logs,
+            address(initializedIndex),
+            deployer,
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
     }
 
@@ -533,27 +507,7 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             logs,
             deployer,
             IndexAction.EXECUTE_WEIGHTS,
-            WeightsUpdateFailed.selector,
-            WeightsUpdated.selector
-        );
-    }
-
-    function testExecuteWeightUpdateForAllIndexesEmitsActionTriggeredOnlyForSucceedingIndex()
-        public
-    {
-        _proposeAndWarpToExecutable(address(initializedIndex), weight70);
-        _refreshExchangeRates();
-
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.executeWeightUpdateForAllIndexes();
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        _assertBatchOneSuccessOneFailure(
-            logs,
-            deployer,
-            IndexAction.EXECUTE_WEIGHTS,
-            WeightsUpdateFailed.selector,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
             WeightsUpdated.selector
         );
     }
@@ -642,14 +596,12 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             0,
             "a failed fee collection must not emit IndexActionTriggered"
         );
-        assertEq(
-            _countManagerEvents(
-                logs,
-                FeesCollectionFailed.selector,
-                address(initializedIndex)
-            ),
-            1,
-            "a failed fee collection must emit FeesCollectionFailed"
+        _assertSingleActionFailedFor(
+            logs,
+            address(initializedIndex),
+            feeCollector,
+            IndexAction.COLLECT_FEES,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector)
         );
     }
 
@@ -669,28 +621,7 @@ contract IndexManagerActionTriggeredTest is BaseTest {
             logs,
             feeCollector,
             IndexAction.COLLECT_FEES,
-            FeesCollectionFailed.selector,
-            FeesCollected.selector
-        );
-    }
-
-    function testCollectFeesFromAllIndexesEmitsActionTriggeredOnlyForSucceedingIndex()
-        public
-    {
-        _mintSharesViaRouter(user1, FEE_GENERATING_DEPOSIT);
-        (, uint128 secondIndexFees) = s_secondIndex.getFeesInfo();
-        assertEq(secondIndexFees, 0, "the second index must have no fees");
-
-        vm.recordLogs();
-        vm.prank(feeCollector);
-        indexManager.collectFeesFromAllIndexes();
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        _assertBatchOneSuccessOneFailure(
-            logs,
-            feeCollector,
-            IndexAction.COLLECT_FEES,
-            FeesCollectionFailed.selector,
+            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
             FeesCollected.selector
         );
     }

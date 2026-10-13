@@ -23,17 +23,17 @@ abstract contract ContractCodeConstants {
      * @dev The standard number of decimals for tokens.
      * @dev This is used for normalizing token amounts and prices to a common decimal standard.
      */
-    uint8 public constant DECIMALS_STANDARD = 18;
+    uint8 internal constant DECIMALS_STANDARD = 18;
 
     /**
      * @dev The precision for percentage fee calculations, in basis points (1 basis point = 0.01%).
      */
-    uint32 public constant PERCENTAGE_FEE_PRECISION = 10000;
+    uint32 internal constant PERCENTAGE_FEE_PRECISION = 10000;
 
     /**
      * @dev The maximum percentage value, in basis points.
      */
-    uint32 public constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
+    uint32 internal constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
 
     /**
      * @dev The maximum tolerance allowed for mint/redeem operations.

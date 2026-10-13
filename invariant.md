@@ -70,7 +70,7 @@
 
 11. **Weight sum at creation**: Per ogni index creato, `asset0.weightPercentage + asset1.weightPercentage == MAX_WEIGHT`.
 
-12. **Single Router proxy**: `i_router` è il proxy ERC1967 creato nel costruttore, non cambia mai e ogni Index assegna `ROUTER_ROLE` a questo indirizzo. Un upgrade del Router (solo tramite il `TimelockController`) vale per tutti gli index, compresi quelli già creati.
+12. **Single Router proxy**: `i_router` è il proxy ERC1967 creato nel costruttore, non cambia mai e ogni Index lo salva come immutabile `i_router` (leggibile con `getRouter()`). Un upgrade del Router (solo tramite il `TimelockController`) vale per tutti gli index, compresi quelli già creati.
 
 13. **Single SwapManager proxy**: `i_swapManager` è il proxy ERC1967 creato nel costruttore, non cambia mai ed è lo stesso indirizzo passato a ogni Index (`Index.i_swapManager == IndexManager.getSwapManagerAddress()`). L'owner del proxy è l'IndexManager.
 
@@ -78,15 +78,15 @@
 
 15. **totalFeesCollected consistency**: `s_totalFeesCollected == Σ` di tutti i `feeAmount` raccolti con successo dai singoli index.
 
-16. **sortAssets determinism**: `sortAssets(a, b) == sortAssets(b, a)` e `token0 < token1` sempre.
+16. **sortAssets determinism**: `_sortAssets(a, b) == _sortAssets(b, a)` e `token0 < token1` sempre (funzione interna dell'IndexManager).
 
 17. **No self-pair index**: `createIndex` reverta se `_assetA.asset == _assetB.asset`.
 
-18. **ERC20 validation**: Entrambi gli asset di un index devono implementare `symbol()` (proxy per validazione ERC20).
+18. **ERC20 validation**: la fa il PriceFeedManager in `registerPriceFeed`: l'asset deve rispondere a `symbol()` con dati (`PriceFeedManager__InvalidAsset`) e a `decimals()` con un valore ≤ 18 (`PriceFeedManager__InvalidAssetDecimals`). Dato che `createIndex` richiede un feed registrato per entrambi gli asset (invariante 19), ogni asset di un index è stato validato.
 
 19. **Price feed registration**: `createIndex` reverta se asset0, asset1 o USDC non hanno un feed registrato nel PriceFeedManager.
 
-20. **Rebalance/fee collection non-reverting batch**: `rebalanceAllIndexes`, `collectFeesFromAllIndexes`, ecc. non revertano l'intera transazione se un singolo index fallisce — emettono eventi di fallimento.
+20. **Rebalance/fee collection non-reverting batch**: rebalance, esecuzione dei pesi e raccolta fee (varianti single e multiple, tutte via `_tryIndexAction`) non revertano se un index fallisce: emettono `IndexActionFailed(index, caller, action, reasonData)` con il revert data originale. Le varianti multiple revertano solo se un indirizzo della lista non è un index inizializzato.
 
 21. **Proxy upgrade timelock**: SwapManager, PriceFeedManager e Router hanno come `upgrader` (`UpgraderAuth`, storage ERC-7201 `onchainassetmanager.storage.UpgraderAuth`) il `TimelockController` passato al costruttore dell'IndexManager (mai zero, `IndexManager__ZeroAddress`). Solo l'upgrader può chiamare `upgradeToAndCall`: IndexManager, owner, admin o chiunque altro ricevono `UpgraderAuth__Unauthorized(caller)`. Ogni upgrade richiede quindi `schedule` + attesa di almeno `getMinDelay()` (2 giorni) + `execute` da parte del MultiSig; `cancel` è possibile finché non è eseguito. L'upgrader non ha setter: cambia solo con un upgrade. L'IndexManager non ha più funzioni di upgrade.
 

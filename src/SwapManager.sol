@@ -19,6 +19,7 @@ import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 import {SwapType, PoolKey, PoolVersion, SwapRoute} from "./types.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IIndex} from "./Interface/IIndex.sol";
+import {ISwapManager} from "./Interface/ISwapManager.sol";
 
 /**
  * @title SwapManager
@@ -27,7 +28,12 @@ import {IIndex} from "./Interface/IIndex.sol";
  *      Only the upgrader (the TimelockController) can upgrade it, see UpgraderAuth.
  *      Storage follows ERC-7201 namespaced layout.
  */
-contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
+contract SwapManager is
+    ISwapManager,
+    Initializable,
+    OwnableUpgradeable,
+    UpgraderAuth
+{
     // Errors
     error SwapManager__IndexNotRegistered();
     error SwapManager__RouteNotRegistered();
@@ -59,12 +65,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         _disableInitializers();
     }
 
-    /**
-     * @notice Initializes the proxy storage.
-     * @dev Reverts with UpgraderAuth__ZeroAddress if `_upgrader` is zero.
-     * @param _indexManager The IndexManager address, set as owner (only account allowed to register and update routes).
-     * @param _upgrader The only account allowed to upgrade the proxy (the TimelockController).
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function initialize(
         address _indexManager,
         address _upgrader
@@ -73,18 +74,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         __UpgraderAuth_init(_upgrader);
     }
 
-    /**
-     * @notice Registers the swap routes for an index.
-     * @dev Each route can independently use either Uniswap V3 or Uniswap V4.
-     *      Each route must connect the expected tokens of the index, read from the index itself:
-     *      ASSET0_USDC ↔ {asset0, usdc}, ASSET1_USDC ↔ {asset1, usdc}, ASSET0_ASSET1 ↔ {asset0, asset1}.
-     *      Reverts with `SwapManager__NotAnIndex` before any route is validated if `_indexAddress`
-     *      has no code or does not expose `getAsset0`, `getAsset1` and `getUsdc`.
-     * @param _indexAddress The index contract address.
-     * @param _routeAsset0Usdc The route used for Asset0 ↔ USDC swaps.
-     * @param _routeAsset1Usdc The route used for Asset1 ↔ USDC swaps.
-     * @param _routeAsset0Asset1 The route used for Asset0 ↔ Asset1 swaps.
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function registerIndex(
         address _indexAddress,
         SwapRoute memory _routeAsset0Usdc,
@@ -111,13 +101,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         $.routes[_indexAddress][SwapType.ASSET0_ASSET1] = _routeAsset0Asset1;
     }
 
-    /**
-     * @notice Updates a single route for a registered index.
-     * @dev The new route must connect the expected tokens of the index for `_swapType`.
-     * @param _indexAddress The index contract address.
-     * @param _swapType The swap type to update.
-     * @param _newRoute The new route definition, either V3 or V4.
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function updateRoute(
         address _indexAddress,
         SwapType _swapType,
@@ -131,18 +115,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         _getSwapManagerStorage().routes[_indexAddress][_swapType] = _newRoute;
     }
 
-    /**
-     * @dev Builds the parameters for a single swap.
-     * @param _indexAddress The address of the index.
-     * @param _swapType The type of swap.
-     * @param _tokenIn The address of the input token.
-     * @param _amountIn The amount of the input token.
-     * @param _amountOutMinimum Minimum output amount in token decimals; the router reverts if not met (0 disables the check).
-     * @return commands The encoded commands for the swap.
-     * @return inputs The encoded inputs for the swap.
-     * @return tokenIn The address of the input token.
-     * @return tokenOut The address of the output token.
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function buildSingleSwapParams(
         address _indexAddress,
         SwapType _swapType,
@@ -183,21 +156,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         }
     }
 
-    /**
-     * @notice Builds the parameters for two independent swaps in a single call.
-     * @dev The two swaps can use different pool versions, for example V3 + V4.
-     * @param _indexAddress The index contract address.
-     * @param _swapType0 The swap type for the first swap.
-     * @param _swapType1 The swap type for the second swap.
-     * @param _tokenIn0 The input token address for the first swap.
-     * @param _tokenIn1 The input token address for the second swap.
-     * @param _amountIn0 The input amount for the first swap.
-     * @param _amountIn1 The input amount for the second swap.
-     * @param _amountOutMinimum0 Minimum output amount for the first swap, in token decimals.
-     * @param _amountOutMinimum1 Minimum output amount for the second swap, in token decimals.
-     * @return commands The concatenated router commands.
-     * @return inputs The encoded router inputs for both swaps.
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function buildDoubleSwapParams(
         address _indexAddress,
         SwapType _swapType0,
@@ -242,12 +201,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         inputs[1] = inputs1[0];
     }
 
-    /**
-     * @notice Returns the registered route for an index and swap type.
-     * @param _indexAddress The index contract address.
-     * @param _swapType The swap type to query.
-     * @return The stored swap route.
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function getRoute(
         address _indexAddress,
         SwapType _swapType
@@ -580,9 +534,7 @@ contract SwapManager is Initializable, OwnableUpgradeable, UpgraderAuth {
         }
     }
 
-    /**
-     * @notice Returns the current implementation address of the proxy.
-     */
+    /// @dev Inherit from ISwapManager. See interface for details.
     function getImplementation() external view returns (address) {
         return ERC1967Utils.getImplementation();
     }

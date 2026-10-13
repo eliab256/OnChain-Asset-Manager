@@ -54,7 +54,7 @@ contract ShortDecimalsReturnTokenMock {
 /**
  * @dev ERC20 whose `decimals()` returns a valid value to callers with deployed code and reverts
  *      for callers without code — i.e. a contract still running its constructor.
- *      It passes the IndexManager validation (caller = IndexManager) and then makes the Index
+ *      It passes the PriceFeedManager validation (caller = PriceFeedManager proxy) and then makes the Index
  *      constructor revert (caller = the Index under construction), so create2 returns address(0).
  *      A storage counter cannot be used: both calls are STATICCALLs (view), so no state can change.
  */
@@ -69,6 +69,36 @@ contract ConstructorDecimalsRevertingTokenMock is ERC20 {
         if (msg.sender.code.length == 0) {
             revert ConstructorDecimalsRevertingTokenMock__CallerUnderConstruction();
         }
+        return TOKEN_DECIMALS;
+    }
+}
+
+/**
+ * @dev Token exposing `decimals()` but no `symbol()` function at all (and no fallback),
+ *      so a `symbol()` call fails at the dispatcher and the asset validation rejects it.
+ */
+contract NoSymbolTokenMock {
+    uint8 private constant TOKEN_DECIMALS = 18;
+
+    function decimals() external pure returns (uint8) {
+        return TOKEN_DECIMALS;
+    }
+}
+
+/**
+ * @dev Token whose `symbol()` succeeds but returns no data at all, like a non-compliant token
+ *      with an empty body. `decimals()` works, so only the symbol validation can reject it.
+ */
+contract EmptySymbolReturnTokenMock {
+    uint8 private constant TOKEN_DECIMALS = 18;
+
+    function symbol() external pure {
+        assembly {
+            return(0x00, 0x00)
+        }
+    }
+
+    function decimals() external pure returns (uint8) {
         return TOKEN_DECIMALS;
     }
 }

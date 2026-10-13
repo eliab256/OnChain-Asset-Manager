@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 error PriceFeedManager__CallerNotAssetManager();
 error PriceFeedManager__InvalidAsset();
+error PriceFeedManager__InvalidAssetDecimals(address asset);
 error PriceFeedManager__InvalidPriceFeed(address feed);
 error PriceFeedManager__InvalidMaxDelay();
 error PriceFeedManager__PriceFeedAlreadySet(address asset);

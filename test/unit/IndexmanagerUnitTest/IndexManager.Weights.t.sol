@@ -39,7 +39,7 @@ contract IndexManagerWeightsTest is BaseTest {
             weightA: 60 * WEIGHT_PRECISION,
             weightB: 40 * WEIGHT_PRECISION,
             feePercentage: 1 * PERCENTAGE_FEE_PRECISION, // 1%
-            initialAssetADeposit: 0, // computed by the script via retrieveAmountFromAmount
+            initialAssetADeposit: 0, // computed by the script via UnderlyingMath.calculateComplementaryAssetAmount
             initialAssetBDeposit: 1000 * 10 ** 18 // 1000 units of assetB
         });
 
@@ -193,7 +193,7 @@ contract IndexManagerWeightsTest is BaseTest {
         indexManager.executeSingleWeightUpdate(address(nonInitializedIndex));
     }
 
-    function testExecuteWeightUpdateEmitsWeightUpdateFailedWhenNoPendingUpdate()
+    function testExecuteWeightUpdateEmitsIndexActionFailedWhenNoPendingUpdate()
         public
     {
         vm.prank(deployer);
@@ -201,33 +201,12 @@ contract IndexManagerWeightsTest is BaseTest {
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 expectedSig = WeightsUpdateFailed.selector;
-        bool eventFound = false;
-        address indexFromEvent;
-        bytes memory reasonDataFromEvent;
-
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (
-                logs[i].emitter == address(indexManager) &&
-                logs[i].topics[0] == expectedSig
-            ) {
-                eventFound = true;
-                indexFromEvent = address(uint160(uint256(logs[i].topics[1])));
-                reasonDataFromEvent = logs[i].data;
-                break;
-            }
-        }
-        assertTrue(eventFound, "WeightsUpdateFailed event not emitted");
-        assertEq(
-            indexFromEvent,
+        _assertOnlyActionFailed(
+            logs,
             address(initializedIndex),
-            "Incorrect index address in event"
-        );
-        bytes memory reasonBytes = abi.decode(reasonDataFromEvent, (bytes));
-        assertEq(
-            reasonBytes,
-            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
-            "Reason must be the raw Index__NotPendingWeightUpdate revert data"
+            deployer,
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
     }
 
@@ -249,7 +228,7 @@ contract IndexManagerWeightsTest is BaseTest {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         // Index emits WeightsUpdated (the weight update succeeded).
         // Index internally emits WeightsUpdateRebalanceFailed (rebalance failed).
-        // IndexManager does NOT emit WeightsUpdateFailed because Index.executeWeightUpdate() did not revert:
+        // IndexManager does NOT emit IndexActionFailed because Index.executeWeightUpdate() did not revert:
         // it emits only IndexActionTriggered(EXECUTE_WEIGHTS).
         bytes32 expectedSuccessSig = WeightsUpdated.selector;
         bytes32 expectedRebalanceFailedSig = WeightsUpdateRebalanceFailed
@@ -291,7 +270,7 @@ contract IndexManagerWeightsTest is BaseTest {
         );
     }
 
-    function testExecuteWeightUpdateEmitsWeightUpdateFailedWhenExecutedTooEarly()
+    function testExecuteWeightUpdateEmitsIndexActionFailedWhenExecutedTooEarly()
         public
     {
         vm.prank(deployer);
@@ -303,37 +282,16 @@ contract IndexManagerWeightsTest is BaseTest {
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 expectedSig = WeightsUpdateFailed.selector;
-        bool eventFound = false;
-        address indexFromEvent;
-        bytes memory reasonDataFromEvent;
-
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (
-                logs[i].emitter == address(indexManager) &&
-                logs[i].topics[0] == expectedSig
-            ) {
-                eventFound = true;
-                indexFromEvent = address(uint160(uint256(logs[i].topics[1])));
-                reasonDataFromEvent = logs[i].data;
-                break;
-            }
-        }
-        assertTrue(eventFound, "WeightsUpdateFailed event not emitted");
-        assertEq(
-            indexFromEvent,
+        _assertOnlyActionFailed(
+            logs,
             address(initializedIndex),
-            "Incorrect index address in event"
-        );
-        bytes memory reasonBytes = abi.decode(reasonDataFromEvent, (bytes));
-        assertEq(
-            reasonBytes,
-            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
-            "Reason must be the raw Index__NotPendingWeightUpdate revert data"
+            deployer,
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
     }
 
-    function testExecuteWeightUpdateEmitsWeightUpdateFailedWhenProposalExpired()
+    function testExecuteWeightUpdateEmitsIndexActionFailedWhenProposalExpired()
         public
     {
         vm.prank(deployer);
@@ -350,24 +308,12 @@ contract IndexManagerWeightsTest is BaseTest {
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bool eventFound = false;
-        bytes memory reasonDataFromEvent;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (
-                logs[i].emitter == address(indexManager) &&
-                logs[i].topics[0] == WeightsUpdateFailed.selector
-            ) {
-                eventFound = true;
-                reasonDataFromEvent = logs[i].data;
-                break;
-            }
-        }
-        assertTrue(eventFound, "WeightsUpdateFailed event not emitted");
-        bytes memory reasonBytes = abi.decode(reasonDataFromEvent, (bytes));
-        assertEq(
-            reasonBytes,
-            abi.encodeWithSelector(Index__WeightUpdateExpired.selector),
-            "Reason must be the raw Index__WeightUpdateExpired revert data"
+        _assertOnlyActionFailed(
+            logs,
+            address(initializedIndex),
+            deployer,
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__WeightUpdateExpired.selector)
         );
     }
 
@@ -469,7 +415,7 @@ contract IndexManagerWeightsTest is BaseTest {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         // Success is now logged only by each Index (WeightsUpdated, emitter = index).
         bytes32 expectedSuccessSig = WeightsUpdated.selector;
-        bytes32 expectedFailedSig = WeightsUpdateFailed.selector;
+        bytes32 expectedFailedSig = IndexActionFailed.selector;
         uint256 successCount = 0;
         uint256 failedCount = 0;
         address[] memory indexesFromSuccessEvents = new address[](2);
@@ -508,13 +454,59 @@ contract IndexManagerWeightsTest is BaseTest {
             address(newIndexWbtcComp),
             "Failed event should be for newIndexWbtcComp"
         );
+        _assertSingleActionFailedFor(
+            logs,
+            address(newIndexWbtcComp),
+            deployer,
+            IndexAction.EXECUTE_WEIGHTS,
+            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
+        );
     }
 
-    // =========================================================================
-    //  executeWeightUpdateForAllIndexes
-    // =========================================================================
+    function testExecuteWeightUpdateForMultipleIndexesOnInitializedIndexesUpdatesOnlyPending()
+        public
+    {
+        vm.startPrank(deployer);
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+        indexManager.proposeNewWeights(address(newIndexLinkWeth), weight30);
+        vm.stopPrank();
+        (uint128 untouchedWeight0Before, uint128 untouchedWeight1Before) = newIndexWbtcComp
+            .getAssetsWeights();
 
-    function testExecuteWeightUpdateForAllIndexesWithInitializedIndexesEmitEvents()
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+        _refreshPriceFeeds();
+
+        address[] memory indexes = indexManager.getInitializedIndexes();
+        assertEq(indexes.length, 3, "three initialized indexes expected");
+
+        vm.prank(deployer);
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+
+        (uint128 w0, uint128 w1) = initializedIndex.getAssetsWeights();
+        assertEq(w0, weight30, "initializedIndex weight0 must be updated");
+        assertEq(w1, MAX_WEIGHT - weight30, "initializedIndex weight1");
+        (w0, w1) = newIndexLinkWeth.getAssetsWeights();
+        assertEq(w0, weight30, "newIndexLinkWeth weight0 must be updated");
+        assertEq(w1, MAX_WEIGHT - weight30, "newIndexLinkWeth weight1");
+        (w0, w1) = newIndexWbtcComp.getAssetsWeights();
+        assertEq(
+            w0,
+            untouchedWeight0Before,
+            "index without pending update must keep weight0"
+        );
+        assertEq(
+            w1,
+            untouchedWeight1Before,
+            "index without pending update must keep weight1"
+        );
+
+        (uint128 pending0, , uint256 executableAt) = initializedIndex
+            .getAssetsPendingWeights();
+        assertEq(pending0, 0, "pending weights must be cleared");
+        assertEq(executableAt, 0, "pending timestamp must be cleared");
+    }
+
+    function testExecuteWeightUpdateForMultipleIndexesOnInitializedIndexesEmitsOneEventPerIndex()
         public
     {
         vm.startPrank(deployer);
@@ -525,76 +517,42 @@ contract IndexManagerWeightsTest is BaseTest {
         vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
         _refreshPriceFeeds();
 
+        address[] memory indexes = indexManager.getInitializedIndexes();
+
         vm.prank(deployer);
         vm.recordLogs();
-        indexManager.executeWeightUpdateForAllIndexes();
-
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        // Success is now logged only by each Index (WeightsUpdated, emitter = index).
-        bytes32 expectedSuccessSig = WeightsUpdated.selector;
-        bytes32 expectedFailedSig = WeightsUpdateFailed.selector;
-        uint256 successCount = 0;
-        uint256 failedCount = 0;
-        address[] memory indexesFromSuccessEvents = new address[](2);
-        address[] memory indexesFromFailedEvents = new address[](1);
-        bytes memory reasonDataFromFailedEvent;
 
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == expectedSuccessSig) {
-                indexesFromSuccessEvents[successCount] = logs[i].emitter;
-                successCount++;
-            } else if (
-                logs[i].emitter == address(indexManager) &&
-                logs[i].topics[0] == expectedFailedSig
-            ) {
-                address indexFromEvent = address(
-                    uint160(uint256(logs[i].topics[1]))
+        for (uint256 i = 0; i < indexes.length; i++) {
+            if (indexes[i] == address(newIndexWbtcComp)) {
+                _assertSingleActionFailedFor(
+                    logs,
+                    indexes[i],
+                    deployer,
+                    IndexAction.EXECUTE_WEIGHTS,
+                    abi.encodeWithSelector(
+                        Index__NotPendingWeightUpdate.selector
+                    )
                 );
-                indexesFromFailedEvents[failedCount] = indexFromEvent;
-                failedCount++;
-                reasonDataFromFailedEvent = logs[i].data;
+            } else {
+                _assertSingleActionTriggeredFor(
+                    logs,
+                    indexes[i],
+                    deployer,
+                    IndexAction.EXECUTE_WEIGHTS
+                );
             }
         }
-
-        uint256 totalIndexes = indexManager.getInitializedIndexes().length;
         assertEq(
-            successCount + failedCount,
-            totalIndexes,
-            "Total events should equal total initialized indexes"
-        );
-        assertEq(
-            successCount,
+            _countManagerEvents(logs, IndexActionTriggered.selector),
             2,
-            "There should be 2 successful executions for indexes with pending updates"
+            "IndexActionTriggered only for the indexes with a pending update"
         );
         assertEq(
-            failedCount,
-            totalIndexes - 2,
-            "The rest of the events should be failed executions for indexes without pending updates"
+            _countManagerEvents(logs, IndexActionFailed.selector),
+            1,
+            "IndexActionFailed only for the index without a pending update"
         );
-        bytes memory reasonBytes = abi.decode(
-            reasonDataFromFailedEvent,
-            (bytes)
-        );
-        assertEq(
-            reasonBytes,
-            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
-            "Incorrect reason in event"
-        );
-
-        // control non initialized index is not included in the function
-        for (uint256 i = 0; i < failedCount; i++) {
-            assertTrue(
-                indexesFromFailedEvents[i] != address(nonInitializedIndex),
-                "Non initialized index should not be included in failed events"
-            );
-        }
-
-        for (uint256 i = 0; i < successCount; i++) {
-            assertTrue(
-                indexesFromSuccessEvents[i] != address(nonInitializedIndex),
-                "Non initialized index should not be included in success events"
-            );
-        }
     }
 }

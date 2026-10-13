@@ -17,3 +17,7 @@ error Index__WeightUpdateExpired();
 error Index__UnauthorizedCallback();
 error Index__RebalanceSlippageTooHigh();
 error Index__NoFeesToCollect();
+/// @notice Thrown when a function restricted to the IndexManager is called by any other address (the index itself excluded).
+error Index__CallerNotIndexManager();
+/// @notice Thrown when mintShares or redeem is called by an address other than the shared Router proxy.
+error Index__CallerNotRouter();

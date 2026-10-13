@@ -45,9 +45,16 @@ contract IndexManagerTest is BaseTest {
             address(routerImplementation),
             address(timelock)
         );
-        assertEq(newIndexManager.getUsdc(), address(mockUsdc));
-        // The USDC feed is no longer a constructor argument: a fresh manager has none registered.
-        assertEq(newIndexManager.getUsdcPriceFeed(), address(0));
+        // getUsdc/getUsdcPriceFeed were removed from the IndexManager: USDC is read from its Router
+        // and the USDC feed from its PriceFeedManager, where a fresh manager has none registered.
+        assertEq(
+            Router(newIndexManager.getRouterAddress()).getUsdc(),
+            address(mockUsdc)
+        );
+        assertFalse(
+            PriceFeedManager(newIndexManager.getPriceFeedManagerAddress())
+                .hasPriceFeed(address(mockUsdc))
+        );
         assertEq(
             newIndexManager.getUniswapUniversalRouter(),
             address(mockUniRouter)

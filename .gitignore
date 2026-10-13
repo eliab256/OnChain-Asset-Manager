@@ -12,6 +12,7 @@ coverage/
 docs/
 
 lib/
+
 # Dotenv file
 .env
 
@@ -22,3 +23,5 @@ indexer/.env
 sdk/node_modules/
 sdk/.env
 node_modules
+
+localHelpers/

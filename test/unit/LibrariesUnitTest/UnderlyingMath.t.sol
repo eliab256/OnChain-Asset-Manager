@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, stdError} from "forge-std/Test.sol";
 import {UnderlyingMath} from "../../../src/libraries/UnderlyingMath.sol";
 
 contract UnderlyingMathTest is Test {
@@ -1071,6 +1071,235 @@ contract UnderlyingMathTest is Test {
         assertEq(eff0, 120); // 60% of 200
         assertEq(eff1, 80); // 40% of 200
         assertEq(eff0 + eff1, customTotalWeight);
+    }
+
+    // =========================================================================
+    //  calculateComplementaryAssetAmount
+    // =========================================================================
+
+    /// @dev External wrapper so vm.expectRevert can catch the library panic (internal calls are inlined).
+    function calculateComplementaryAssetAmountExternal(
+        uint256 _amountIn,
+        uint256 _priceIn,
+        uint256 _priceOut,
+        uint8 _decimalsIn,
+        uint8 _decimalsOut,
+        uint128 _weightIn,
+        uint128 _weightOut
+    ) external pure returns (uint256) {
+        return
+            UnderlyingMath.calculateComplementaryAssetAmount(
+                _amountIn,
+                _priceIn,
+                _priceOut,
+                _decimalsIn,
+                _decimalsOut,
+                _weightIn,
+                _weightOut
+            );
+    }
+
+    function testCalculateComplementaryAssetAmountWbtcToWethSixtyForty()
+        public
+        pure
+    {
+        // 1 WBTC ($30 000) at 60% -> 40% side is worth $20 000 -> 10 WETH at $2 000
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            ONE_WBTC,
+            WBTC_PRICE_STD,
+            WETH_PRICE_STD,
+            WBTC_DECIMALS,
+            WETH_DECIMALS,
+            WEIGHT_60,
+            WEIGHT_40
+        );
+        assertEq(result, TEN_WETH, "1 WBTC at 60/40 must match 10 WETH");
+    }
+
+    function testCalculateComplementaryAssetAmountWethToWbtcFortySixty()
+        public
+        pure
+    {
+        // 10 WETH ($20 000) at 40% -> 60% side is worth $30 000 -> 1 WBTC at $30 000
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            TEN_WETH,
+            WETH_PRICE_STD,
+            WBTC_PRICE_STD,
+            WETH_DECIMALS,
+            WBTC_DECIMALS,
+            WEIGHT_40,
+            WEIGHT_60
+        );
+        assertEq(result, ONE_WBTC, "10 WETH at 40/60 must match 1 WBTC");
+    }
+
+    function testCalculateComplementaryAssetAmountRoundTripBothDirectionsRoundsDown()
+        public
+        pure
+    {
+        uint256 wethOut = UnderlyingMath.calculateComplementaryAssetAmount(
+            ONE_WBTC,
+            WBTC_PRICE_STD,
+            WETH_PRICE_STD,
+            WBTC_DECIMALS,
+            WETH_DECIMALS,
+            WEIGHT_70,
+            WEIGHT_30
+        );
+        uint256 wbtcBack = UnderlyingMath.calculateComplementaryAssetAmount(
+            wethOut,
+            WETH_PRICE_STD,
+            WBTC_PRICE_STD,
+            WETH_DECIMALS,
+            WBTC_DECIMALS,
+            WEIGHT_30,
+            WEIGHT_70
+        );
+        // 70/30 is not an exact ratio: each step rounds down, so the round trip may lose 1 wei
+        // of the input and must never return more than the input.
+        assertLe(wbtcBack, ONE_WBTC, "round trip must never exceed the input");
+        assertApproxEqAbs(wbtcBack, ONE_WBTC, 1, "round trip loses at most 1 wei");
+    }
+
+    function testCalculateComplementaryAssetAmountSameDecimalsEqualWeights()
+        public
+        pure
+    {
+        // 1 000 LINK ($7 000) at 50/50 -> $7 000 of WETH at $2 000 = 3.5 WETH
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            1_000 * ONE_LINK,
+            LINK_PRICE_STD,
+            WETH_PRICE_STD,
+            LINK_DECIMALS,
+            WETH_DECIMALS,
+            WEIGHT_50,
+            WEIGHT_50
+        );
+        assertEq(result, (7 * ONE_WETH) / 2, "must be 3.5 WETH");
+    }
+
+    function testCalculateComplementaryAssetAmountSixToEightDecimals()
+        public
+        pure
+    {
+        // 30 000 USDC at 50/50 -> 1 WBTC at $30 000
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            30_000 * ONE_USDC,
+            USDC_PRICE_STD,
+            WBTC_PRICE_STD,
+            USDC_DECIMALS,
+            WBTC_DECIMALS,
+            WEIGHT_50,
+            WEIGHT_50
+        );
+        assertEq(result, ONE_WBTC, "30 000 USDC must match 1 WBTC");
+    }
+
+    function testCalculateComplementaryAssetAmountIdentityWithSameAssetParams()
+        public
+        pure
+    {
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            TEN_WETH,
+            WETH_PRICE_STD,
+            WETH_PRICE_STD,
+            WETH_DECIMALS,
+            WETH_DECIMALS,
+            WEIGHT_50,
+            WEIGHT_50
+        );
+        assertEq(result, TEN_WETH, "same price, decimals and weight is identity");
+    }
+
+    function testCalculateComplementaryAssetAmountZeroAmountReturnsZero()
+        public
+        pure
+    {
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            0,
+            WBTC_PRICE_STD,
+            WETH_PRICE_STD,
+            WBTC_DECIMALS,
+            WETH_DECIMALS,
+            WEIGHT_60,
+            WEIGHT_40
+        );
+        assertEq(result, 0);
+    }
+
+    function testCalculateComplementaryAssetAmountRoundsDownDustToZero()
+        public
+        pure
+    {
+        // 1 wei of WETH is worth 2 000 wei-USD -> 3 000 wei-USD on the 60% side,
+        // far below the value of 1 satoshi of WBTC: the result rounds down to 0.
+        uint256 result = UnderlyingMath.calculateComplementaryAssetAmount(
+            1,
+            WETH_PRICE_STD,
+            WBTC_PRICE_STD,
+            WETH_DECIMALS,
+            WBTC_DECIMALS,
+            WEIGHT_40,
+            WEIGHT_60
+        );
+        assertEq(result, 0, "dust must round down to zero");
+    }
+
+    function testCalculateComplementaryAssetAmountRevertsIfWeightInIsZero()
+        public
+    {
+        vm.expectRevert(stdError.divisionError);
+        this.calculateComplementaryAssetAmountExternal(
+            ONE_WBTC,
+            WBTC_PRICE_STD,
+            WETH_PRICE_STD,
+            WBTC_DECIMALS,
+            WETH_DECIMALS,
+            0,
+            WEIGHT_40
+        );
+    }
+
+    function testCalculateComplementaryAssetAmountRevertsIfPriceOutIsZero()
+        public
+    {
+        vm.expectRevert(stdError.divisionError);
+        this.calculateComplementaryAssetAmountExternal(
+            ONE_WBTC,
+            WBTC_PRICE_STD,
+            0,
+            WBTC_DECIMALS,
+            WETH_DECIMALS,
+            WEIGHT_60,
+            WEIGHT_40
+        );
+    }
+
+    function testFuzzCalculateComplementaryAssetAmountOutputValueNeverExceedsTarget(
+        uint256 _amountIn,
+        uint128 _weightIn
+    ) public pure {
+        _amountIn = bound(_amountIn, 0, 1_000_000 * ONE_WBTC);
+        _weightIn = uint128(bound(_weightIn, 1, MAX_WEIGHT - 1));
+        uint128 weightOut = MAX_WEIGHT - _weightIn;
+
+        uint256 amountOut = UnderlyingMath.calculateComplementaryAssetAmount(
+            _amountIn,
+            WBTC_PRICE_STD,
+            WETH_PRICE_STD,
+            WBTC_DECIMALS,
+            WETH_DECIMALS,
+            _weightIn,
+            weightOut
+        );
+
+        // Rounding is always down: the USD value of the output never exceeds the target.
+        uint256 amountInUsd = (_amountIn * WBTC_PRICE_STD) /
+            (10 ** WBTC_DECIMALS);
+        uint256 targetOutUsd = (amountInUsd * weightOut) / _weightIn;
+        uint256 amountOutUsd = (amountOut * WETH_PRICE_STD) /
+            (10 ** WETH_DECIMALS);
+        assertLe(amountOutUsd, targetOutUsd, "output value above target");
     }
 
     // =========================================================================

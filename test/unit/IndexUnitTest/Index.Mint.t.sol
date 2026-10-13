@@ -21,9 +21,6 @@ import {console2} from "forge-std/console2.sol";
 import {
     IERC20Errors
 } from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
-import {
-    IAccessControl
-} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import "../../../src/errors/IndexErrors.sol";
 import {
@@ -48,15 +45,35 @@ contract IndexMintTest is BaseTest {
     }
 
     function testMintRevertsIfNotRouter() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                keccak256("ROUTER_ROLE")
-            )
-        );
+        vm.expectRevert(Index__CallerNotRouter.selector);
         vm.prank(user1);
         initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testMintRevertsIfCalledByIndexManager() public {
+        // The IndexManager is privileged for manager functions only, not for mint.
+        vm.expectRevert(Index__CallerNotRouter.selector);
+        vm.prank(address(indexManager));
+        initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testMintRevertsIfCalledByIndexItself() public {
+        // The self-call allowance of onlyIndexManager does not extend to onlyRouter.
+        vm.expectRevert(Index__CallerNotRouter.selector);
+        vm.prank(address(initializedIndex));
+        initializedIndex.mintShares(user1, VALID_USDC_AMOUNT, VALID_TOLERANCE);
+    }
+
+    function testMintChecksInitializationBeforeRouter() public {
+        // Modifier order is isInitialized then onlyRouter: a non-router caller on a
+        // non-initialized index gets Index__NotInitialized, not Index__CallerNotRouter.
+        vm.expectRevert(Index__NotInitialized.selector);
+        vm.prank(address(indexManager));
+        nonInitializedIndex.mintShares(
+            user1,
+            VALID_USDC_AMOUNT,
+            VALID_TOLERANCE
+        );
     }
 
     function testMintRevertsIfUserHasNotEnoughBalance() public {

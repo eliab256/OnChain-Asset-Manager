@@ -3,9 +3,6 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {
-    IAccessControl
-} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/events/IndexEvents.sol";
 import {UniversalRouterMock} from "../../mocks/UniversalRouterMock.sol";
@@ -21,13 +18,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
 
     function testProposeWeightUpdateRevertsIfNotManager() public {
         vm.prank(user1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                keccak256("INDEX_MANAGER_ROLE")
-            )
-        );
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
         initializedIndex.proposeUpdateWeights(weight70);
     }
 
@@ -153,13 +144,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
 
     function testExecuteWeightUpdateRevertsIfNotManager() public {
         vm.prank(user1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                keccak256("INDEX_MANAGER_ROLE")
-            )
-        );
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
         initializedIndex.executeWeightUpdate();
     }
 
@@ -369,14 +354,79 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
 
     function testRebalanceIndexRevertsIfNotManager() public {
         vm.prank(user1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                keccak256("INDEX_MANAGER_ROLE")
-            )
-        );
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
         initializedIndex.rebalanceIndex();
+    }
+
+    function testRebalanceIndexRevertsIfCalledByRouter() public {
+        // The router is privileged only for mint/redeem, not for manager functions.
+        vm.prank(address(router));
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
+        initializedIndex.rebalanceIndex();
+    }
+
+    function testFuzz_RebalanceIndexRevertsIfCallerIsNotManagerOrSelf(
+        address _caller
+    ) public {
+        vm.assume(_caller != address(indexManager));
+        vm.assume(_caller != address(initializedIndex));
+
+        vm.prank(_caller);
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
+        initializedIndex.rebalanceIndex();
+    }
+
+    function testRebalanceIndexSucceedsIfCalledByIndexItself() public {
+        // Arrange: WBTC price doubles → WBTC overweight → swap WBTC → WETH.
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+        _setWbtcToWethRateRelativeToOracle(10_000);
+
+        (uint128 reserveBefore0, uint128 reserveBefore1) = initializedIndex
+            .getAssetsReserves();
+
+        // The index itself is allowed by onlyIndexManager (self-call path used
+        // by executeWeightUpdate).
+        vm.prank(address(initializedIndex));
+        initializedIndex.rebalanceIndex();
+
+        (uint128 reserveAfter0, uint128 reserveAfter1) = initializedIndex
+            .getAssetsReserves();
+        assertGt(reserveAfter0, reserveBefore0, "reserve0 must increase");
+        assertLt(reserveAfter1, reserveBefore1, "reserve1 must decrease");
+    }
+
+    function testExecuteWeightUpdateSelfCallToRebalanceIsAuthorized() public {
+        vm.startPrank(address(indexManager));
+        initializedIndex.proposeUpdateWeights(weight70);
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1 hours);
+        _refreshPriceFeeds();
+        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+        _setWbtcToWethRateRelativeToOracle(10_000);
+
+        vm.recordLogs();
+        initializedIndex.executeWeightUpdate();
+        vm.stopPrank();
+
+        // The inner this.rebalanceIndex() call has msg.sender == index: it must
+        // pass the access check and rebalance instead of failing with
+        // Index__CallerNotIndexManager.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool rebalancedEmitted;
+        bool rebalanceFailedEmitted;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(initializedIndex)) continue;
+            if (logs[i].topics[0] == IndexRebalanced.selector) {
+                rebalancedEmitted = true;
+            }
+            if (logs[i].topics[0] == WeightsUpdateRebalanceFailed.selector) {
+                rebalanceFailedEmitted = true;
+            }
+        }
+        assertTrue(rebalancedEmitted, "IndexRebalanced must be emitted");
+        assertFalse(
+            rebalanceFailedEmitted,
+            "self-call rebalance must not fail on the access check"
+        );
     }
 
     function testExecuteWeightUpdateSucceedsAtEndOfExecutionWindow() public {
@@ -427,13 +477,7 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
 
     function testCancelWeightUpdateRevertsIfNotManager() public {
         vm.prank(user1);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                user1,
-                keccak256("INDEX_MANAGER_ROLE")
-            )
-        );
+        vm.expectRevert(Index__CallerNotIndexManager.selector);
         initializedIndex.cancelWeightUpdate();
     }
 

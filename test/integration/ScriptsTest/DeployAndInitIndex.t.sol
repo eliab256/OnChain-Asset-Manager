@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
+import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
 import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {
@@ -32,7 +33,7 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
     address public deployer;
 
     modifier onMainnetFork() {
-        vm.createSelectFork(vm.rpcUrl("mainnet"));
+        vm.createSelectFork(vm.rpcUrl("mainnet"), MAINNET_FORK_BLOCK);
         _;
     }
 
@@ -62,7 +63,7 @@ contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
             weightA: weight60,
             weightB: weight40,
             feePercentage: feePercentage,
-            initialAssetADeposit: 0, // computed by the script via retrieveAmountFromAmount
+            initialAssetADeposit: 0, // computed by the script via UnderlyingMath.calculateComplementaryAssetAmount
             initialAssetBDeposit: initialWbtcDeposit
         });
 

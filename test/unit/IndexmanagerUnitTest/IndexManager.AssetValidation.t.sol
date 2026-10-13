@@ -6,18 +6,17 @@ import {Index} from "../../../src/Index.sol";
 import {IndexAsset} from "../../../src/types.sol";
 import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
 import {
-    DecimalsRevertingTokenMock,
-    NoDecimalsTokenMock,
-    ShortDecimalsReturnTokenMock,
     ConstructorDecimalsRevertingTokenMock
 } from "../../mocks/DecimalsTokenMocks.sol";
 
 import "../../../src/errors/IndexManagerErrors.sol";
 
 /**
- * @dev L-04: createIndex validates `decimals()` of both assets (must succeed, return a full word
- *      and be <= DECIMALS_STANDARD) and reverts IndexManager__IndexDeployFailed when create2
- *      returns address(0) because the Index constructor reverted.
+ * @dev L-04: asset metadata (`symbol()`, `decimals()` <= DECIMALS_STANDARD) is validated by the
+ *      PriceFeedManager at feed registration (see PriceFeedManagerRegister.t.sol). An asset that
+ *      cannot get a feed therefore makes createIndex revert IndexManager__PriceFeedNotRegistered.
+ *      createIndex reverts IndexManager__IndexDeployFailed when create2 returns address(0)
+ *      because the Index constructor reverted.
  */
 contract IndexManagerAssetValidationTest is BaseTest {
     // Fixed addresses below / above every deployed token, so the sorted position
@@ -87,7 +86,7 @@ contract IndexManagerAssetValidationTest is BaseTest {
     }
 
     // =========================================================================
-    //  createIndex — decimals validation
+    //  createIndex — assets rejected by the PriceFeedManager have no feed
     // =========================================================================
 
     function testCreateIndexRevertsIfAsset0HasMoreThanStandardDecimals()
@@ -97,10 +96,12 @@ contract IndexManagerAssetValidationTest is BaseTest {
             LOW_TOKEN_ADDRESS,
             s_invalidDecimals
         );
+        // The PriceFeedManager rejects it (PriceFeedManager__InvalidAssetDecimals), so it has no feed.
+        assertFalse(priceFeedManager.hasPriceFeed(token), "no feed expected");
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IndexManager__InvalidAssetDecimals.selector,
+                IndexManager__PriceFeedNotRegistered.selector,
                 token
             )
         );
@@ -114,52 +115,16 @@ contract IndexManagerAssetValidationTest is BaseTest {
             HIGH_TOKEN_ADDRESS,
             s_invalidDecimals
         );
+        // The PriceFeedManager rejects it (PriceFeedManager__InvalidAssetDecimals), so it has no feed.
+        assertFalse(priceFeedManager.hasPriceFeed(token), "no feed expected");
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IndexManager__InvalidAssetDecimals.selector,
+                IndexManager__PriceFeedNotRegistered.selector,
                 token
             )
         );
         _createIndex(s_validAsset, token);
-    }
-
-    function testCreateIndexRevertsIfAssetDecimalsReverts() public {
-        address token = address(new DecimalsRevertingTokenMock());
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IndexManager__InvalidAssetDecimals.selector,
-                token
-            )
-        );
-        _createIndex(token, s_validAsset);
-    }
-
-    function testCreateIndexRevertsIfAssetHasSymbolButNoDecimals() public {
-        address token = address(new NoDecimalsTokenMock());
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IndexManager__InvalidAssetDecimals.selector,
-                token
-            )
-        );
-        _createIndex(token, s_validAsset);
-    }
-
-    function testCreateIndexRevertsIfAssetDecimalsReturnsLessThanOneWord()
-        public
-    {
-        address token = address(new ShortDecimalsReturnTokenMock());
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IndexManager__InvalidAssetDecimals.selector,
-                token
-            )
-        );
-        _createIndex(token, s_validAsset);
     }
 
     function testCreateIndexAcceptsAssetWithStandardDecimals() public {
@@ -200,7 +165,7 @@ contract IndexManagerAssetValidationTest is BaseTest {
     // =========================================================================
 
     function testCreateIndexRevertsIfIndexConstructorReverts() public {
-        // decimals() is valid for the IndexManager validation but reverts when called by the
+        // decimals() is valid for the PriceFeedManager validation but reverts when called by the
         // Index under construction, so create2 returns address(0).
         address token = address(new ConstructorDecimalsRevertingTokenMock());
         _registerFeedFor(token);

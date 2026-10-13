@@ -9,6 +9,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {Vm} from "forge-std/Vm.sol";
+import {IndexAction} from "../../../src/types.sol";
+import {IndexActionFailed} from "../../../src/events/IndexManagerEvents.sol";
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/errors/RouterErrors.sol";
 
@@ -19,7 +22,8 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
     uint256 constant INVALID_TOLERANCE_ABOVE = 11 * PERCENTAGE_FEE_PRECISION; //11%
     uint128 constant WBTC_TARGET_WEIGHT_AFTER_SHIFT = 500000; // 50%
     // Storage slot of Index.s_weight0 | s_weight1 (see `forge inspect Index storageLayout`).
-    uint256 constant INDEX_WEIGHTS_SLOT = 9;
+    // ERC20 uses slots 0-4, EIP712 name/version fallbacks 5-6, Nonces 7; Index storage starts at 8.
+    uint256 constant INDEX_WEIGHTS_SLOT = 8;
     uint256 constant INVALID_TOLERANCE_ZERO = 0;
 
     function setUp() public override {
@@ -454,7 +458,7 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
      */
     function test_rebalance_revertsWhenNotNeeded() public {
         // The rebalance call propagates the revert through IndexManager.
-        // _rebalanceSingleIndex wraps it in try/catch and emits IndexRebalanceFailed.
+        // _tryIndexAction catches it with a low-level call and emits IndexActionFailed.
         // We verify by checking that no revert at the IndexManager level occurs but
         // the on-chain state is unchanged (reserves identical before and after).
         (uint128 r0Before, uint128 r1Before) = wbtcWethIndex
@@ -476,6 +480,43 @@ contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
             r1Before,
             "asset1 reserve changed despite no rebalance needed"
         );
+    }
+
+    function test_rebalance_notNeeded_emitsIndexActionFailed() public {
+        vm.recordLogs();
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bool eventFound;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].emitter != address(indexManager) ||
+                logs[i].topics[0] != IndexActionFailed.selector
+            ) continue;
+            eventFound = true;
+            assertEq(
+                address(uint160(uint256(logs[i].topics[1]))),
+                address(wbtcWethIndex),
+                "IndexActionFailed must log the index"
+            );
+            assertEq(
+                address(uint160(uint256(logs[i].topics[2]))),
+                deployer,
+                "IndexActionFailed must log the caller"
+            );
+            assertEq(
+                uint256(logs[i].topics[3]),
+                uint256(IndexAction.REBALANCE),
+                "IndexActionFailed must log the REBALANCE action"
+            );
+            assertEq(
+                abi.decode(logs[i].data, (bytes)),
+                abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
+                "IndexActionFailed must log the raw Index__RebalanceNotNeeded revert data"
+            );
+        }
+        assertTrue(eventFound, "IndexActionFailed was not emitted");
     }
 
     // =========================================================================

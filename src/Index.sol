@@ -4,6 +4,9 @@ pragma solidity ^0.8.0;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {
+    IERC20Permit
+} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IIndex} from "./Interface/IIndex.sol";
 import "./events/IndexEvents.sol";
 import "./errors/IndexErrors.sol";
@@ -13,7 +16,6 @@ import {
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
@@ -33,19 +35,11 @@ import {
  * (i.e. the native decimals of each underlying asset).
  *
  */
-contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
+contract Index is IIndex, ERC20Permit, ContractCodeConstants {
     using UnderlyingMath for uint256;
     using SharesMath for uint256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
-
-    // =========================================================================
-    //  Roles
-    // =========================================================================
-
-    bytes32 public constant INDEX_MANAGER_ROLE =
-        keccak256("INDEX_MANAGER_ROLE");
-    bytes32 public constant ROUTER_ROLE = keccak256("ROUTER_ROLE");
 
     // =========================================================================
     //  Immutables
@@ -64,6 +58,11 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
     ISwapManager internal immutable i_swapManager;
     IUniversalRouter internal immutable i_universalRouter;
+
+    // IndexManager that deployed this index. Same address for every index.
+    address internal immutable i_indexManager;
+    // Shared Router proxy, the only entry point for mint and redeem. Same address for every index.
+    address internal immutable i_router;
 
     // =========================================================================
     //  Storage
@@ -93,6 +92,16 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
 
     modifier isInitialized() {
         _isInitialized();
+        _;
+    }
+
+    modifier onlyIndexManager() {
+        _onlyIndexManager();
+        _;
+    }
+
+    modifier onlyRouter() {
+        _onlyRouter();
         _;
     }
 
@@ -129,10 +138,8 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
         i_decimalsUsdc = IERC20Metadata(_usdcAddress).decimals();
 
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(INDEX_MANAGER_ROLE, msg.sender);
-        _grantRole(INDEX_MANAGER_ROLE, address(this));
-        _grantRole(ROUTER_ROLE, _router);
+        i_indexManager = msg.sender;
+        i_router = _router;
     }
 
     // =========================================================================
@@ -148,7 +155,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     function initialize(
         address _depositor,
         uint256 _underlyingAmount0
-    ) external onlyRole(INDEX_MANAGER_ROLE) {
+    ) external onlyIndexManager {
         // 1. Check if index is already initialized, if not proceed with initialization
         if (s_initialized) revert Index__AlreadyInitialized();
 
@@ -236,7 +243,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         address _to,
         uint256 _usdcAmountIn,
         uint256 _maxTolerance
-    ) public isInitialized onlyRole(ROUTER_ROLE) {
+    ) public isInitialized onlyRouter {
         i_usdc.safeTransferFrom(_to, address(this), _usdcAmountIn);
 
         // 1. Cache initial state.
@@ -381,7 +388,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         address _from,
         uint256 _sharesAmount,
         uint256 _maxTolerance
-    ) public isInitialized onlyRole(ROUTER_ROLE) {
+    ) public isInitialized onlyRouter {
         // 1. Cache initial state.
         InitStateCache memory initState;
         (
@@ -506,7 +513,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     function minMintPreview(
         uint256 _usdcAmountIn,
         uint256 _maxTolerance
-    ) public view isInitialized returns (uint256 minimumSharesToMint) {
+    ) public view isInitialized returns (uint256 minSharesToMint) {
         // 1. Convert USDC amount from token decimals to std decimals for internal calculations
         uint256 usdcAmountInNormalized = _convertToDecimalStandard(
             _usdcAmountIn,
@@ -537,7 +544,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             MAX_PERCENTAGE
         );
         // 6. Returns the minimum shares to mint corresponding to the minimum USD amount to accept based on the current total asset USD value and total shares supply.
-        minimumSharesToMint = _mintPreview(
+        minSharesToMint = _mintPreview(
             minimumUsdAmount,
             totalAssetUsdValue
         );
@@ -596,7 +603,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
         uint128 _newWeightAsset0
     )
         external
-        onlyRole(INDEX_MANAGER_ROLE)
+        onlyIndexManager
         returns (uint256 implementationTimestamp)
     {
         // 1. Check if there is already a pending weight update
@@ -640,7 +647,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @dev Emits WeightsUpdated, then WeightsUpdateRebalanceSkipped if the rebalance reverts with Index__RebalanceNotNeeded,
      *      or WeightsUpdateRebalanceFailed with the raw revert data for any other revert. A successful rebalance emits IndexRebalanced.
      */
-    function executeWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
+    function executeWeightUpdate() external onlyIndexManager {
         // 1. Check if there is a pending weight update ready to be executed, if not revert.
         if (
             s_weightUpdateExecutableAt == 0 ||
@@ -679,7 +686,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
     /**
      * @notice Cancels the pending weight update, whether it is still in its delay, executable or expired.
      */
-    function cancelWeightUpdate() external onlyRole(INDEX_MANAGER_ROLE) {
+    function cancelWeightUpdate() external onlyIndexManager {
         // 1. Check if there is a pending weight update, if not revert.
         if (s_weightUpdateExecutableAt == 0)
             revert Index__NotPendingWeightUpdate();
@@ -701,7 +708,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function collectFees(
         address _collector
-    ) external onlyRole(INDEX_MANAGER_ROLE) returns (uint256 feesCollected) {
+    ) external onlyIndexManager returns (uint256 feesCollected) {
         // 1. Cache totalFees in a local variable to avoid multiple storage reads
         uint128 cacheTotalFees = s_totalFees;
 
@@ -725,7 +732,7 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      * @dev Reverts if there are no fees to collect.
      * @dev Reverts if swap slippage is higher than the defined threshold.
      */
-    function rebalanceIndex() public onlyRole(INDEX_MANAGER_ROLE) {
+    function rebalanceIndex() public onlyIndexManager {
         // 1. Cache initial state.
         InitStateCache memory initState;
         (
@@ -1017,50 +1024,15 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 i_decimalsUsdc
             );
 
-        bytes memory commands;
-        bytes[] memory inputs;
-        uint256 asset0BalanceBefore;
-        uint256 asset1BalanceBefore;
-
-        // 2. Build swap commands and snapshot balances before the swap.
-        // 2.1. Only asset1 needed single swap USDC to asset1
-        if (_usdcAmountIn0 == 0 && _usdcAmountIn1 > 0) {
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET1_USDC,
-                address(i_usdc),
-                usdcAmount1TokenDec.toUint128(),
-                0 // no minOut: user tolerance is checked on the whole amount
-            );
-            asset1BalanceBefore = i_asset1.balanceOf(address(this));
-        }
-        // 2.2. Only asset0 needed single swap USDC to asset0
-        else if (_usdcAmountIn0 > 0 && _usdcAmountIn1 == 0) {
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                address(i_usdc),
-                usdcAmount0TokenDec.toUint128(),
-                0 // no minOut: user tolerance is checked on the whole amount
-            );
-            asset0BalanceBefore = i_asset0.balanceOf(address(this));
-        }
-        // 2.3. Both needed  double swap USDC to asset0 + USDC to asset1
-        else {
-            (commands, inputs) = i_swapManager.buildDoubleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                SwapType.ASSET1_USDC,
-                address(i_usdc),
-                address(i_usdc),
-                usdcAmount0TokenDec.toUint128(),
-                usdcAmount1TokenDec.toUint128(),
-                0, // no minOut: user tolerance is checked on the whole amount
-                0
-            );
-            asset0BalanceBefore = i_asset0.balanceOf(address(this));
-            asset1BalanceBefore = i_asset1.balanceOf(address(this));
-        }
+        // 2. Build swap commands: single swap if only one leg is needed, double swap otherwise.
+        (bytes memory commands, bytes[] memory inputs) = _buildUsdcSwapParams(
+            _usdcAmountIn0 > 0,
+            _usdcAmountIn1 > 0,
+            address(i_usdc),
+            address(i_usdc),
+            usdcAmount0TokenDec,
+            usdcAmount1TokenDec
+        );
 
         // 3. Transfer USDC to the Universal Router and execute the swap.
         //    payerIsUser=false → the router pays from its own balance (no Permit2 needed).
@@ -1068,29 +1040,24 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             address(i_universalRouter),
             usdcAmount0TokenDec + usdcAmount1TokenDec
         );
-        i_universalRouter.execute(
+        (uint256 received0TokenDec, uint256 received1TokenDec) = _executeSwap(
             commands,
             inputs,
-            block.timestamp + SWAP_DEADLINE
+            _usdcAmountIn0 > 0 ? i_asset0 : IERC20(address(0)),
+            _usdcAmountIn1 > 0 ? i_asset1 : IERC20(address(0))
         );
 
-        // 4. Measure received amounts (token decimals) and convert to std decimals.
-        if (_usdcAmountIn0 > 0) {
-            uint256 receivedTokenDec = i_asset0.balanceOf(address(this)) -
-                asset0BalanceBefore;
+        // 4. Convert received amounts (token decimals) to std decimals.
+        if (_usdcAmountIn0 > 0)
             asset0ReceivedStd = _convertToDecimalStandard(
-                receivedTokenDec,
+                received0TokenDec,
                 i_decimals0
             );
-        }
-        if (_usdcAmountIn1 > 0) {
-            uint256 receivedTokenDec = i_asset1.balanceOf(address(this)) -
-                asset1BalanceBefore;
+        if (_usdcAmountIn1 > 0)
             asset1ReceivedStd = _convertToDecimalStandard(
-                receivedTokenDec,
+                received1TokenDec,
                 i_decimals1
             );
-        }
     }
 
     /**
@@ -1135,75 +1102,38 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
             }
         }
 
-        bytes memory commands;
-        bytes[] memory inputs;
-
-        // 2. Build swap commands and transfer input tokens to the Universal Router.
-        if (_asset0UsdToSwap > 0 && _asset1UsdToSwap == 0) {
-            // 2.1 Only asset0 to sell; single swap asset0 to USDC.
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                address(i_asset0),
-                asset0AmountTokenDec.toUint128(),
-                0 // no minOut: user tolerance is checked on the whole amount
-            );
-            i_asset0.safeTransfer(
-                address(i_universalRouter),
-                asset0AmountTokenDec
-            );
-        } else if (_asset0UsdToSwap == 0 && _asset1UsdToSwap > 0) {
-            // 2.2 Only asset1 to sell; single swap asset1 to USDC.
-            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
-                address(this),
-                SwapType.ASSET1_USDC,
-                address(i_asset1),
-                asset1AmountTokenDec.toUint128(),
-                0 // no minOut: user tolerance is checked on the whole amount
-            );
-            i_asset1.safeTransfer(
-                address(i_universalRouter),
-                asset1AmountTokenDec
-            );
-        } else {
-            // 2.3 Both to sell; double swap asset0 to USDC + asset1 to USDC.
-            (commands, inputs) = i_swapManager.buildDoubleSwapParams(
-                address(this),
-                SwapType.ASSET0_USDC,
-                SwapType.ASSET1_USDC,
-                address(i_asset0),
-                address(i_asset1),
-                asset0AmountTokenDec.toUint128(),
-                asset1AmountTokenDec.toUint128(),
-                0, // no minOut: user tolerance is checked on the whole amount
-                0
-            );
-            i_asset0.safeTransfer(
-                address(i_universalRouter),
-                asset0AmountTokenDec
-            );
-            i_asset1.safeTransfer(
-                address(i_universalRouter),
-   
-                asset1AmountTokenDec
-            );
-        }
-
-        // 3. Snapshot USDC balance before swap.
-        uint256 usdcBalanceBefore = i_usdc.balanceOf(address(this));
-
-        // 4.  Execute the swap via the Universal Router.
-        i_universalRouter.execute(
-            commands,
-            inputs,
-            block.timestamp + SWAP_DEADLINE
+        // 2. Build swap commands: single swap if only one leg is needed, double swap otherwise.
+        (bytes memory commands, bytes[] memory inputs) = _buildUsdcSwapParams(
+            _asset0UsdToSwap > 0,
+            _asset1UsdToSwap > 0,
+            address(i_asset0),
+            address(i_asset1),
+            asset0AmountTokenDec,
+            asset1AmountTokenDec
         );
 
-        // 5. Calculate USDC received as the delta between balances.
-        uint256 usdcReceivedTokenDec = i_usdc.balanceOf(address(this)) -
-            usdcBalanceBefore;
+        // 3. Transfer input tokens to the Universal Router.
+        //    The double swap branch (which also covers the both-zero case) transfers both legs.
+        if (_asset0UsdToSwap > 0 || _asset1UsdToSwap == 0)
+            i_asset0.safeTransfer(
+                address(i_universalRouter),
+                asset0AmountTokenDec
+            );
+        if (_asset1UsdToSwap > 0 || _asset0UsdToSwap == 0)
+            i_asset1.safeTransfer(
+                address(i_universalRouter),
+                asset1AmountTokenDec
+            );
 
-        // 6. Convert received USDC from token decimals to std decimals.
+        // 4. Execute the swap and measure the USDC received in token decimals.
+        (uint256 usdcReceivedTokenDec, ) = _executeSwap(
+            commands,
+            inputs,
+            i_usdc,
+            IERC20(address(0))
+        );
+
+        // 5. Convert received USDC from token decimals to std decimals.
         usdcReceived = _convertToDecimalStandard(
             usdcReceivedTokenDec,
             i_decimalsUsdc
@@ -1267,33 +1197,102 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
                 minAmountOutTokenDec.toUint128()
             );
 
-        // 4. Snapshot balance, transfer tokens to the Universal Router, and execute the swap.
-        uint256 amountReceivedTokenDec;
-        {
-            uint256 balanceBefore = IERC20(tokenToReceive).balanceOf(
-                address(this)
-            );
-
-            IERC20(tokenToSwap).safeTransfer(
-                address(i_universalRouter),
-                amountToSwapTokenDec
-            );
-            i_universalRouter.execute(
-                commands,
-                inputs,
-                block.timestamp + SWAP_DEADLINE
-            );
-
-            amountReceivedTokenDec =
-                IERC20(tokenToReceive).balanceOf(address(this)) -
-                balanceBefore;
-        }
+        // 4. Transfer tokens to the Universal Router and execute the swap.
+        IERC20(tokenToSwap).safeTransfer(
+            address(i_universalRouter),
+            amountToSwapTokenDec
+        );
+        (uint256 amountReceivedTokenDec, ) = _executeSwap(
+            commands,
+            inputs,
+            IERC20(tokenToReceive),
+            IERC20(address(0))
+        );
 
         // 5. Convert received amount from token decimals to std decimals.
         amountReceived = _convertToDecimalStandard(
             amountReceivedTokenDec,
             receivedAssetDecimals
         ).toUint128();
+    }
+
+    /**
+     * @notice Builds the Universal Router commands for a swap between the underlying assets and USDC.
+     * @dev Builds a single swap when exactly one leg is requested, a double swap otherwise (both-zero included).
+     *      Swap types are ASSET0_USDC for leg 0 and ASSET1_USDC for leg 1, with no minOut:
+     *      the user tolerance is checked by the caller on the whole amount.
+     * @param _swap0 True if the leg 0 (asset0 ↔ USDC) is requested.
+     * @param _swap1 True if the leg 1 (asset1 ↔ USDC) is requested.
+     * @param _tokenIn0 Input token address of leg 0.
+     * @param _tokenIn1 Input token address of leg 1.
+     * @param _amount0TokenDec Input amount of leg 0, in input token decimals.
+     * @param _amount1TokenDec Input amount of leg 1, in input token decimals.
+     * @return commands Encoded Universal Router commands.
+     * @return inputs Encoded Universal Router inputs, one per command.
+     */
+    function _buildUsdcSwapParams(
+        bool _swap0,
+        bool _swap1,
+        address _tokenIn0,
+        address _tokenIn1,
+        uint256 _amount0TokenDec,
+        uint256 _amount1TokenDec
+    ) internal view returns (bytes memory commands, bytes[] memory inputs) {
+        if (_swap0 != _swap1) {
+            (commands, inputs, , ) = i_swapManager.buildSingleSwapParams(
+                address(this),
+                _swap0 ? SwapType.ASSET0_USDC : SwapType.ASSET1_USDC,
+                _swap0 ? _tokenIn0 : _tokenIn1,
+                (_swap0 ? _amount0TokenDec : _amount1TokenDec).toUint128(),
+                0
+            );
+        } else {
+            (commands, inputs) = i_swapManager.buildDoubleSwapParams(
+                address(this),
+                SwapType.ASSET0_USDC,
+                SwapType.ASSET1_USDC,
+                _tokenIn0,
+                _tokenIn1,
+                _amount0TokenDec.toUint128(),
+                _amount1TokenDec.toUint128(),
+                0,
+                0
+            );
+        }
+    }
+
+    /**
+     * @notice Executes a swap on the Universal Router and measures the output tokens received.
+     * @dev Input tokens must already be transferred to the Universal Router. An output token set to address(0) is not measured and returns 0.
+     *      The input token must never be one of the output tokens, otherwise the measured delta would be wrong.
+     * @param _commands Encoded Universal Router commands.
+     * @param _inputs Encoded Universal Router inputs, one per command.
+     * @param _tokenOut0 First output token to measure, or address(0).
+     * @param _tokenOut1 Second output token to measure, or address(0).
+     * @return received0 Amount of _tokenOut0 received, in _tokenOut0 decimals.
+     * @return received1 Amount of _tokenOut1 received, in _tokenOut1 decimals.
+     */
+    function _executeSwap(
+        bytes memory _commands,
+        bytes[] memory _inputs,
+        IERC20 _tokenOut0,
+        IERC20 _tokenOut1
+    ) internal returns (uint256 received0, uint256 received1) {
+        bool measure0 = address(_tokenOut0) != address(0);
+        bool measure1 = address(_tokenOut1) != address(0);
+        if (measure0) received0 = _tokenOut0.balanceOf(address(this));
+        if (measure1) received1 = _tokenOut1.balanceOf(address(this));
+
+        i_universalRouter.execute(
+            _commands,
+            _inputs,
+            block.timestamp + SWAP_DEADLINE
+        );
+
+        if (measure0)
+            received0 = _tokenOut0.balanceOf(address(this)) - received0;
+        if (measure1)
+            received1 = _tokenOut1.balanceOf(address(this)) - received1;
     }
 
     // =========================================================================
@@ -1444,6 +1443,22 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function _isInitialized() internal view {
         if (!s_initialized) revert Index__NotInitialized();
+    }
+
+    /**
+     * @notice Reverts unless the caller is the IndexManager or the index itself.
+     * @dev The index itself is allowed because executeWeightUpdate calls this.rebalanceIndex() through _tryRebalanceIndex.
+     */
+    function _onlyIndexManager() internal view {
+        if (msg.sender != i_indexManager && msg.sender != address(this))
+            revert Index__CallerNotIndexManager();
+    }
+
+    /**
+     * @notice Reverts unless the caller is the shared Router proxy.
+     */
+    function _onlyRouter() internal view {
+        if (msg.sender != i_router) revert Index__CallerNotRouter();
     }
 
     /**
@@ -1669,5 +1684,27 @@ contract Index is IIndex, ERC20Permit, AccessControl, ContractCodeConstants {
      */
     function getInitializationStatus() public view returns (bool) {
         return s_initialized;
+    }
+
+    /// @dev Inherit from IIndex. See interface for details.
+    function getIndexManager() public view returns (address) {
+        return i_indexManager;
+    }
+
+    /// @dev Inherit from IIndex. See interface for details.
+    function getRouter() public view returns (address) {
+        return i_router;
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    /////////////////////// inheritance overrides //////////////////////
+    ////////////////////////////////////////////////////////////////////
+
+    /// @dev Inherit from IERC20Permit. See interface for details.
+    // Required because IIndex extends IERC20Permit; delegates to ERC20Permit.
+    function nonces(
+        address _owner
+    ) public view override(IERC20Permit, ERC20Permit) returns (uint256) {
+        return super.nonces(_owner);
     }
 }

@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import {BaseTest} from "../Base.t.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute} from "../../../src/types.sol";
+import {IndexAsset, SwapRoute, FeedConfig} from "../../../src/types.sol";
 import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -199,17 +199,18 @@ contract IndexManagerTest is BaseTest {
         );
     }
 
-    function testGetUsdcReturnsCorrectAddress() public view {
+    function testPriceFeedManagerOfIndexManagerHoldsUsdcPriceFeed() public view {
+        // getUsdcPriceFeed was removed from the IndexManager: the USDC feed is read from its PriceFeedManager.
         assertEq(
-            indexManager.getUsdc(),
-            address(mockUsdc),
-            "USDC address must match mock"
+            address(priceFeedManager),
+            indexManager.getPriceFeedManagerAddress(),
+            "PriceFeedManager must be the IndexManager's proxy"
         );
-    }
-
-    function testGetUsdcPriceFeedReturnsCorrectAddress() public view {
+        FeedConfig memory usdcConfig = priceFeedManager.getPriceFeedConfig(
+            address(mockUsdc)
+        );
         assertEq(
-            indexManager.getUsdcPriceFeed(),
+            usdcConfig.feed,
             address(mockUsdcPriceFeed),
             "USDC price feed must match mock"
         );

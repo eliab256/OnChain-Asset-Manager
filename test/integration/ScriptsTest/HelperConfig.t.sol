@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
+import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
 import {console} from "forge-std/console.sol";
 import {
     HelperConfig,
@@ -32,7 +33,7 @@ contract HelperConfigTest is Test, CodeConstants {
     }
 
     modifier onMainnetFork() {
-        vm.createSelectFork(vm.rpcUrl("mainnet"));
+        vm.createSelectFork(vm.rpcUrl("mainnet"), MAINNET_FORK_BLOCK);
         mainnetHelperConfig = new HelperConfig();
         _;
     }
