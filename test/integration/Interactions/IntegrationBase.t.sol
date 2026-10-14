@@ -3,17 +3,12 @@ pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
 import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
-import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {
     DeployAndInitNewIndex,
     RunParams
 } from "../../../script/DeployAndInitNewIndex.s.sol";
-import {
-    HelperConfig,
-    AssetConfig,
-    NetworkConfig
-} from "../../../script/HelperConfig.s.sol";
+import {HelperConfig, NetworkConfig} from "../../../script/HelperConfig.s.sol";
 import {AssetAvailable} from "../../../src/types.sol";
 import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
 import {Router} from "../../../src/Router.sol";

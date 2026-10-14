@@ -13,6 +13,24 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
     }
 
     // =========================================================================
+    //  helpers
+    // =========================================================================
+
+    /// @dev Returns how many logs from `_emitter` match `_sig` and the position of the first one.
+    function _findLogs(
+        Vm.Log[] memory _logs,
+        address _emitter,
+        bytes32 _sig
+    ) internal pure returns (uint256 count, uint256 firstIndex) {
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (_logs[i].emitter != _emitter || _logs[i].topics[0] != _sig)
+                continue;
+            if (count == 0) firstIndex = i;
+            count++;
+        }
+    }
+
+    // =========================================================================
     //  proposeWeightUpdate
     // =========================================================================
 
@@ -126,16 +144,31 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
     function testProposeUpdateWeightsEmitsEvent() public {
         (uint128 oldWeight0, uint128 oldWeight1) = initializedIndex
             .getAssetsWeights();
+        uint256 expectedExecutableAt = block.timestamp + WEIGHT_UPDATE_DELAY;
+
+        vm.recordLogs();
         vm.prank(address(indexManager));
-        vm.expectEmit(true, true, true, true, address(initializedIndex));
-        emit WeightsUpdateProposed(
-            oldWeight0,
-            oldWeight1,
-            weight70,
-            weight30,
-            block.timestamp + WEIGHT_UPDATE_DELAY
-        );
         initializedIndex.proposeUpdateWeights(weight70);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        (uint256 count, uint256 idx) = _findLogs(
+            logs,
+            address(initializedIndex),
+            WeightsUpdateProposed.selector
+        );
+        assertEq(count, 1, "WeightsUpdateProposed must be emitted once");
+        assertEq(logs[idx].topics.length, 1, "no indexed params expected");
+        assertEq(
+            logs[idx].data,
+            abi.encode(
+                oldWeight0,
+                oldWeight1,
+                weight70,
+                weight30,
+                expectedExecutableAt
+            ),
+            "WeightsUpdateProposed payload mismatch"
+        );
     }
 
     // =========================================================================
@@ -491,10 +524,26 @@ contract IndexRebalanceAndWeightsTest is BaseTest {
         vm.startPrank(address(indexManager));
         initializedIndex.proposeUpdateWeights(weight70);
 
-        vm.expectEmit(false, false, false, true, address(initializedIndex));
-        emit WeightsUpdateCancelled(weight70, weight30);
+        vm.recordLogs();
         initializedIndex.cancelWeightUpdate();
         vm.stopPrank();
+
+        {
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+            (uint256 count, uint256 idx) = _findLogs(
+                logs,
+                address(initializedIndex),
+                WeightsUpdateCancelled.selector
+            );
+            assertEq(count, 1, "WeightsUpdateCancelled must be emitted once");
+            assertEq(logs[idx].topics.length, 1, "no indexed params expected");
+            (uint128 cancelled0, uint128 cancelled1) = abi.decode(
+                logs[idx].data,
+                (uint128, uint128)
+            );
+            assertEq(cancelled0, weight70, "cancelled weight0 mismatch");
+            assertEq(cancelled1, weight30, "cancelled weight1 mismatch");
+        }
 
         (
             uint128 pendingWeight0,

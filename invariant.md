@@ -40,8 +40,10 @@
 
 18. **collectFees drains exactly s_totalFees**: Dopo `collectFees`, l'ammontare trasferito == il valore pre-call di `s_totalFees`, e `s_totalFees == 0`.
 
-19. **Price feed freshness**: `getLatestPrice` accetta solo asset0, asset1 e USDC e delega a `PriceFeedManager.getPrice`, che reverta se il feed non è registrato, `answer <= 0`, `answeredInRound < roundId` o `block.timestamp - updatedAt > maxDelay` del feed.
+19. **Price feed freshness**: l'Index legge i prezzi solo per asset0, asset1 e USDC con l'helper interno `_getPrice`, che delega a `PriceFeedManager.getPrice`, che reverta se il feed non è registrato, `answer <= 0`, `answeredInRound < roundId` o `block.timestamp - updatedAt > maxDelay` del feed.
 
+
+20. **Index manager fissato alla creazione**: `i_indexManager` è il parametro `_indexManager` del costruttore (mai zero, `Index__ZeroAddress`) e non cambia mai. La `IndexFactory` passa sempre il proprio chiamante, quindi per ogni index creato con `IndexManager.createIndex` vale `getIndexManager() == address(indexManager)`.
 ---
 
 ## IndexManager.sol
@@ -90,6 +92,26 @@
 
 21. **Proxy upgrade timelock**: SwapManager, PriceFeedManager e Router hanno come `upgrader` (`UpgraderAuth`, storage ERC-7201 `onchainassetmanager.storage.UpgraderAuth`) il `TimelockController` passato al costruttore dell'IndexManager (mai zero, `IndexManager__ZeroAddress`). Solo l'upgrader può chiamare `upgradeToAndCall`: IndexManager, owner, admin o chiunque altro ricevono `UpgraderAuth__Unauthorized(caller)`. Ogni upgrade richiede quindi `schedule` + attesa di almeno `getMinDelay()` (2 giorni) + `execute` da parte del MultiSig; `cancel` è possibile finché non è eseguito. L'upgrader non ha setter: cambia solo con un upgrade. L'IndexManager non ha più funzioni di upgrade.
 
+
+22. **Index creati solo tramite la factory**: `i_indexFactory` è fissato nel costruttore (deve avere codice, `IndexManager__InvalidIndexFactory`) e non cambia mai. `createIndex` deploya ogni index con `IIndexFactory.deployIndex` e l'IndexManager non incorpora il bytecode dell'Index. L'indirizzo dell'index è il CREATE2 della factory con il salt `keccak256(asset0, asset1)` e l'IndexManager come chiamante.
+
+---
+
+## IndexFactory.sol
+
+### Invariant di Stato
+
+1. **Creation code immutabile**: i due contratti dati (`getCodePointers()`) sono creati nel costruttore e il loro codice è `0x00` seguito da una metà dell'initcode dell'Index. Gli indirizzi e le lunghezze sono immutabili, quindi `getIndexCreationCode()` restituisce sempre lo stesso valore (uguale al `type(Index).creationCode` passato al deploy).
+
+2. **Contratti dati inerti**: il primo byte di ogni contratto dati è `STOP`, quindi una chiamata diretta non esegue nulla e non cambia stato.
+
+3. **Manager = chiamante**: `deployIndex` passa sempre `msg.sender` come `_indexManager` del nuovo Index. Chiunque può chiamarla, ma ottiene un Index gestito da sé stesso e non registrato nell'IndexManager ufficiale (`isIndexAddress == false`).
+
+4. **Indirizzo deterministico per chiamante**: l'indirizzo dipende da factory, salt e initcode (che include il chiamante come `_indexManager`). Chiamanti diversi con gli stessi parametri finiscono su indirizzi diversi, quindi nessuno può occupare in anticipo l'indirizzo di un index ufficiale. Stesso chiamante e stesso salt due volte: `IndexFactory__IndexDeployFailed`.
+
+5. **Nessun evento e nessuno stato mutabile**: la factory non ha storage e non emette eventi; `IndexCreated` resta dell'IndexManager.
+
+6. **Limiti di dimensione**: ogni contratto dati ha al massimo 24.576 byte di runtime (`SplitCode__DataTooLarge`). L'initcode dell'Index ricomposto deve rispettare EIP-3860 (49.152 B) e il runtime dell'Index EIP-170 (24.576 B), altrimenti il CREATE2 fallisce con `IndexFactory__IndexDeployFailed`.
 ---
 
 ## Router.sol

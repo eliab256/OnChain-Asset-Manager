@@ -5,6 +5,8 @@ import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
 import {MultiSigWallet} from "../src/MultiSigWallet.sol";
 import {IndexManager} from "../src/IndexManager.sol";
+import {IndexFactory} from "../src/IndexFactory.sol";
+import {Index} from "../src/Index.sol";
 import {Router} from "../src/Router.sol";
 import {SwapManager} from "../src/SwapManager.sol";
 import {PriceFeedManager} from "../src/PriceFeedManager.sol";
@@ -17,6 +19,7 @@ import {CodeConstants} from "../script/CodeConstants.sol";
 contract DeployPeriphery is Script, CodeConstants {
     MultiSigWallet public multiSigWallet;
     IndexManager public indexManager;
+    IndexFactory public indexFactory;
     Router public router;
     HelperConfig public helperConfig;
     SwapManager public swapManager;
@@ -64,7 +67,10 @@ contract DeployPeriphery is Script, CodeConstants {
             address(0)
         );
 
-        // 3. Deploy IndexManager; its constructor deploys and initializes the SwapManager, PriceFeedManager and Router proxies
+        // 3. Deploy the split-code IndexFactory, which stores the Index creation code outside the IndexManager
+        indexFactory = new IndexFactory(type(Index).creationCode);
+
+        // 3.1 Deploy IndexManager; its constructor deploys and initializes the SwapManager, PriceFeedManager and Router proxies
         //    from fresh implementations (initializers disabled), with the IndexManager as owner and the timelock as upgrader
         indexManager = new IndexManager(
             config.usdcAddress,
@@ -72,7 +78,8 @@ contract DeployPeriphery is Script, CodeConstants {
             address(new SwapManager()),
             address(new PriceFeedManager()),
             address(new Router()),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
         swapManager = SwapManager(indexManager.getSwapManagerAddress());
         priceFeedManager = PriceFeedManager(
@@ -80,7 +87,7 @@ contract DeployPeriphery is Script, CodeConstants {
         );
         router = Router(indexManager.getRouterAddress());
 
-        // 3.1 Register the USDC/USD feed while the deployer still holds ASSET_MANAGER_ROLE
+        // 3.2 Register the USDC/USD feed while the deployer still holds ASSET_MANAGER_ROLE
         priceFeedManager.registerPriceFeed(
             config.usdcAddress,
             config.usdcPriceFeedAddress,
@@ -108,6 +115,7 @@ contract DeployPeriphery is Script, CodeConstants {
             console.log("MultiSigWallet Address:", address(multiSigWallet));
             console.log("TimelockController (upgrader) Address:", address(timelock));
             console.log("IndexManager Address:", address(indexManager));
+            console.log("IndexFactory Address:", address(indexFactory));
             console.log("SwapManager Proxy Address:", address(swapManager));
             console.log(
                 "SwapManager Implementation Address:",

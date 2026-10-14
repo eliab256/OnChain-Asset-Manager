@@ -35,6 +35,7 @@ A decentralized, non-custodial index fund protocol built on Ethereum. Users depo
 | Contract           | Responsibility                                                                                                     |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | `IndexManager.sol` | Governance executor — creates and initialises indexes, orchestrates rebalancing, fee collection and weight updates |
+| `IndexFactory.sol` | Index deployer — split-code factory: stores the Index creation code in two data contracts and re-assembles it to CREATE2 each new index, so the IndexManager does not embed the Index bytecode (EIP-170). Permissionless and event-less: the caller always becomes the new index's manager, so only indexes created through `IndexManager.createIndex` are registered |
 | `Index.sol`        | The vault — holds assets, mints/burns shares, calculates NAV, enforces slippage tolerance                          |
 | `Router.sol`       | UX entry point — validates user inputs, routes buy/sell calls to the correct index. UUPS proxy (ERC-7201 storage) deployed by IndexManager; every index stores the same proxy as its immutable router, so its logic can be upgraded for all indexes (only by the `TimelockController`, after a 2-day delay) without touching the indexes |
 | `PriceFeedManager.sol` | Oracle registry — one Chainlink feed per asset with its own staleness limit (`maxDelay`), shared by all indexes. Feed replacement is timelocked (2 days + 3-day window). UUPS proxy (ERC-7201 storage) deployed by IndexManager (owner), upgradeable only by the `TimelockController` after a 2-day delay |
@@ -69,11 +70,11 @@ These roles are defined in `IndexManager.sol`. The deployer receives all three r
 
 ### Index access control
 
-`Index.sol` sets two immutable addresses in its constructor (readable with `getIndexManager()` and `getRouter()`). They never change: there is no role administration on an Index.
+`Index.sol` sets two immutable addresses in its constructor (readable with `getIndexManager()` and `getRouter()`). The IndexManager address is passed by `IndexFactory`, which always uses its own caller, so indexes created through `IndexManager.createIndex` are managed by the IndexManager. They never change: there is no role administration on an Index.
 
 | Modifier           | Allowed caller                                                  | Functions                                                                                 | Revert error                   |
 | ------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------ |
-| `onlyIndexManager` | The deploying IndexManager, and the Index itself (self-call used by `executeWeightUpdate` to try the rebalance) | `initialize`, `proposeUpdateWeights`, `executeWeightUpdate`, `cancelWeightUpdate`, `collectFees`, `rebalanceIndex` | `Index__CallerNotIndexManager` |
+| `onlyIndexManager` | The IndexManager set at construction, and the Index itself (self-call used by `executeWeightUpdate` to try the rebalance) | `initialize`, `proposeUpdateWeights`, `executeWeightUpdate`, `cancelWeightUpdate`, `collectFees`, `rebalanceIndex` | `Index__CallerNotIndexManager` |
 | `onlyRouter`       | Router proxy (the same address for every index)                 | `mintShares`, `redeem` (after the `isInitialized` check): the only entry points for user buy/sell operations | `Index__CallerNotRouter`       |
 
 ### User (no role required)
@@ -157,7 +158,7 @@ make integrationtest
 .
 ├── script/
 │   ├── CodeConstants.sol            # Chain IDs, mainnet addresses, deployer constants
-│   ├── DeployPeriphery.s.sol        # Deploys MultiSig, TimelockController (upgrader), SwapManager/PriceFeedManager/Router implementations and IndexManager (creates the three proxies); registers the USDC feed
+│   ├── DeployPeriphery.s.sol        # Deploys MultiSig, TimelockController (upgrader), SwapManager/PriceFeedManager/Router implementations, IndexFactory and IndexManager (creates the three proxies); registers the USDC feed
 │   ├── DeployAndInitNewIndex.s.sol  # Registers missing asset feeds, deploys and seeds a new Index
 │   └── HelperConfig.s.sol           # Network config and mock setup for Anvil
 │
@@ -165,18 +166,21 @@ make integrationtest
 │   ├── ContractCodeConstants.sol    # Protocol-wide constants (fees, weights, thresholds)
 │   ├── Index.sol                    # Core vault: mint, redeem, rebalance, fees
 │   ├── IndexManager.sol             # Governance: create, init, rebalance, collect fees
+│   ├── IndexFactory.sol             # Split-code factory that deploys new Index contracts (CREATE2)
 │   ├── Router.sol                   # User entry point: input validation, buy/sell routing (UUPS proxy)
 │   ├── PriceFeedManager.sol         # Shared Chainlink feed registry (UUPS proxy)
 │   ├── SwapManager.sol              # Uniswap V3/V4 swap parameter builder
 │   ├── types.sol                    # Shared structs and enums
 │   ├── Interface/
 │   │   ├── IIndex.sol
+│   │   ├── IIndexFactory.sol
 │   │   ├── IIndexManager.sol
 │   │   ├── IPriceFeedManager.sol
 │   │   ├── IRouter.sol
 │   │   └── ISwapManager.sol
 │   ├── errors/
 │   │   ├── IndexErrors.sol
+│   │   ├── IndexFactoryErrors.sol
 │   │   ├── IndexManagerErrors.sol
 │   │   └── RouterErrors.sol
 │   ├── events/
@@ -184,6 +188,7 @@ make integrationtest
 │   │   └── IndexManagerEvents.sol
 │   └── libraries/
 │       ├── SharesMath.sol           # Share mint/redeem/tolerance arithmetic
+│       ├── SplitCode.sol            # Stores bytes as contract code (STOP-prefixed) and reads them back
 │       └── UnderlyingMath.sol       # USD valuation, rebalance amounts, decimal conversion
 │
 └── test/
@@ -207,6 +212,7 @@ make integrationtest
     │   │   ├── IndexManager.Rebalance.t.sol
     │   │   ├── IndexManager.Weights.t.sol
     │   │   └── Indexmanager.CollectFees.t.sol
+    │   ├── IndexFactoryUnitTest/    # Split-code factory: code pointers, deployIndex, IndexManager wiring
     │   ├── RouterUnitTest/
     │   │   ├── Router.BuyShares.t.sol
     │   │   ├── Router.Getters.t.sol
@@ -220,6 +226,7 @@ make integrationtest
     │   │   └── UpgraderAuthTimelockUpgrade.t.sol
     │   └── LibrariesUnitTest/
     │       ├── SharesMath.t.sol
+    │       ├── SplitCode.t.sol
     │       └── UnderlyingMath.t.sol
     └── integration/
         ├── Interactions/
@@ -275,7 +282,7 @@ make unittest
 source .env
 anvil --fork-url $MAINNET_RPC_URL &
 
-# Deploy the MultiSig, the TimelockController, the SwapManager, PriceFeedManager and Router implementations and IndexManager (creates the three proxies)
+# Deploy the MultiSig, the TimelockController, the SwapManager, PriceFeedManager and Router implementations, the IndexFactory and IndexManager (creates the three proxies)
 forge script script/DeployPeriphery.s.sol --broadcast --rpc-url http://localhost:8545
 
 # Deploy and initialise a WETH/WBTC 60/40 index

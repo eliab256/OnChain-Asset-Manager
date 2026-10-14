@@ -122,6 +122,14 @@ interface IIndexManager {
      */
     function getPriceFeedManagerAddress() external view returns (address);
 
+    /**
+     * @notice Returns the address of the IndexFactory used to deploy the indexes, set in the constructor.
+     * @dev Never changes. The factory is permissionless, but only indexes created through createIndex are
+     *      registered here (see isIndexAddress).
+     * @return The IndexFactory address.
+     */
+    function getIndexFactory() external view returns (address);
+
     function getTotalFeesCollected() external view returns (uint256);
 
     function getUniswapUniversalRouter() external view returns (address);

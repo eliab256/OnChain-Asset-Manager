@@ -4,10 +4,11 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
-import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
+import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
 import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
+import {IndexFactory} from "../../../src/IndexFactory.sol";
 import {Index} from "../../../src/Index.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
 import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
@@ -267,6 +268,60 @@ contract DeployPeripheryTest is Test, CodeConstants {
             IUpgraderAuth(address(mainnetRouter)).getUpgrader(),
             address(timelock),
             "Router upgrader"
+        );
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    ///////////////////////////// IndexFactory /////////////////////////
+    ////////////////////////////////////////////////////////////////////
+
+    function testDeployPeripheryDeploysIndexFactoryOnMainnet()
+        public
+        selectFork("mainnet")
+    {
+        DeployPeriphery deployPeriphery = new DeployPeriphery();
+        (
+            mainnetIndexManager,
+            mainnetRouter,
+            isolatedHelperConfig,
+            mainnetSwapManager,
+            multiSigWallet,
+            timelock,
+            mainnetDeployer
+        ) = deployPeriphery.run();
+
+        _assertIndexFactorySetup(deployPeriphery);
+    }
+
+    function testDeployPeripheryDeploysIndexFactoryOnAnvil() public {
+        DeployPeriphery deployPeriphery = new DeployPeriphery();
+        (
+            mainnetIndexManager,
+            mainnetRouter,
+            isolatedHelperConfig,
+            mainnetSwapManager,
+            multiSigWallet,
+            timelock,
+            mainnetDeployer
+        ) = deployPeriphery.run();
+
+        _assertIndexFactorySetup(deployPeriphery);
+    }
+
+    /// @dev Shared assertions on the IndexFactory deployed by DeployPeriphery.run().
+    function _assertIndexFactorySetup(DeployPeriphery _deployPeriphery) internal view {
+        IndexFactory factory = _deployPeriphery.indexFactory();
+        assertTrue(address(factory) != address(0), "factory must be deployed");
+        assertTrue(address(factory).code.length > 0, "factory must have code");
+        assertEq(
+            mainnetIndexManager.getIndexFactory(),
+            address(factory),
+            "IndexManager must use the factory deployed by the script"
+        );
+        assertEq(
+            keccak256(factory.getIndexCreationCode()),
+            keccak256(type(Index).creationCode),
+            "factory must store the Index creation code"
         );
     }
 }

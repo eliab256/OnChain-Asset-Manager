@@ -42,6 +42,34 @@ struct PendingFeed {
 }
 
 /**
+ * @notice Constructor arguments of an Index passed to the IndexFactory.
+ * @dev The IndexManager argument of the Index constructor is not part of the struct:
+ *      the IndexFactory always sets it to msg.sender.
+ * @param name             ERC-20 name of the index shares.
+ * @param symbol           ERC-20 symbol of the index shares.
+ * @param router           Shared Router proxy, the only entry point for mint and redeem.
+ * @param usdc             USDC token address.
+ * @param priceFeedManager Shared PriceFeedManager proxy.
+ * @param swapManager      Shared SwapManager proxy.
+ * @param universalRouter  Uniswap Universal Router address.
+ * @param asset0           First underlying asset (lower address) and its weight.
+ * @param asset1           Second underlying asset (higher address) and its weight.
+ * @param feePercentage    Fee percentage with 4 decimals (1_000_000 = 100%).
+ */
+struct IndexDeployParams {
+    string name;
+    string symbol;
+    address router;
+    address usdc;
+    address priceFeedManager;
+    address swapManager;
+    address universalRouter;
+    IndexAsset asset0;
+    IndexAsset asset1;
+    uint32 feePercentage;
+}
+
+/**
  * @notice Snapshot of prices, reserves, and USD values captured at the start of
  *         a mint or redeem operation to avoid repeated storage reads and external
  *         price-feed calls throughout the function.

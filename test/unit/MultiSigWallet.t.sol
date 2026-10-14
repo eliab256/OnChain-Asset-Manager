@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "./Base.t.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {CodeConstants} from "../../script/CodeConstants.sol";
 import {MultiSigWallet} from "../../src/MultiSigWallet.sol";
 
@@ -119,6 +120,44 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         sig = abi.encodePacked(r, s, v);
     }
 
+    /// @dev Returns how many logs from `_emitter` match `_sig` and the position of the first one.
+    function _findLogs(
+        Vm.Log[] memory _logs,
+        address _emitter,
+        bytes32 _sig
+    ) internal pure returns (uint256 count, uint256 firstIndex) {
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (_logs[i].emitter != _emitter || _logs[i].topics[0] != _sig)
+                continue;
+            if (count == 0) firstIndex = i;
+            count++;
+        }
+    }
+
+    /// @dev Asserts a (uint256 indexed txId, address indexed account) event with empty data
+    ///      was emitted exactly once by the MultiSig.
+    function _assertTxOwnerEvent(
+        Vm.Log[] memory _logs,
+        bytes32 _sig,
+        uint256 _expectedTxId,
+        address _expectedAccount
+    ) internal view {
+        (uint256 count, uint256 idx) = _findLogs(
+            _logs,
+            address(multiSigWallet),
+            _sig
+        );
+        assertEq(count, 1, "event must be emitted exactly once");
+        assertEq(_logs[idx].topics.length, 3, "2 indexed params expected");
+        assertEq(uint256(_logs[idx].topics[1]), _expectedTxId, "txId");
+        assertEq(
+            address(uint160(uint256(_logs[idx].topics[2]))),
+            _expectedAccount,
+            "indexed account"
+        );
+        assertEq(_logs[idx].data.length, 0, "no data expected");
+    }
+
     // =========================================================================
     //  Constructor
     // =========================================================================
@@ -185,21 +224,41 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         );
         uint256 expectedTxId = multiSigWallet.getTransactionCount();
 
-        vm.expectEmit(true, true, true, true);
-        emit TransactionSubmitted(
-            expectedTxId,
-            ANVIL_OWNER_1,
-            address(callTarget),
-            ETH_SEND_AMOUNT,
-            data
-        );
-
+        vm.recordLogs();
         vm.prank(ANVIL_OWNER_1);
         uint256 txId = multiSigWallet.submitTransaction(
             address(callTarget),
             ETH_SEND_AMOUNT,
             data
         );
+
+        {
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+            (uint256 count, uint256 idx) = _findLogs(
+                logs,
+                address(multiSigWallet),
+                TransactionSubmitted.selector
+            );
+            assertEq(count, 1, "TransactionSubmitted must be emitted once");
+            assertEq(logs[idx].topics.length, 4, "3 indexed params expected");
+            assertEq(uint256(logs[idx].topics[1]), expectedTxId, "txId");
+            assertEq(
+                address(uint160(uint256(logs[idx].topics[2]))),
+                ANVIL_OWNER_1,
+                "proposer"
+            );
+            assertEq(
+                address(uint160(uint256(logs[idx].topics[3]))),
+                address(callTarget),
+                "target"
+            );
+            (uint256 loggedValue, bytes memory loggedData) = abi.decode(
+                logs[idx].data,
+                (uint256, bytes)
+            );
+            assertEq(loggedValue, ETH_SEND_AMOUNT, "value");
+            assertEq(loggedData, data, "data");
+        }
 
         assertEq(txId, expectedTxId);
         assertEq(multiSigWallet.getTransactionCount(), expectedTxId + 1);
@@ -232,11 +291,16 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
     function test_confirmTransaction_incrementsCounterAndEmitsEvent() public {
         uint256 txId = _submitDummyTx();
 
-        vm.expectEmit(true, true, false, false);
-        emit TransactionConfirmed(txId, ANVIL_OWNER_2);
-
+        vm.recordLogs();
         vm.prank(ANVIL_OWNER_2);
         multiSigWallet.confirmTransaction(txId);
+
+        _assertTxOwnerEvent(
+            vm.getRecordedLogs(),
+            TransactionConfirmed.selector,
+            txId,
+            ANVIL_OWNER_2
+        );
 
         (, , , , uint256 confirmations) = multiSigWallet.getTransaction(txId);
         assertEq(confirmations, 1);
@@ -297,11 +361,16 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         vm.prank(ANVIL_OWNER_2);
         multiSigWallet.confirmTransaction(txId);
 
-        vm.expectEmit(true, true, false, false);
-        emit TransactionExecuted(txId, ANVIL_OWNER_1);
-
+        vm.recordLogs();
         vm.prank(ANVIL_OWNER_1);
         multiSigWallet.executeTransaction(txId);
+
+        _assertTxOwnerEvent(
+            vm.getRecordedLogs(),
+            TransactionExecuted.selector,
+            txId,
+            ANVIL_OWNER_1
+        );
 
         (, , , bool executed, ) = multiSigWallet.getTransaction(txId);
         assertTrue(executed);
@@ -384,11 +453,16 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
         vm.prank(ANVIL_OWNER_2);
         multiSigWallet.confirmTransaction(txId);
 
-        vm.expectEmit(true, true, false, false);
-        emit ConfirmationRevoked(txId, ANVIL_OWNER_2);
-
+        vm.recordLogs();
         vm.prank(ANVIL_OWNER_2);
         multiSigWallet.revokeConfirmation(txId);
+
+        _assertTxOwnerEvent(
+            vm.getRecordedLogs(),
+            ConfirmationRevoked.selector,
+            txId,
+            ANVIL_OWNER_2
+        );
 
         (, , , , uint256 confirmations) = multiSigWallet.getTransaction(txId);
         assertEq(confirmations, 0);
@@ -441,12 +515,19 @@ contract MultiSigWalletTest is BaseTest, CodeConstants {
 
         bytes memory sig = _signConfirm(ANVIL_OWNER_2_PK, ANVIL_OWNER_2, txId);
 
-        vm.expectEmit(true, true, false, false);
-        emit TransactionConfirmed(txId, ANVIL_OWNER_2);
-
         // Relayed by a third party — not an owner themselves
+        vm.recordLogs();
         vm.prank(nonOwner);
         multiSigWallet.confirmTransactionWithSig(txId, ANVIL_OWNER_2, sig);
+
+        // The confirming owner is the signer, not the relayer.
+        assertTrue(ANVIL_OWNER_2 != nonOwner, "signer and relayer must differ");
+        _assertTxOwnerEvent(
+            vm.getRecordedLogs(),
+            TransactionConfirmed.selector,
+            txId,
+            ANVIL_OWNER_2
+        );
 
         (, , , , uint256 confirmations) = multiSigWallet.getTransaction(txId);
         assertEq(confirmations, 1);

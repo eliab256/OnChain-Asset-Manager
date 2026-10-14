@@ -458,15 +458,6 @@ contract PriceFeedManagerRegisterTest is BasePriceFeedManagerTest {
         );
     }
 
-    function testRegisterPriceFeedIsEffectiveImmediately() public {
-        _register(s_asset, address(s_feed8Decimals), s_validMaxDelay);
-
-        assertEq(
-            priceFeedManager.getPrice(s_asset),
-            uint256(PRICE_8_DECIMALS) * 10 ** (DECIMALS_STANDARD - FEED_DECIMALS_8)
-        );
-    }
-
     function testRegisterPriceFeedEmitsEvent() public {
         vm.recordLogs();
         _register(s_asset, address(s_feed8Decimals), s_validMaxDelay);

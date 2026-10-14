@@ -269,8 +269,11 @@ contract DeployAndInitNewIndex is Script {
                 ? (asset0, asset1, weight0, weight1)
                 : (asset1, asset0, weight1, weight0);
         }
-        uint256 priceIn = IIndex(_index).getLatestPrice(assetIn);
-        uint256 priceOut = IIndex(_index).getLatestPrice(assetOut);
+        PriceFeedManager priceFeedManager = PriceFeedManager(
+            indexManager.getPriceFeedManagerAddress()
+        );
+        uint256 priceIn = priceFeedManager.getPrice(assetIn);
+        uint256 priceOut = priceFeedManager.getPrice(assetOut);
         return
             UnderlyingMath.calculateComplementaryAssetAmount(
                 _amount,

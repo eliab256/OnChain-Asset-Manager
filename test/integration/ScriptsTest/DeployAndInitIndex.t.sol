@@ -3,13 +3,12 @@ pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
 import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
-import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
 import {
     DeployAndInitNewIndex,
     RunParams
 } from "../../../script/DeployAndInitNewIndex.s.sol";
-import {HelperConfig, AssetConfig} from "../../../script/HelperConfig.s.sol";
+import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
 import {Router} from "../../../src/Router.sol";
 import {IndexManager} from "../../../src/IndexManager.sol";
@@ -18,7 +17,6 @@ import {SwapManager} from "../../../src/SwapManager.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
 import {AssetAvailable} from "../../../src/types.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     TimelockController
 } from "@openzeppelin/contracts/governance/TimelockController.sol";

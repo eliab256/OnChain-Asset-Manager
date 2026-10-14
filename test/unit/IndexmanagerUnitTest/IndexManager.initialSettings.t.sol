@@ -9,12 +9,7 @@ import {Router} from "../../../src/Router.sol";
 import {
     ERC1967Utils
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute} from "../../../src/types.sol";
-import {HelperConfig} from "../../../script/HelperConfig.s.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Vm} from "forge-std/Vm.sol";
-import {console2} from "forge-std/console2.sol";
+import {IndexAsset} from "../../../src/types.sol";
 
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/events/IndexManagerEvents.sol";
@@ -43,7 +38,8 @@ contract IndexManagerTest is BaseTest {
             address(implementation),
             address(priceFeedManagerImplementation),
             address(routerImplementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
         // getUsdc/getUsdcPriceFeed were removed from the IndexManager: USDC is read from its Router
         // and the USDC feed from its PriceFeedManager, where a fresh manager has none registered.
@@ -94,7 +90,8 @@ contract IndexManagerTest is BaseTest {
             address(implementation),
             address(priceFeedManagerImplementation),
             address(routerImplementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
 
         SwapManager proxy = SwapManager(newIndexManager.getSwapManagerAddress());
@@ -127,7 +124,8 @@ contract IndexManagerTest is BaseTest {
             address(swapManagerImplementation),
             address(implementation),
             address(routerImplementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
 
         PriceFeedManager proxy = PriceFeedManager(
@@ -171,7 +169,8 @@ contract IndexManagerTest is BaseTest {
             noCode,
             address(priceFeedManagerImplementation),
             address(routerImplementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
     }
 
@@ -193,7 +192,8 @@ contract IndexManagerTest is BaseTest {
             address(swapManagerImplementation),
             noCode,
             address(routerImplementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
     }
 
@@ -213,7 +213,8 @@ contract IndexManagerTest is BaseTest {
             address(swapManagerImplementation),
             address(priceFeedManagerImplementation),
             noCode,
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
     }
 
@@ -228,7 +229,8 @@ contract IndexManagerTest is BaseTest {
             address(swapManagerImplementation),
             address(priceFeedManagerImplementation),
             address(implementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
 
         Router proxy = Router(newIndexManager.getRouterAddress());

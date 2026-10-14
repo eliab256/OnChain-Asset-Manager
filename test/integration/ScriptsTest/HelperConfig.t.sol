@@ -3,7 +3,6 @@ pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
 import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
-import {console} from "forge-std/console.sol";
 import {
     HelperConfig,
     AssetConfig,
@@ -11,9 +10,7 @@ import {
 } from "../../../script/HelperConfig.s.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 import {AssetAvailable, SwapRoute, PoolVersion} from "../../../src/types.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
 import {MockUSDC} from "../../mocks/USDCMock.sol";
 import {UniversalRouterMock} from "../../mocks/UniversalRouterMock.sol";

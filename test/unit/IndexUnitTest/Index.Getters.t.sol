@@ -9,61 +9,98 @@ import {
 } from "../../../src/errors/PriceFeedManagerErrors.sol";
 
 contract IndexGettersTest is BaseTest {
+    /// WETH price used to check that the index NAV follows a feed update, in 8 decimals
+    int256 internal constant UPDATED_WETH_PRICE = 5_000 * 10 ** 8;
+
     function setUp() public override {
         super.setUp();
     }
 
-    function testGetLatestPriceReturnsCorrectPriceForAsset0() public view {
-        uint256 price = initializedIndex.getLatestPrice(address(mockWeth));
-        uint256 expectedPrice = uint256(WETH_INITIAL_PRICE) * 1e10; // 8 -> 18 decimals
-        assertEq(price, expectedPrice);
+    // =========================================================================
+    //  Prices — read by the Index from the shared PriceFeedManager
+    // =========================================================================
+
+    function testPriceFeedManagerIsTheIndexManagerProxy() public view {
+        assertEq(
+            address(priceFeedManager),
+            indexManager.getPriceFeedManagerAddress(),
+            "the Index prices assets through the IndexManager's PriceFeedManager"
+        );
     }
 
-    function testGetLatestPriceReturnsCorrectPriceForAsset1() public view {
-        uint256 price = initializedIndex.getLatestPrice(address(mockWbtc));
-        uint256 expectedPrice = uint256(WBTC_INITIAL_PRICE) * 1e10; // 8 -> 18 decimals
-        assertEq(price, expectedPrice);
+    function testGetAssetsUsdValuePricesAsset0WithPriceFeedManagerPrice()
+        public
+        view
+    {
+        uint256 price = priceFeedManager.getPrice(initializedIndex.getAsset0());
+        assertEq(price, uint256(WETH_INITIAL_PRICE) * 1e10); // 8 -> 18 decimals
+
+        (uint256 reserve0Std, ) = initializedIndex
+            .getAssetsReservesStdDecimals();
+        (uint256 v0, , ) = initializedIndex.getAssetsUsdValue();
+        assertEq(v0, (reserve0Std * price) / 1e18);
     }
 
-    function testGetLatestPriceReturnsCorrectPriceForUsdc() public view {
-        uint256 price = initializedIndex.getLatestPrice(address(mockUsdc));
-        uint256 expectedPrice = uint256(USDC_INITIAL_PRICE) * 1e10; // 8 -> 18 decimals
-        assertEq(price, expectedPrice);
+    function testGetAssetsUsdValuePricesAsset1WithPriceFeedManagerPrice()
+        public
+        view
+    {
+        uint256 price = priceFeedManager.getPrice(initializedIndex.getAsset1());
+        assertEq(price, uint256(WBTC_INITIAL_PRICE) * 1e10); // 8 -> 18 decimals
+
+        (, uint256 reserve1Std) = initializedIndex
+            .getAssetsReservesStdDecimals();
+        (, uint256 v1, ) = initializedIndex.getAssetsUsdValue();
+        assertEq(v1, (reserve1Std * price) / 1e18);
     }
 
-    function testGetLatestPriceRevertIfAssetNotSupported() public {
-        // LINK is not supported
-        vm.expectRevert(Index__AssetNotSupported.selector);
-        initializedIndex.getLatestPrice(address(mockLink));
+    function testGetAssetsUsdValueRevertsIfUsdcAnswerIsZero() public {
+        // The NAV path also reads the USDC price from the PriceFeedManager.
+        mockUsdcPriceFeed.updateAnswer(0);
+
+        vm.expectRevert(PriceFeedManager__PriceFeedNotAvailable.selector);
+        initializedIndex.getAssetsUsdValue();
     }
 
-    function testGetLatestPriceRevertIfPriceIsStale() public {
+    function testGetAssetsUsdValueRevertIfPriceIsStale() public {
         vm.warp(block.timestamp + 2 hours);
 
         vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        initializedIndex.getLatestPrice(address(mockWeth));
+        initializedIndex.getAssetsUsdValue();
     }
 
-    function testGetLatestPriceRevertIfAnswerIsZero() public {
+    function testGetAssetsUsdValueRevertIfAnswerIsZero() public {
         mockWethPriceFeed.updateAnswer(0);
 
         vm.expectRevert(PriceFeedManager__PriceFeedNotAvailable.selector);
-        initializedIndex.getLatestPrice(address(mockWeth));
+        initializedIndex.getAssetsUsdValue();
     }
 
-    function testGetLatestPriceRevertIfAnswerIsNegative() public {
+    function testGetAssetsUsdValueRevertIfAnswerIsNegative() public {
         mockWethPriceFeed.updateAnswer(-1);
 
         vm.expectRevert(PriceFeedManager__PriceFeedNotAvailable.selector);
-        initializedIndex.getLatestPrice(address(mockWeth));
+        initializedIndex.getAssetsUsdValue();
     }
 
-    function testGetLatestPriceReflectsUpdatedFeedValue() public {
-        // Aggiorniamo il prezzo WETH a $5 000 e verifichiamo che il getter lo restituisca
-        mockWethPriceFeed.updateAnswer(5_000 * 10 ** 8);
+    function testGetAssetsUsdValueReflectsUpdatedFeedValue() public {
+        (uint256 reserve0Std, ) = initializedIndex
+            .getAssetsReservesStdDecimals();
+        (uint256 v0Before, uint256 v1Before, ) = initializedIndex
+            .getAssetsUsdValue();
+        assertEq(
+            v0Before,
+            (reserve0Std * uint256(WETH_INITIAL_PRICE) * 1e10) / 1e18
+        );
 
-        uint256 price = initializedIndex.getLatestPrice(address(mockWeth));
-        assertEq(price, 5_000e18);
+        mockWethPriceFeed.updateAnswer(UPDATED_WETH_PRICE);
+
+        assertEq(priceFeedManager.getPrice(address(mockWeth)), 5_000e18);
+        (uint256 v0After, uint256 v1After, uint256 totalAfter) = initializedIndex
+            .getAssetsUsdValue();
+        assertEq(v0After, (reserve0Std * 5_000e18) / 1e18);
+        assertEq(v1After, v1Before, "asset1 value must not change");
+        assertEq(totalAfter, v0After + v1After);
     }
 
     // =========================================================================
@@ -451,34 +488,46 @@ contract IndexGettersTest is BaseTest {
     }
 
     // =========================================================================
-    //  getAsset0PriceFeed / getAsset1PriceFeed / getUsdcPriceFeed
+    //  Price feeds of the Index assets — PriceFeedManager config
     // =========================================================================
 
-    function testGetAsset0PriceFeedReturnsCorrectAddress() public view {
+    function testAsset0PriceFeedInPriceFeedManagerIsCorrect() public view {
         assertEq(
-            initializedIndex.getAsset0PriceFeed(),
+            priceFeedManager
+                .getPriceFeedConfig(initializedIndex.getAsset0())
+                .feed,
             address(mockWethPriceFeed)
         );
     }
 
-    function testGetAsset1PriceFeedReturnsCorrectAddress() public view {
+    function testAsset1PriceFeedInPriceFeedManagerIsCorrect() public view {
         assertEq(
-            initializedIndex.getAsset1PriceFeed(),
+            priceFeedManager
+                .getPriceFeedConfig(initializedIndex.getAsset1())
+                .feed,
             address(mockWbtcPriceFeed)
         );
     }
 
-    function testGetUsdcPriceFeedReturnsCorrectAddress() public view {
+    function testUsdcPriceFeedInPriceFeedManagerIsCorrect() public view {
         assertEq(
-            initializedIndex.getUsdcPriceFeed(),
+            priceFeedManager
+                .getPriceFeedConfig(initializedIndex.getUsdc())
+                .feed,
             address(mockUsdcPriceFeed)
         );
     }
 
     function testPriceFeedsAreDistinctAddresses() public view {
-        address feed0 = initializedIndex.getAsset0PriceFeed();
-        address feed1 = initializedIndex.getAsset1PriceFeed();
-        address feedUsdc = initializedIndex.getUsdcPriceFeed();
+        address feed0 = priceFeedManager
+            .getPriceFeedConfig(initializedIndex.getAsset0())
+            .feed;
+        address feed1 = priceFeedManager
+            .getPriceFeedConfig(initializedIndex.getAsset1())
+            .feed;
+        address feedUsdc = priceFeedManager
+            .getPriceFeedConfig(initializedIndex.getUsdc())
+            .feed;
 
         assertNotEq(
             feed0,
@@ -500,17 +549,23 @@ contract IndexGettersTest is BaseTest {
     function testNonInitializedIndexHasCorrectPriceFeeds() public view {
         // nonInitializedIndex: WBTC / LINK
         assertEq(
-            nonInitializedIndex.getAsset0PriceFeed(),
+            priceFeedManager
+                .getPriceFeedConfig(nonInitializedIndex.getAsset0())
+                .feed,
             address(mockWbtcPriceFeed),
             "asset0 price feed deve essere mockWbtcPriceFeed"
         );
         assertEq(
-            nonInitializedIndex.getAsset1PriceFeed(),
+            priceFeedManager
+                .getPriceFeedConfig(nonInitializedIndex.getAsset1())
+                .feed,
             address(mockLinkPriceFeed),
             "asset1 price feed deve essere mockLinkPriceFeed"
         );
         assertEq(
-            nonInitializedIndex.getUsdcPriceFeed(),
+            priceFeedManager
+                .getPriceFeedConfig(nonInitializedIndex.getUsdc())
+                .feed,
             address(mockUsdcPriceFeed),
             "USDC price feed deve essere mockUsdcPriceFeed"
         );

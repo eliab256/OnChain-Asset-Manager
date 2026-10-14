@@ -2,12 +2,9 @@
 pragma solidity ^0.8.13;
 
 import {IntegrationBase} from "./IntegrationBase.t.sol";
-import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {Index} from "../../../src/Index.sol";
 import {
     AggregatorV3Interface
 } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import "../../../src/errors/IndexErrors.sol";
 import {
     PriceFeedManager__PriceIsStale
 } from "../../../src/errors/PriceFeedManagerErrors.sol";
@@ -23,31 +20,31 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
     //  WBTC price feed
     // =========================================================================
 
-    function test_getLatestPrice_wbtc_returnsPositivePrice() public view {
-        uint256 price = wbtcWethIndex.getLatestPrice(address(wbtc));
+    function test_priceFeedManager_getPrice_wbtc_returnsPositivePrice() public view {
+        uint256 price = priceFeedManager.getPrice(address(wbtc));
         assertGt(price, 0, "WBTC price must be positive");
     }
 
     /**
-     * @dev  Price is returned in 18-decimal standard by Index.getLatestPrice.
+     * @dev  Price is returned in 18-decimal standard by PriceFeedManager.getPrice.
      *       Range: $10 000 – $200 000 per BTC.
      */
-    function test_getLatestPrice_wbtc_isInExpectedRange() public view {
-        uint256 price = wbtcWethIndex.getLatestPrice(address(wbtc));
+    function test_priceFeedManager_getPrice_wbtc_isInExpectedRange() public view {
+        uint256 price = priceFeedManager.getPrice(address(wbtc));
         assertGt(price, 10_000e18, "WBTC price below $10 000 floor");
         assertLt(price, 200_000e18, "WBTC price above $200 000 ceiling");
     }
 
-    function test_getLatestPrice_weth_returnsPositivePrice() public view {
-        uint256 price = wbtcWethIndex.getLatestPrice(address(weth));
+    function test_priceFeedManager_getPrice_weth_returnsPositivePrice() public view {
+        uint256 price = priceFeedManager.getPrice(address(weth));
         assertGt(price, 0, "WETH price must be positive");
     }
 
     /**
      * @dev  Range: $500 – $50 000 per ETH.
      */
-    function test_getLatestPrice_weth_isInExpectedRange() public view {
-        uint256 price = wbtcWethIndex.getLatestPrice(address(weth));
+    function test_priceFeedManager_getPrice_weth_isInExpectedRange() public view {
+        uint256 price = priceFeedManager.getPrice(address(weth));
         assertGt(price, 500e18, "WETH price below $500 floor");
         assertLt(price, 50_000e18, "WETH price above $50 000 ceiling");
     }
@@ -59,8 +56,8 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
     /**
      * @dev  USDC should always be within 5 % of its $1 peg.
      */
-    function test_getLatestPrice_usdc_isCloseToDollarPeg() public view {
-        uint256 price = wbtcWethIndex.getLatestPrice(address(usdc));
+    function test_priceFeedManager_getPrice_usdc_isCloseToDollarPeg() public view {
+        uint256 price = priceFeedManager.getPrice(address(usdc));
         assertGt(price, 0.95e18, "USDC below $0.95 peg band");
         assertLt(price, 1.05e18, "USDC above $1.05 peg band");
     }
@@ -70,8 +67,8 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
     // =========================================================================
 
     function test_wbtcPrice_isGreaterThan_wethPrice() public view {
-        uint256 wbtcPrice = wbtcWethIndex.getLatestPrice(address(wbtc));
-        uint256 wethPrice = wbtcWethIndex.getLatestPrice(address(weth));
+        uint256 wbtcPrice = priceFeedManager.getPrice(address(wbtc));
+        uint256 wethPrice = priceFeedManager.getPrice(address(weth));
         assertGt(wbtcPrice, wethPrice, "WBTC must be priced above WETH");
     }
 
@@ -193,36 +190,59 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         );
     }
 
-    function test_getLatestPrice_matchesPriceFeedManagerPrice() public view {
+    function test_priceFeedManager_getPrice_matchesChainlinkAnswer() public view {
         assertEq(
-            wbtcWethIndex.getLatestPrice(address(wbtc)),
-            priceFeedManager.getPrice(address(wbtc))
+            priceFeedManager.getPrice(address(wbtc)),
+            _chainlinkAnswerStd(address(wbtc))
         );
         assertEq(
-            wbtcWethIndex.getLatestPrice(address(usdc)),
-            priceFeedManager.getPrice(address(usdc))
+            priceFeedManager.getPrice(address(usdc)),
+            _chainlinkAnswerStd(address(usdc))
         );
     }
 
-    function test_getLatestPrice_revertsWhenPriceIsStale() public {
+    function test_priceFeedManager_isIndexManagerProxy() public view {
+        assertEq(
+            address(priceFeedManager),
+            indexManager.getPriceFeedManagerAddress()
+        );
+    }
+
+    function test_priceFeedManager_getPrice_wbtc_revertsWhenPriceIsStale() public {
         _warpPastMaxDelay(address(wbtc));
 
         vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        wbtcWethIndex.getLatestPrice(address(wbtc));
+        priceFeedManager.getPrice(address(wbtc));
     }
 
-    function test_getLatestPrice_weth_revertsWhenPriceIsStale() public {
+    function test_priceFeedManager_getPrice_weth_revertsWhenPriceIsStale() public {
         _warpPastMaxDelay(address(weth));
 
         vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        wbtcWethIndex.getLatestPrice(address(weth));
+        priceFeedManager.getPrice(address(weth));
     }
 
-    function test_getLatestPrice_usdc_revertsWhenPriceIsStale() public {
+    function test_priceFeedManager_getPrice_usdc_revertsWhenPriceIsStale() public {
         _warpPastMaxDelay(address(usdc));
 
         vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        wbtcWethIndex.getLatestPrice(address(usdc));
+        priceFeedManager.getPrice(address(usdc));
+    }
+
+    function test_getAssetsUsdValue_revertsWhenWbtcPriceIsStale() public {
+        _warpPastMaxDelay(address(wbtc));
+
+        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
+        wbtcWethIndex.getAssetsUsdValue();
+    }
+
+    /// @dev Returns the latest Chainlink answer of `_asset`'s registered feed, scaled to 18 decimals.
+    function _chainlinkAnswerStd(address _asset) internal view returns (uint256) {
+        AggregatorV3Interface feed = AggregatorV3Interface(
+            priceFeedManager.getPriceFeedConfig(_asset).feed
+        );
+        (, int256 answer, , , ) = feed.latestRoundData();
+        return uint256(answer) * 10 ** (18 - feed.decimals());
     }
 
     /// @dev Warps to one second after the latest answer of `_asset` exceeds its maxDelay.
@@ -231,20 +251,6 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         (, , , uint256 updatedAt, ) = AggregatorV3Interface(config.feed)
             .latestRoundData();
         vm.warp(updatedAt + config.maxDelay + 1);
-    }
-
-    // =========================================================================
-    //  Unsupported asset guard
-    // =========================================================================
-
-    function test_getLatestPrice_revertsForAssetNotInIndex() public {
-        vm.expectRevert(Index__AssetNotSupported.selector);
-        wbtcWethIndex.getLatestPrice(address(comp));
-    }
-
-    function test_getLatestPrice_revertsForZeroAddress() public {
-        vm.expectRevert(Index__AssetNotSupported.selector);
-        wbtcWethIndex.getLatestPrice(address(0));
     }
 
     // =========================================================================
@@ -259,8 +265,8 @@ contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
         (uint256 reserve0Std, uint256 reserve1Std) = wbtcWethIndex
             .getAssetsReservesStdDecimals();
 
-        uint256 wbtcPrice = wbtcWethIndex.getLatestPrice(address(wbtc));
-        uint256 wethPrice = wbtcWethIndex.getLatestPrice(address(weth));
+        uint256 wbtcPrice = priceFeedManager.getPrice(address(wbtc));
+        uint256 wethPrice = priceFeedManager.getPrice(address(weth));
 
         // USD value = (reserve_in_18_dec * price_in_18_dec) / 1e18
         uint256 expected0Usd = (reserve0Std * wbtcPrice) / 1e18;

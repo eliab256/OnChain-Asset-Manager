@@ -59,7 +59,8 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
     ISwapManager internal immutable i_swapManager;
     IUniversalRouter internal immutable i_universalRouter;
 
-    // IndexManager that deployed this index. Same address for every index.
+    // IndexManager that manages this index, passed by the IndexFactory as its caller. Same address for every index
+    // created through the official IndexManager.
     address internal immutable i_indexManager;
     // Shared Router proxy, the only entry point for mint and redeem. Same address for every index.
     address internal immutable i_router;
@@ -112,6 +113,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
     constructor(
         string memory _name,
         string memory _symbol,
+        address _indexManager,
         address _router,
         address _usdcAddress,
         address _priceFeedManager,
@@ -121,6 +123,8 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
         IndexAsset memory _asset1,
         uint32 _feePercentage
     ) ERC20Permit(_name) ERC20(_name, _symbol) {
+        if (_indexManager == address(0)) revert Index__ZeroAddress();
+
         i_asset0 = IERC20(_asset0.asset);
         i_asset1 = IERC20(_asset1.asset);
         i_usdc = IERC20(_usdcAddress);
@@ -138,7 +142,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
         i_decimals1 = IERC20Metadata(_asset1.asset).decimals();
         i_decimalsUsdc = IERC20Metadata(_usdcAddress).decimals();
 
-        i_indexManager = msg.sender;
+        i_indexManager = _indexManager;
         i_router = _router;
     }
 
@@ -181,7 +185,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
         uint256 underlying0UsdValue = UnderlyingMath
             .calculateUSDValueOfTokenAmountStdDecimals(
                 underlyingAmount0Std,
-                getLatestPrice(address(i_asset0)),
+                _getPrice(address(i_asset0)),
                 DECIMALS_STANDARD
             );
 
@@ -195,7 +199,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
         uint256 underlyingAmount1Std = UnderlyingMath
             .calculateTokenAmountFromUsdValue(
                 underlying1UsdValue,
-                getLatestPrice(address(i_asset1)),
+                _getPrice(address(i_asset1)),
                 DECIMALS_STANDARD
             );
 
@@ -941,6 +945,11 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
     //  Internal — state initialisation
     // =========================================================================
 
+    // USD price with 18 decimals; callers only pass i_asset0, i_asset1 or i_usdc.
+    function _getPrice(address _asset) internal view returns (uint256) {
+        return i_priceFeedManager.getPrice(_asset);
+    }
+
     /**
      * @notice Returns values are stored in the InitStateCache struct to avoid stack too deep errors.
      * @dev Reads storage and price feeds to cache all the necessary values for the mint and redeem functions in a struct to avoid multiple storage reads and external calls throughout the functions, which would increase gas and create more points of failure (e.g. price feed calls).
@@ -967,9 +976,9 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
             uint256 totalAssetUsdValue
         )
     {
-        priceAsset0 = getLatestPrice(address(i_asset0));
-        priceAsset1 = getLatestPrice(address(i_asset1));
-        priceUsdc = getLatestPrice(address(i_usdc));
+        priceAsset0 = _getPrice(address(i_asset0));
+        priceAsset1 = _getPrice(address(i_asset1));
+        priceUsdc = _getPrice(address(i_usdc));
 
         initialAsset0Reserve = _convertToDecimalStandard(
             s_asset0Reserve,
@@ -1079,7 +1088,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
                 uint256 amountStd = UnderlyingMath
                     .calculateTokenAmountFromUsdValue(
                         _asset0UsdToSwap,
-                        getLatestPrice(address(i_asset0)),
+                        _getPrice(address(i_asset0)),
                         DECIMALS_STANDARD
                     );
                 asset0AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
@@ -1092,7 +1101,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
                 uint256 amountStd = UnderlyingMath
                     .calculateTokenAmountFromUsdValue(
                         _asset1UsdToSwap,
-                        getLatestPrice(address(i_asset1)),
+                        _getPrice(address(i_asset1)),
                         DECIMALS_STANDARD
                     );
                 asset1AmountTokenDec = _convertFromStdDecimalsToTokenDecimals(
@@ -1490,23 +1499,6 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
     // =========================================================================
 
     /**
-     * @notice Returns the latest normalised Chainlink price for a supported asset.
-     * @notice Normalised means that the price is converted to the 18-decimal standard regardless of the decimals of the price feed, to have a consistent decimal format across all prices used in the contract.
-     * @dev Feeds and staleness checks (per-feed maxDelay) live in the shared PriceFeedManager.
-     * @param _asset The address of the asset to get the price for. Must be either asset0, asset1, or USDC.
-     * @return price USD price with 18 decimals.
-     */
-    function getLatestPrice(address _asset) public view returns (uint256) {
-        if (
-            _asset != address(i_asset0) &&
-            _asset != address(i_asset1) &&
-            _asset != address(i_usdc)
-        ) revert Index__AssetNotSupported();
-
-        return i_priceFeedManager.getPrice(_asset);
-    }
-
-    /**
      * @notice Returns the total USD value of asset0, asset1, and the combined total.
      * @dev Values come from the _initFunctionValues function which reads the latest prices and reserves to calculate the USD values, so they are all consistent and based on the same block data.
      * @return asset0TotalUsdValue The total USD value of asset0.
@@ -1631,38 +1623,6 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
      */
     function getUsdc() public view returns (address) {
         return address(i_usdc);
-    }
-
-    /**
-     * @notice Returns the address of the asset0 price feed.
-     * @return The address of the asset0 price feed.
-     */
-    function getAsset0PriceFeed() public view returns (address) {
-        return i_priceFeedManager.getPriceFeedConfig(address(i_asset0)).feed;
-    }
-
-    /**
-     * @notice Returns the address of the asset1 price feed.
-     * @return The address of the asset1 price feed.
-     */
-    function getAsset1PriceFeed() public view returns (address) {
-        return i_priceFeedManager.getPriceFeedConfig(address(i_asset1)).feed;
-    }
-
-    /**
-     * @notice Returns the address of the USDC price feed.
-     * @return The address of the USDC price feed.
-     */
-    function getUsdcPriceFeed() public view returns (address) {
-        return i_priceFeedManager.getPriceFeedConfig(address(i_usdc)).feed;
-    }
-
-    /**
-     * @notice Returns the address of the shared PriceFeedManager used to price the index assets.
-     * @return The address of the PriceFeedManager proxy.
-     */
-    function getPriceFeedManager() public view returns (address) {
-        return address(i_priceFeedManager);
     }
 
     /**

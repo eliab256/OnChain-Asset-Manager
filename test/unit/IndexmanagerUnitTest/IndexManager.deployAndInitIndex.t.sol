@@ -7,12 +7,10 @@ import {SwapManager} from "../../../src/SwapManager.sol";
 import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
 import {Router} from "../../../src/Router.sol";
 import {Index} from "../../../src/Index.sol";
-import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {IndexAsset, SwapRoute, IndexAction} from "../../../src/types.sol";
-import {HelperConfig} from "../../../script/HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {console2} from "forge-std/console2.sol";
+//import {console2} from "forge-std/console2.sol";
 
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/events/IndexManagerEvents.sol";
@@ -69,7 +67,8 @@ contract IndexManagerTest is BaseTest {
             address(swapManagerImplementation),
             address(priceFeedManagerImplementation),
             address(routerImplementation),
-            address(timelock)
+            address(timelock),
+            address(indexFactory)
         );
     }
 

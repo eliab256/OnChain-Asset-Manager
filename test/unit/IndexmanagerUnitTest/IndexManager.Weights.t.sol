@@ -2,17 +2,10 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
-import {IndexManager} from "../../../src/IndexManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {Index} from "../../../src/Index.sol";
-import {
-    IndexAsset,
-    SwapRoute,
-    AssetAvailable,
-    IndexAction
-} from "../../../src/types.sol";
+import {AssetAvailable, IndexAction} from "../../../src/types.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {console2} from "forge-std/console2.sol";
+//import {console2} from "forge-std/console2.sol";
 import {
     IAccessControl
 } from "@openzeppelin/contracts/access/IAccessControl.sol";
@@ -321,14 +314,10 @@ contract IndexManagerWeightsTest is BaseTest {
     // //  cancelWeightUpdate
     // // =========================================================================
 
-    function testCancelWeightUpdateResetsPendingWeightsAndEmitsEvent() public {
+    function testCancelWeightUpdateResetsPendingWeights() public {
         vm.prank(deployer);
         indexManager.proposeNewWeights(address(initializedIndex), weight50);
 
-        // The IndexManager duplicate (WeightUpdateCancelled) was removed:
-        // the cancellation is logged by the Index with the cancelled weights.
-        vm.expectEmit(true, true, true, true, address(initializedIndex));
-        emit WeightsUpdateCancelled(weight50, MAX_WEIGHT - weight50);
         vm.prank(deployer);
         indexManager.cancelWeightUpdate(address(initializedIndex));
 

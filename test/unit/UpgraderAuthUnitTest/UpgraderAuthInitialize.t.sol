@@ -105,7 +105,8 @@ contract UpgraderAuthInitializeTest is BaseUpgraderAuthTest {
             swapImplementation,
             priceFeedImplementation,
             routerImplementation,
-            address(0)
+            address(0),
+            address(indexFactory)
         );
     }
 
@@ -117,7 +118,8 @@ contract UpgraderAuthInitializeTest is BaseUpgraderAuthTest {
             s_noCodeImplementation,
             s_noCodeImplementation,
             s_noCodeImplementation,
-            address(0)
+            address(0),
+            address(indexFactory)
         );
     }
 
@@ -132,7 +134,8 @@ contract UpgraderAuthInitializeTest is BaseUpgraderAuthTest {
             swapImplementation,
             priceFeedImplementation,
             routerImplementation,
-            s_freshUpgrader
+            s_freshUpgrader,
+            address(indexFactory)
         );
 
         assertEq(IUpgraderAuth(freshManager.getSwapManagerAddress()).getUpgrader(), s_freshUpgrader);

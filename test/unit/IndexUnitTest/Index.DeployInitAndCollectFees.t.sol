@@ -3,21 +3,6 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {IIndexManager} from "../../../src/Interface/IIndexManager.sol";
-import {ISwapManager} from "../../../src/Interface/ISwapManager.sol";
-import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {IndexAsset, SwapRoute, AssetAvailable} from "../../../src/types.sol";
-import {Index} from "../../../src/Index.sol";
-import {
-    HelperConfig,
-    AssetConfig,
-    NetworkConfig
-} from "../../../script/HelperConfig.s.sol";
-import {
-    DeployAndInitNewIndex,
-    RunParams
-} from "../../../script/DeployAndInitNewIndex.s.sol";
-import {console2} from "forge-std/console2.sol";
 
 import "../../../src/errors/IndexErrors.sol";
 import "../../../src/events/IndexEvents.sol";
@@ -46,6 +31,20 @@ contract IndexTest is BaseTest {
         totalFees = actualTotalfees;
     }
 
+    /// @dev Returns how many logs from `_emitter` match `_sig` and the position of the first one.
+    function _findLogs(
+        Vm.Log[] memory _logs,
+        address _emitter,
+        bytes32 _sig
+    ) internal pure returns (uint256 count, uint256 firstIndex) {
+        for (uint256 i = 0; i < _logs.length; i++) {
+            if (_logs[i].emitter != _emitter || _logs[i].topics[0] != _sig)
+                continue;
+            if (count == 0) firstIndex = i;
+            count++;
+        }
+    }
+
     // =========================================================================
     //  deployment and constructor
     // =========================================================================
@@ -62,16 +61,21 @@ contract IndexTest is BaseTest {
         assertEq(effectiveToken0, address(mockWbtc));
         assertEq(effectiveToken1, address(mockLink));
         assertEq(nonInitializedIndex.getUsdc(), address(mockUsdc));
+        // The Index prices its assets through the IndexManager's PriceFeedManager.
         assertEq(
-            nonInitializedIndex.getAsset0PriceFeed(),
+            indexManager.getPriceFeedManagerAddress(),
+            address(priceFeedManager)
+        );
+        assertEq(
+            priceFeedManager.getPriceFeedConfig(effectiveToken0).feed,
             address(mockWbtcPriceFeed)
         );
         assertEq(
-            nonInitializedIndex.getAsset1PriceFeed(),
+            priceFeedManager.getPriceFeedConfig(effectiveToken1).feed,
             address(mockLinkPriceFeed)
         );
         assertEq(
-            nonInitializedIndex.getUsdcPriceFeed(),
+            priceFeedManager.getPriceFeedConfig(address(mockUsdc)).feed,
             address(mockUsdcPriceFeed)
         );
         (uint128 actualWeight0, uint128 actualWeight1) = nonInitializedIndex
@@ -286,18 +290,36 @@ contract IndexTest is BaseTest {
 
         uint256 expectedInitialShares = amount0InUsd + amount1InUsd;
 
-        vm.expectEmit(true, true, true, true, address(nonInitializedIndex));
-        emit IndexInitialized(
-            address(deployer),
-            initAmount, // token decimals, not std
-            amount1TokenDec, // token decimals, not std
-            amount0InUsd,
-            amount1InUsd,
-            expectedInitialShares
-        );
-
+        vm.recordLogs();
         vm.prank(address(indexManager));
         nonInitializedIndex.initialize(address(deployer), initAmount);
+
+        {
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+            (uint256 count, uint256 idx) = _findLogs(
+                logs,
+                address(nonInitializedIndex),
+                IndexInitialized.selector
+            );
+            assertEq(count, 1, "IndexInitialized must be emitted once");
+            assertEq(logs[idx].topics.length, 2, "1 indexed param expected");
+            assertEq(
+                address(uint160(uint256(logs[idx].topics[1]))),
+                address(deployer),
+                "depositor"
+            );
+            assertEq(
+                logs[idx].data,
+                abi.encode(
+                    initAmount, // token decimals, not std
+                    amount1TokenDec, // token decimals, not std
+                    amount0InUsd,
+                    amount1InUsd,
+                    expectedInitialShares
+                ),
+                "IndexInitialized payload mismatch"
+            );
+        }
     }
 
     // =========================================================================

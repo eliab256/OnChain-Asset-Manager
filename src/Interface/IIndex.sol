@@ -38,8 +38,6 @@ interface IIndex is IERC20, IERC20Metadata, IERC20Permit {
         uint256 _maxTolerance
     ) external view returns (uint256 minUsdcToReceive);
 
-    function getLatestPrice(address _asset) external view returns (uint256);
-
     function proposeUpdateWeights(
         uint128 _newWeightAsset0
     ) external returns (uint256 implementationTimestamp);
@@ -96,14 +94,6 @@ interface IIndex is IERC20, IERC20Metadata, IERC20Permit {
     function getAsset1() external view returns (address);
 
     function getUsdc() external view returns (address);
-
-    function getAsset0PriceFeed() external view returns (address);
-
-    function getAsset1PriceFeed() external view returns (address);
-
-    function getUsdcPriceFeed() external view returns (address);
-
-    function getPriceFeedManager() external view returns (address);
 
     function getFeesInfo()
         external

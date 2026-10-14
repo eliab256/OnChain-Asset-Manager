@@ -3,7 +3,6 @@ pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {console} from "forge-std/console.sol";
 import {DeployPeriphery} from "../../script/DeployPeriphery.s.sol";
 import {
     DeployAndInitNewIndex,
@@ -13,6 +12,7 @@ import {HelperConfig, AssetConfig} from "../../script/HelperConfig.s.sol";
 import {MultiSigWallet} from "../../src/MultiSigWallet.sol";
 import {Router} from "../../src/Router.sol";
 import {IndexManager} from "../../src/IndexManager.sol";
+import {IndexFactory} from "../../src/IndexFactory.sol";
 import {Index} from "../../src/Index.sol";
 import {SwapManager} from "../../src/SwapManager.sol";
 import {PriceFeedManager} from "../../src/PriceFeedManager.sol";
@@ -41,6 +41,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
     HelperConfig public helperConfig;
     Router public router;
     IndexManager public indexManager;
+    IndexFactory public indexFactory;
     DeployAndInitNewIndex public deployAndInitNewIndex;
 
     Index public initializedIndex;
@@ -136,6 +137,7 @@ abstract contract BaseTest is Test, ContractCodeConstants {
 
         mockUniRouter = helperConfig.getUniswapUniversalRouter();
         priceFeedManager = deployerPeriphery.priceFeedManager();
+        indexFactory = deployerPeriphery.indexFactory();
         assetPriceFeedMaxDelay = helperConfig.ASSET_USD_PRICEFEED_MAX_DELAY();
         usdcPriceFeedMaxDelay = helperConfig.USDC_USD_PRICEFEED_MAX_DELAY();
 

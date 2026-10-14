@@ -35,6 +35,8 @@ contract IndexPriceFeedMigrationTest is BaseTest {
     uint8 internal constant REPLACEMENT_FEED_DECIMALS = 8;
     /// L-03: age of an answer published just after a 1h heartbeat, still within the 15 min margin
     uint256 internal constant ANSWER_AGE_WITHIN_MARGIN = 1 hours + 5 minutes;
+    /// Multiplier applied to the asset0 price on the replacement feed, to tell it apart from the old feed
+    int256 internal constant REPLACEMENT_PRICE_MULTIPLIER = 2;
 
     // =========================================================================
     //  Values derived from the contracts
@@ -148,6 +150,21 @@ contract IndexPriceFeedMigrationTest is BaseTest {
         );
     }
 
+    /// @dev Returns the USD value (18 decimals) the Index should report for its `_asset` reserve
+    ///      when `_asset` is priced at `_price18` (18 decimals).
+    function _expectedAssetUsdValue(
+        Index _index,
+        address _asset,
+        uint256 _price18
+    ) internal view returns (uint256 expectedValue, uint256 actualValue) {
+        (uint256 reserve0Std, uint256 reserve1Std) = _index
+            .getAssetsReservesStdDecimals();
+        (uint256 v0, uint256 v1, ) = _index.getAssetsUsdValue();
+        bool isAsset0 = _index.getAsset0() == _asset;
+        expectedValue = ((isAsset0 ? reserve0Std : reserve1Std) * _price18) / 1e18;
+        actualValue = isAsset0 ? v0 : v1;
+    }
+
     /// @dev Buys then sells shares of `_index` and asserts both legs moved balances.
     function _assertMintAndRedeemWork(Index _index, address _user) internal {
         uint256 sharesBefore = _index.balanceOf(_user);
@@ -241,7 +258,7 @@ contract IndexPriceFeedMigrationTest is BaseTest {
         _migrateAsset0Feed();
 
         assertEq(
-            initializedIndex.getLatestPrice(s_asset0),
+            priceFeedManager.getPrice(s_asset0),
             uint256(s_asset0Price) * 1e10,
             "asset0 must be priced by the replacement feed"
         );
@@ -263,17 +280,54 @@ contract IndexPriceFeedMigrationTest is BaseTest {
         _assertMintAndRedeemWork(s_secondIndex, user2);
     }
 
-    function testIndexFeedGettersFollowFeedMigration() public {
-        assertEq(initializedIndex.getAsset0PriceFeed(), address(s_asset0Feed));
+    function testPriceFeedManagerConfigFollowsFeedMigration() public {
+        assertEq(
+            priceFeedManager.getPriceFeedConfig(s_asset0).feed,
+            address(s_asset0Feed)
+        );
         _makeAsset0FeedStale();
 
         _migrateAsset0Feed();
 
-        assertEq(initializedIndex.getAsset0PriceFeed(), address(s_replacementFeed));
-        address secondIndexFeed = s_secondIndex.getAsset0() == s_asset0
-            ? s_secondIndex.getAsset0PriceFeed()
-            : s_secondIndex.getAsset1PriceFeed();
-        assertEq(secondIndexFeed, address(s_replacementFeed));
+        assertEq(
+            priceFeedManager.getPriceFeedConfig(s_asset0).feed,
+            address(s_replacementFeed)
+        );
+        assertTrue(
+            s_secondIndex.getAsset0() == s_asset0 ||
+                s_secondIndex.getAsset1() == s_asset0,
+            "second index must hold the migrated asset"
+        );
+    }
+
+    function testEveryIndexValuesSharedAssetWithReplacementFeedAfterMigration()
+        public
+    {
+        _makeAsset0FeedStale();
+        _migrateAsset0Feed();
+
+        // Move only the replacement feed: the old feed stays frozen at s_asset0Price.
+        int256 replacementPrice = s_asset0Price * REPLACEMENT_PRICE_MULTIPLIER;
+        s_replacementFeed.updateAnswer(replacementPrice);
+        uint256 replacementPrice18 = uint256(replacementPrice) * 1e10;
+
+        assertEq(priceFeedManager.getPrice(s_asset0), replacementPrice18);
+
+        (uint256 expected, uint256 actual) = _expectedAssetUsdValue(
+            initializedIndex,
+            s_asset0,
+            replacementPrice18
+        );
+        assertGt(expected, 0);
+        assertEq(actual, expected, "initializedIndex must use the replacement feed");
+
+        (expected, actual) = _expectedAssetUsdValue(
+            s_secondIndex,
+            s_asset0,
+            replacementPrice18
+        );
+        assertGt(expected, 0);
+        assertEq(actual, expected, "second index must use the replacement feed");
     }
 
     // =========================================================================
@@ -287,15 +341,21 @@ contract IndexPriceFeedMigrationTest is BaseTest {
         );
     }
 
-    function testGetLatestPriceAcceptsAnswerOlderThanHeartbeatWithinMargin()
+    function testGetAssetsUsdValueAcceptsAnswerOlderThanHeartbeatWithinMargin()
         public
     {
         vm.warp(block.timestamp + ANSWER_AGE_WITHIN_MARGIN);
 
         assertEq(
-            initializedIndex.getLatestPrice(s_asset0),
+            priceFeedManager.getPrice(s_asset0),
             uint256(s_asset0Price) * 1e10
         );
+        (uint256 expected, uint256 actual) = _expectedAssetUsdValue(
+            initializedIndex,
+            s_asset0,
+            uint256(s_asset0Price) * 1e10
+        );
+        assertEq(actual, expected);
     }
 
     function testMintSucceedsWithAnswersOlderThanHeartbeatWithinMargin()
@@ -307,10 +367,12 @@ contract IndexPriceFeedMigrationTest is BaseTest {
         _assertMintAndRedeemWork(initializedIndex, user1);
     }
 
-    function testGetLatestPriceRevertsOneSecondPastHeartbeatPlusMargin() public {
+    function testGetAssetsUsdValueRevertsOneSecondPastHeartbeatPlusMargin()
+        public
+    {
         vm.warp(block.timestamp + assetPriceFeedMaxDelay + 1);
 
         vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        initializedIndex.getLatestPrice(s_asset0);
+        initializedIndex.getAssetsUsdValue();
     }
 }

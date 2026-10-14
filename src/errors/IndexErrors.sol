@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-error Index__AssetNotSupported();
 error Index__AlreadyInitialized();
 error Index__InvalidUnderlyingAmount();
 error Index__NotInitialized();
@@ -21,3 +20,5 @@ error Index__NoFeesToCollect();
 error Index__CallerNotIndexManager();
 /// @notice Thrown when mintShares or redeem is called by an address other than the shared Router proxy.
 error Index__CallerNotRouter();
+/// @notice Thrown when the constructor receives a zero IndexManager address.
+error Index__ZeroAddress();

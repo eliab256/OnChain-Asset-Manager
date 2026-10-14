@@ -10,13 +10,14 @@ import {
 } from "../../mocks/DecimalsTokenMocks.sol";
 
 import "../../../src/errors/IndexManagerErrors.sol";
+import {IndexFactory__IndexDeployFailed} from "../../../src/errors/IndexFactoryErrors.sol";
 
 /**
  * @dev L-04: asset metadata (`symbol()`, `decimals()` <= DECIMALS_STANDARD) is validated by the
  *      PriceFeedManager at feed registration (see PriceFeedManagerRegister.t.sol). An asset that
  *      cannot get a feed therefore makes createIndex revert IndexManager__PriceFeedNotRegistered.
- *      createIndex reverts IndexManager__IndexDeployFailed when create2 returns address(0)
- *      because the Index constructor reverted.
+ *      createIndex reverts IndexFactory__IndexDeployFailed (raised by the IndexFactory and bubbled up
+ *      by the IndexManager) when create2 returns address(0) because the Index constructor reverted.
  */
 contract IndexManagerAssetValidationTest is BaseTest {
     // Fixed addresses below / above every deployed token, so the sorted position
@@ -170,7 +171,7 @@ contract IndexManagerAssetValidationTest is BaseTest {
         address token = address(new ConstructorDecimalsRevertingTokenMock());
         _registerFeedFor(token);
 
-        vm.expectRevert(IndexManager__IndexDeployFailed.selector);
+        vm.expectRevert(IndexFactory__IndexDeployFailed.selector);
         _createIndex(token, s_validAsset);
     }
 
@@ -179,7 +180,7 @@ contract IndexManagerAssetValidationTest is BaseTest {
         _registerFeedFor(token);
         uint256 deployedBefore = indexManager.getDeployedIndexes().length;
 
-        vm.expectRevert(IndexManager__IndexDeployFailed.selector);
+        vm.expectRevert(IndexFactory__IndexDeployFailed.selector);
         _createIndex(token, s_validAsset);
 
         assertEq(

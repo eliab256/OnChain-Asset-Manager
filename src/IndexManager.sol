@@ -3,8 +3,8 @@ pragma solidity ^0.8.0;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ContractCodeConstants} from "./ContractCodeConstants.sol";
-import {Index} from "./Index.sol";
 import {IIndexManager} from "./Interface/IIndexManager.sol";
+import {IIndexFactory} from "./Interface/IIndexFactory.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
 import {SwapManager} from "./SwapManager.sol";
 import {IPriceFeedManager} from "./Interface/IPriceFeedManager.sol";
@@ -14,7 +14,7 @@ import {
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "./errors/IndexManagerErrors.sol";
 import "./events/IndexManagerEvents.sol";
-import {IndexAsset, SwapRoute, IndexAction} from "./types.sol";
+import {IndexAsset, SwapRoute, IndexAction, IndexDeployParams} from "./types.sol";
 import {
     IERC20Metadata
 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -50,6 +50,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     address internal immutable i_priceFeedManager;
     // Router ERC1967 proxy, deployed in the constructor. Every index stores this address as its router.
     address internal immutable i_router;
+    // Split-code IndexFactory that deploys every index with this contract as its IndexManager.
+    address internal immutable i_indexFactory;
 
     address[] private s_deployedIndexes;
     address[] private s_initializedIndexes;
@@ -79,6 +81,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
      * @param _priceFeedManagerImplementation The PriceFeedManager implementation; the constructor deploys its proxy, owned by this contract.
      * @param _routerImplementation The Router implementation; the constructor deploys its proxy, bound to this contract.
      * @param _upgrader The only account allowed to upgrade the three proxies (the TimelockController). Must be non-zero.
+     * @param _indexFactory The IndexFactory used to deploy the indexes. Must have code.
      */
     constructor(
         address _usdcAddress,
@@ -86,7 +89,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         address _swapManagerImplementation,
         address _priceFeedManagerImplementation,
         address _routerImplementation,
-        address _upgrader
+        address _upgrader,
+        address _indexFactory
     ) {
         if (_upgrader == address(0)) revert IndexManager__ZeroAddress();
         if (_swapManagerImplementation.code.length == 0) {
@@ -102,6 +106,10 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         if (_routerImplementation.code.length == 0) {
             revert IndexManager__InvalidImplementation(_routerImplementation);
         }
+        if (_indexFactory.code.length == 0) {
+            revert IndexManager__InvalidIndexFactory(_indexFactory);
+        }
+        i_indexFactory = _indexFactory;
         i_usdc = _usdcAddress;
         i_uniswapUniversalRouter = _uniswapUniversalRouter;
         i_swapManager = address(
@@ -424,18 +432,20 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @dev Deploys a new index contract with the specified assets, fee percentage, and USDC address.
-     * @param _asset0 The first asset of the index.
-     * @param _asset1 The second asset of the index.
-     * @param _feePercentage The fee percentage for the index.
-     * @return index The address of the newly deployed index contract.
+     * @notice Deploys a new index through the IndexFactory.
+     * @dev Builds the share name ("Index S0/S1") and symbol ("IDXS0S1") from the asset symbols and uses
+     *      keccak256(asset0, asset1) as CREATE2 salt. The factory sets this contract as the IndexManager
+     *      of the index; its reverts (e.g. IndexFactory__IndexDeployFailed) bubble up.
+     * @param _asset0 The first asset of the index (lower address) and its weight.
+     * @param _asset1 The second asset of the index (higher address) and its weight.
+     * @param _feePercentage The fee percentage for the index, with 4 decimals (1_000_000 = 100%).
+     * @return The address of the newly deployed index contract.
      */
     function _deployIndex(
         IndexAsset memory _asset0,
         IndexAsset memory _asset1,
         uint32 _feePercentage
-    ) internal returns (address index) {
-        // Prepare constructor data for the Index deployment.
+    ) internal returns (address) {
         string memory name;
         string memory symbol;
         {
@@ -445,30 +455,22 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
             symbol = string(abi.encodePacked("IDX", symbol0, symbol1));
         }
 
-        bytes memory bytecode = abi.encodePacked(
-            type(Index).creationCode,
-            abi.encode(
-                name,
-                symbol,
-                i_router,
-                i_usdc,
-                i_priceFeedManager,
-                i_swapManager,
-                i_uniswapUniversalRouter,
-                _asset0,
-                _asset1,
-                _feePercentage
-            )
-        );
+        IndexDeployParams memory params = IndexDeployParams({
+            name: name,
+            symbol: symbol,
+            router: i_router,
+            usdc: i_usdc,
+            priceFeedManager: i_priceFeedManager,
+            swapManager: i_swapManager,
+            universalRouter: i_uniswapUniversalRouter,
+            asset0: _asset0,
+            asset1: _asset1,
+            feePercentage: _feePercentage
+        });
         bytes32 salt = keccak256(
             abi.encodePacked(_asset0.asset, _asset1.asset)
         );
-        assembly {
-            index := create2(0, add(bytecode, 32), mload(bytecode), salt)
-        }
-        if (index == address(0)) {
-            revert IndexManager__IndexDeployFailed();
-        }
+        return IIndexFactory(i_indexFactory).deployIndex(params, salt);
     }
 
     /**
@@ -598,6 +600,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     /// @dev Inherit from IIndexManager. See interface for details.
     function getPriceFeedManagerAddress() public view returns (address) {
         return i_priceFeedManager;
+    }
+
+    /// @dev Inherit from IIndexManager. See interface for details.
+    function getIndexFactory() public view returns (address) {
+        return i_indexFactory;
     }
 
     /**

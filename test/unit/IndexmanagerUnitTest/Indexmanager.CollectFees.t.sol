@@ -2,22 +2,13 @@
 pragma solidity ^0.8.0;
 
 import {BaseTest} from "../Base.t.sol";
-import {IndexManager} from "../../../src/IndexManager.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
-import {
-    IndexAsset,
-    SwapRoute,
-    AssetAvailable,
-    IndexAction
-} from "../../../src/types.sol";
-import {HelperConfig} from "../../../script/HelperConfig.s.sol";
+import {AssetAvailable, IndexAction} from "../../../src/types.sol";
 import {
     DeployAndInitNewIndex,
     RunParams
 } from "../../../script/DeployAndInitNewIndex.s.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {console2} from "forge-std/console2.sol";
 import {
     IAccessControl
 } from "@openzeppelin/contracts/access/IAccessControl.sol";
