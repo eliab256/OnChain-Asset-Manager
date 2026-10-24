@@ -1,0 +1,64 @@
+{
+  "chainId": 31337,
+  "config": {
+    "feeCollector": "0x0ae039EbCFe635f3Ede0F574ea8a6A9aaC3254e7",
+    "rebalancer": "0x3a5AAA255B8BFf32A00603077671B6406fAb90a9",
+    "universalRouter": "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
+    "usdc": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "usdcPriceFeed": "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+  },
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "indexFactory": "0x9A676e781A523b5d0C0e43731313A708CB607508",
+  "indexManager": "0x68B1D87F95878fE05B998F19b66F4baba5De1aed",
+  "indexes": {
+    "0x2d2DF19A06b90e886EDcf42f0D9bB0147076084d": {
+      "asset0": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "asset1": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "block": 7,
+      "feePercentage": 10000,
+      "weight0": 500000,
+      "weight1": 500000
+    }
+  },
+  "mocks": {
+    "COMP": {
+      "priceFeed": "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
+      "token": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+    },
+    "LINK": {
+      "priceFeed": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+      "token": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+    },
+    "WBTC": {
+      "priceFeed": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+      "token": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+    },
+    "WETH": {
+      "priceFeed": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+      "token": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+    }
+  },
+  "multiSigWallet": {
+    "address": "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e",
+    "owners": [
+      "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+    ],
+    "requiredConfirmations": 2
+  },
+  "priceFeedManager": {
+    "implementation": "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1",
+    "proxy": "0xa12fFA0B9f159BB4C54bce579611927Addc51610"
+  },
+  "router": {
+    "implementation": "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE",
+    "proxy": "0x53839913417ebc7171723489F29B9B54F49b4EEA"
+  },
+  "startBlock": 0,
+  "swapManager": {
+    "implementation": "0x0B306BF915C4d645ff596e518fAf3F9669b97016",
+    "proxy": "0x5E3d0fdE6f793B3115A9E7f5EBC195bbeeD35d6C"
+  },
+  "timelock": "0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82"
+}

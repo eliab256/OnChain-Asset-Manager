@@ -8,6 +8,7 @@ optimizer = true
 optimizer_runs = 100
 #via_ir = true
 #ffi = true 
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
 remappings = [
     '@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/', 
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",

@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import {CodeConstants} from "./CodeConstants.sol";
 import {Script} from "forge-std/Script.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 import {MockUSDC} from "../test/mocks/USDCMock.sol";
 import {UniversalRouterMock} from "../test/mocks/UniversalRouterMock.sol";
 import {AssetTokenMock} from "../test/mocks/AssetTokenMock.sol";
@@ -35,6 +36,7 @@ contract HelperConfig is CodeConstants, Script {
     error HelperConfig__InvalidChainId();
     error HelperConfig__InvalidIndexConfig();
     error HelperConfig__GetRealContractsOnMainnet();
+    error HelperConfig__UnknownAssetSymbol(string symbol);
 
     uint24 public constant DEFAULT_V4_POOL_FEE = 3000;
     int24 public constant DEFAULT_V4_TICK_SPACING = 60;
@@ -55,6 +57,8 @@ contract HelperConfig is CodeConstants, Script {
             activeNetworkConfig = getMainnetConfig();
         } else if (block.chainid == ANVIL_CHAIN_ID) {
             activeNetworkConfig = getAnvilConfig();
+        } else if (block.chainid == FORK_CHAIN_ID) {
+            activeNetworkConfig = getForkConfig();
         } else {
             revert HelperConfig__InvalidChainId();
         }
@@ -84,37 +88,8 @@ contract HelperConfig is CodeConstants, Script {
         owners[1] = vm.envAddress("MULTISIG_OWNER_2");
         owners[2] = vm.envAddress("MULTISIG_OWNER_3");
 
-        assetConfigByChainId[AssetAvailable.WETH][
-            MAINNET_CHAIN_ID
-        ] = AssetConfig({
-            token: WETH_MAINNET,
-            priceFeed: WETH_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
+        _registerMainnetAssetConfigs(MAINNET_CHAIN_ID);
 
-        assetConfigByChainId[AssetAvailable.WBTC][
-            MAINNET_CHAIN_ID
-        ] = AssetConfig({
-            token: WBTC_MAINNET,
-            priceFeed: WBTC_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.LINK][
-            MAINNET_CHAIN_ID
-        ] = AssetConfig({
-            token: LINK_MAINNET,
-            priceFeed: LINK_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.COMP][
-            MAINNET_CHAIN_ID
-        ] = AssetConfig({
-            token: COMP_MAINNET,
-            priceFeed: COMP_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
         return
             NetworkConfig({
                 usdcAddress: USDC_MAINNET,
@@ -129,10 +104,82 @@ contract HelperConfig is CodeConstants, Script {
     }
 
     /**
+     * @notice Returns network configuration for the local anvil fork of mainnet (FORK_CHAIN_ID).
+     * @dev Uses the real mainnet tokens, Chainlink feeds and Universal Router, and the anvil default
+     *      accounts, so no env var is needed. Asset configs are stored under FORK_CHAIN_ID.
+     * @return NetworkConfig Configuration struct with the mainnet fork parameters.
+     */
+    function getForkConfig() public returns (NetworkConfig memory) {
+        _registerMainnetAssetConfigs(FORK_CHAIN_ID);
+
+        address[] memory owners = new address[](3);
+        owners[0] = ANVIL_OWNER_1;
+        owners[1] = ANVIL_OWNER_2;
+        owners[2] = ANVIL_OWNER_3;
+
+        return
+            NetworkConfig({
+                usdcAddress: USDC_MAINNET,
+                usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
+                usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
+                uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
+                deployerAccount: ANVIL_DEPLOYER,
+                feeCollector: makeAddr("feeCollector"),
+                rebalancer: makeAddr("rebalancer"),
+                multiSigOwners: owners
+            });
+    }
+
+    /**
+     * @notice Registers the mainnet token and Chainlink feed of every available asset.
+     * @dev Shared by mainnet and the local mainnet fork, which use the same contracts.
+     * @param _chainId The chain id under which the asset configs are stored.
+     */
+    function _registerMainnetAssetConfigs(uint256 _chainId) internal {
+        assetConfigByChainId[AssetAvailable.WETH][
+            _chainId
+        ] = AssetConfig({
+            token: WETH_MAINNET,
+            priceFeed: WETH_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+        });
+
+        assetConfigByChainId[AssetAvailable.WBTC][
+            _chainId
+        ] = AssetConfig({
+            token: WBTC_MAINNET,
+            priceFeed: WBTC_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+        });
+
+        assetConfigByChainId[AssetAvailable.LINK][
+            _chainId
+        ] = AssetConfig({
+            token: LINK_MAINNET,
+            priceFeed: LINK_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+        });
+
+        assetConfigByChainId[AssetAvailable.COMP][
+            _chainId
+        ] = AssetConfig({
+            token: COMP_MAINNET,
+            priceFeed: COMP_USD_PRICEFEED_MAINNET,
+            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+        });
+    }
+
+    /**
      * @notice Returns network configuration for Anvil local development network
+     * @dev Deploys fresh mocks. Virtual so that HelperConfigFromDeployment can load the mocks
+     *      already deployed on a running anvil node instead.
      * @return NetworkConfig Configuration struct with Anvil local development network parameters
      */
-    function getAnvilConfig() public returns (NetworkConfig memory) {
+    function getAnvilConfig() public virtual returns (NetworkConfig memory) {
+        // Broadcast the mocks so they land on chain under `forge script --broadcast`; skipped in
+        // `forge test` to keep the mock addresses (and the asset0/asset1 sort order) tests rely on.
+        bool isScript = vm.isContext(VmSafe.ForgeContext.ScriptGroup);
+        if (isScript) vm.startBroadcast(ANVIL_DEPLOYER);
         MockUSDC mockUsdc = new MockUSDC();
         AssetTokenMock mockWeth = new AssetTokenMock(
             "Wrapped Ether",
@@ -172,6 +219,9 @@ contract HelperConfig is CodeConstants, Script {
             int256(50 * 10 ** PRICE_FEED_DECIMALS)
         );
 
+        UniversalRouterMock mockUniRouter = new UniversalRouterMock();
+        if (isScript) vm.stopBroadcast();
+
         assetConfigByChainId[AssetAvailable.WETH][
             ANVIL_CHAIN_ID
         ] = AssetConfig({
@@ -203,8 +253,6 @@ contract HelperConfig is CodeConstants, Script {
             priceFeed: address(mockCompPriceFeed),
             priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
         });
-
-        UniversalRouterMock mockUniRouter = new UniversalRouterMock();
 
         address anvilFeeCollector = makeAddr("feeCollector");
         address anvilRebalancer = makeAddr("rebalancer");
@@ -241,12 +289,47 @@ contract HelperConfig is CodeConstants, Script {
             return getMainnetConfig();
         } else if (chainId == ANVIL_CHAIN_ID) {
             return getAnvilConfig();
+        } else if (chainId == FORK_CHAIN_ID) {
+            return getForkConfig();
         } else {
             revert HelperConfig__InvalidChainId();
         }
     }
 
     //Helpers
+    /**
+     * @notice Returns the symbol used for an asset in env vars and in the deployment file.
+     * @param _asset The asset.
+     * @return The asset symbol (WETH, WBTC, LINK or COMP).
+     */
+    function getAssetSymbol(
+        AssetAvailable _asset
+    ) public pure returns (string memory) {
+        if (_asset == AssetAvailable.WETH) return "WETH";
+        if (_asset == AssetAvailable.WBTC) return "WBTC";
+        if (_asset == AssetAvailable.LINK) return "LINK";
+        return "COMP";
+    }
+
+    /**
+     * @notice Returns the asset matching a symbol.
+     * @dev Reverts with HelperConfig__UnknownAssetSymbol if the symbol is not WETH, WBTC, LINK or COMP.
+     * @param _symbol The asset symbol, case sensitive.
+     * @return The matching asset.
+     */
+    function getAssetBySymbol(
+        string memory _symbol
+    ) public pure returns (AssetAvailable) {
+        bytes32 symbolHash = keccak256(bytes(_symbol));
+        for (uint8 i = 0; i <= uint8(type(AssetAvailable).max); i++) {
+            AssetAvailable asset = AssetAvailable(i);
+            if (keccak256(bytes(getAssetSymbol(asset))) == symbolHash) {
+                return asset;
+            }
+        }
+        revert HelperConfig__UnknownAssetSymbol(_symbol);
+    }
+
     function getFeeCollector() public view returns (address) {
         return activeNetworkConfig.feeCollector;
     }

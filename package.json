@@ -1,5 +1,17 @@
 {
+  "name": "onchain-asset-manager",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "abi": "npm run generate --workspace @oam/abi",
+    "abi:watch": "npm run watch --workspace @oam/abi",
+    "check-abi": "packages/abi/check-abi.sh"
+  },
   "devDependencies": {
-    "@wagmi/cli": "^2.10.0"
+    "@wagmi/cli": "^2.10.0",
+    "typescript": "^6.0.3",
+    "viem": "^2.52.2"
   }
 }

@@ -5,6 +5,9 @@ abstract contract CodeConstants {
     // Chain IDs
     uint256 public constant MAINNET_CHAIN_ID = 1;
     uint256 public constant ANVIL_CHAIN_ID = 31337;
+    // Local anvil fork of mainnet started with `--chain-id 31338`, so nothing deployed or signed
+    // there can be confused with or replayed on mainnet.
+    uint256 public constant FORK_CHAIN_ID = 31338;
 
     uint8 public constant PRICE_FEED_DECIMALS = 8;
 

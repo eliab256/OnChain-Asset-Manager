@@ -1,0 +1,46 @@
+{
+  "chainId": 31338,
+  "config": {
+    "feeCollector": "0x0ae039EbCFe635f3Ede0F574ea8a6A9aaC3254e7",
+    "rebalancer": "0x3a5AAA255B8BFf32A00603077671B6406fAb90a9",
+    "universalRouter": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+    "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "usdcPriceFeed": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"
+  },
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "indexFactory": "0xf268088a5b9f52445eb0C7C19ad78a0793Ca8943",
+  "indexManager": "0x5618e2A22a11C30D7024364c9D13fA5fb2CE1D70",
+  "indexes": {
+    "0xBfD11c3C4B3C6870b4D54053a1B4bE5710e732A6": {
+      "asset0": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+      "asset1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "block": 26178002,
+      "feePercentage": 10000,
+      "weight0": 500000,
+      "weight1": 500000
+    }
+  },
+  "multiSigWallet": {
+    "address": "0x17d9d652E2FD969cDfdb4eC7a71137BDd9aada95",
+    "owners": [
+      "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+    ],
+    "requiredConfirmations": 2
+  },
+  "priceFeedManager": {
+    "implementation": "0xAbFd91B16D77a1F62Fe00Dea5aE6478bCc9c7615",
+    "proxy": "0x6dcC697AC63b820f5FdBc92616F23e888161783e"
+  },
+  "router": {
+    "implementation": "0x5a21e9d52715BfeEa4d1d4BC153b687E444aF6f5",
+    "proxy": "0x3Ef2951A816A1FC6aF770826ddE7Fe82cF85aF7F"
+  },
+  "startBlock": 26178000,
+  "swapManager": {
+    "implementation": "0x568F9FaCFB8a10dAEeF0928B33a856Db03E217DB",
+    "proxy": "0xe8d270679B5Fc8d298069e3be39262c41BB8EC72"
+  },
+  "timelock": "0xc3812f3CC2E699a4B7EDB5cF0C64fba4E0b6764d"
+}

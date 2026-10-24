@@ -133,9 +133,11 @@ MAINNET_DEPLOYER=0xYourDeployerAddressHere
 # Load environment variables
 source .env
 
-# Start Anvil with a mainnet fork
-anvil --fork-url $MAINNET_RPC_URL
+# Start Anvil with a mainnet fork, pinned to the fork-test block, chain id 31338
+make anvil-fork
 ```
+
+The fork needs an archive RPC (it reads state at block 26,178,000) and runs with chain id 31338, so nothing deployed or signed there can be confused with mainnet. The real Chainlink feeds do not update on the fork: about 1h15m after start the price reads revert, and the fork has to be restarted.
 
 ### Run tests against the fork
 
@@ -159,8 +161,13 @@ make integrationtest
 ├── script/
 │   ├── CodeConstants.sol            # Chain IDs, mainnet addresses, deployer constants
 │   ├── DeployPeriphery.s.sol        # Deploys MultiSig, TimelockController (upgrader), SwapManager/PriceFeedManager/Router implementations, IndexFactory and IndexManager (creates the three proxies); registers the USDC feed
-│   ├── DeployAndInitNewIndex.s.sol  # Registers missing asset feeds, deploys and seeds a new Index
-│   └── HelperConfig.s.sol           # Network config and mock setup for Anvil
+│   ├── DeployAndInitNewIndex.s.sol  # Registers missing asset feeds, deploys and seeds a new Index (CLI: --sig "run()", params from env)
+│   ├── DeploymentFile.sol           # Path of deployments/<chainId>.json and write guard (only under --broadcast)
+│   ├── FundForkAccount.s.sol        # Fork only: writes WETH/WBTC/USDC balances of the deployer with anvil_setStorageAt
+│   ├── HelperConfig.s.sol           # Network config (mainnet, fork 31338) and mock setup for Anvil
+│   └── HelperConfigFromDeployment.s.sol # Same config, but Anvil mocks loaded from deployments/ instead of redeployed
+│
+├── deployments/                     # <chainId>.json: addresses, start block, indexes (written by the scripts)
 │
 ├── src/
 │   ├── ContractCodeConstants.sol    # Protocol-wide constants (fees, weights, thresholds)
@@ -251,6 +258,10 @@ make indexmanagertest       # IndexmanagerUnitTest only
 make coverage               # coverage summary for src/ only
 make coverage-report        # full lcov HTML report (requires lcov installed)
 make test-single NAME=<fn>  # run a single test by name with -vvvv
+make anvil / make anvil-fork   # start plain Anvil / the mainnet fork (chain id 31338)
+make deploy-anvil           # periphery + WETH/WBTC index on plain Anvil
+make deploy-fork            # fund the deployer, periphery + WETH/WBTC index on the fork
+make deploy-index           # one more index on an existing deployment (INDEX_* env vars)
 ```
 
 ---
@@ -276,18 +287,36 @@ make build
 make unittest
 ```
 
-### Run the full deployment on a local fork
+### Run the full deployment locally
+
+Start the node in one terminal and deploy from another. Both targets use the Anvil default accounts: account 0 is the deployer and multisig owner 1, accounts 1 and 2 are the other owners.
 
 ```bash
-source .env
-anvil --fork-url $MAINNET_RPC_URL &
+# Plain Anvil with mocks
+make anvil
+make deploy-anvil
 
-# Deploy the MultiSig, the TimelockController, the SwapManager, PriceFeedManager and Router implementations, the IndexFactory and IndexManager (creates the three proxies)
-forge script script/DeployPeriphery.s.sol --broadcast --rpc-url http://localhost:8545
-
-# Deploy and initialise a WETH/WBTC 60/40 index
-forge script script/DeployAndInitNewIndex.s.sol --broadcast --rpc-url http://localhost:8545
+# Mainnet fork (MAINNET_RPC_URL in .env, archive node)
+make anvil-fork
+make deploy-fork
 ```
+
+`deploy-fork` runs three steps: `FundForkAccount` (100 WETH, 5 WBTC and 1,000,000 USDC written into the deployer's balance slots, no swaps, so the WBTC/WETH pool stays aligned with Chainlink), `DeployPeriphery` and `DeployAndInitNewIndex`. The broadcasts use `--legacy` because Anvil forwards `eth_feeHistory` with reward percentiles to the upstream RPC, which may answer 503.
+
+Every run writes `deployments/<chainId>.json`: chain id, `startBlock`, deployer, multisig (owners, threshold), timelock, IndexManager, IndexFactory, the three proxies with their implementations, the network config, the Anvil mocks and an `indexes` object keyed by index address. `DeployPeriphery` rewrites the file; `DeployAndInitNewIndex` adds one entry under `indexes`. The file is written only with `--broadcast`, never during `forge test`. Block numbers are the ones the script sees, so they are lower bounds for an indexer.
+
+To add another index to an existing deployment:
+
+```bash
+make deploy-index INDEX_ASSET_A=LINK INDEX_ASSET_B=COMP INDEX_WEIGHT_A=600000 INDEX_WEIGHT_B=400000
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `INDEX_ASSET_A`, `INDEX_ASSET_B` | `WETH`, `WBTC` | `WETH`, `WBTC`, `LINK` or `COMP` |
+| `INDEX_WEIGHT_A`, `INDEX_WEIGHT_B` | `500000` each | target weights, 1,000,000 = 100% |
+| `INDEX_FEE` | `10000` | fee, 1,000,000 = 100% (10000 = 1%) |
+| `INDEX_DEPOSIT_A`, `INDEX_DEPOSIT_B` | 1 unit of A, B computed | initial deposit in native decimals; 0 = computed from the other at weights and Chainlink prices |
 
 ---
 

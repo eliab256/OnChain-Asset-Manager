@@ -7,9 +7,9 @@ Guida per Claude Code su questo repository. Progetto didattico, non auditato, no
 Index fund on-chain a due asset, denominato in USDC. Foundry, solc 0.8.26, `evm_version = cancun`, **optimizer acceso (100 runs), `via_ir` disattivato** (attenzione allo stack-too-deep: usare scoping a blocchi). OpenZeppelin `contracts` e `contracts-upgradeable` v5.5.0.
 
 Cartelle:
-- `src/`: contratti. `script/`: deploy (`DeployPeriphery.s.sol`, `DeployAndInitNewIndex.s.sol`, `HelperConfig.s.sol`, `CodeConstants.sol`). `test/`: unit (`test/unit/`) e fork su mainnet (`test/integration/`).
+- `src/`: contratti. `script/`: deploy (`DeployPeriphery.s.sol`, `DeployAndInitNewIndex.s.sol`, `FundForkAccount.s.sol`, `HelperConfig.s.sol`, `HelperConfigFromDeployment.s.sol`, `DeploymentFile.sol`, `CodeConstants.sol`). `deployments/<chainId>.json`: indirizzi scritti dagli script (solo sotto `--broadcast`), si committano. `test/`: unit (`test/unit/`) e fork su mainnet (`test/integration/`).
 - `indexer/` (Node + Prisma) e `sdk/` (Node): componenti off-chain.
-- Documenti: `README.md` (architettura e uso), `invariant.md` (invarianti per contratto). In `localHelpers/`: `roadmap.md` (piano di lavoro off-chain: monorepo, SDK, indexer, API, keeper, notifiche, front-end), `codeReview.md` (security review corrente), `eventCheck.md` (audit degli eventi per l'indexer), `sdkModify.md` (modifiche da fare all'SDK, non ancora applicate), `TODO.md`.
+- Documenti: `README.md` (architettura e uso), `invariant.md` (invarianti per contratto). In `localHelpers/`: `roadmap.md` (piano di lavoro off-chain: monorepo, SDK, indexer, API, keeper, notifiche, front-end), `codeReview.md` (security review corrente), `eventCheck.md` (audit degli eventi per l'indexer), `apis.md` (elenco delle API del backend), `eventResume.md` (eventi per contratto e mappa API → eventi), `architettura-progetto-defi.md` (ruoli di indexer, SDK, API e backend, con esempi del progetto), `sdkModify.md` (modifiche da fare all'SDK, non ancora applicate), `TODO.md`.
 
 ## Architettura
 
@@ -33,7 +33,19 @@ forge test                 # suite completa, fork inclusi (richiede MAINNET_RPC_
 forge test --match-path "test/unit/**"   # solo unit test, senza RPC
 make test / make unittest / make integrationtest / make coverage
 forge install              # reinstalla le librerie ai commit di foundry.lock
+npm install                # dipendenze Node della root (workspace packages/*)
+npm run abi / make abi     # forge build + rigenera packages/abi/src/generated.ts
+npm run abi:watch          # rigenera a ogni modifica di src/
+npm run check-abi / make check-abi   # fallisce se le ABI generate non sono in git
+git config core.hooksPath .githooks  # una volta per clone: attiva il pre-commit
+make anvil && make deploy-anvil      # in due terminali: anvil pulito con mock
+make anvil-fork && make deploy-fork  # fork di mainnet al blocco 26.178.000, chain id 31338
+make deploy-index INDEX_ASSET_A=LINK INDEX_ASSET_B=COMP   # un index in più (variabili INDEX_*)
 ```
+
+Deploy locale: account di default di anvil (0 = deployer e owner 1, 1 e 2 = owner). Il fork usa chain id 31338 (`FORK_CHAIN_ID`), non 1. I broadcast usano `--legacy` (sul fork il RPC upstream risponde 503 a `eth_feeHistory` con percentili). `DeployAndInitNewIndex` da riga di comando richiede `--sig "run()"`.
+
+ABI: `packages/abi` (`@oam/abi`, workspace npm) genera con `@wagmi/cli` le ABI tipizzate di Index, IndexManager, IndexFactory, Router, SwapManager, PriceFeedManager, MultiSigWallet e TimelockController. `generated.ts` si committa e non si modifica a mano. Il pre-commit (`.githooks/pre-commit`) lancia `check-abi` quando sono in stage file di `src/`, `packages/abi/` o `foundry.toml`. Il plugin foundry di wagmi non lancia `forge` da solo (`build: false`): passa il percorso al comando senza virgolette e il percorso del repo contiene uno spazio; per questo `forge build` lo lanciano gli script npm.
 
 Stato atteso: 950 test passati su 48 suite.
 
@@ -52,13 +64,14 @@ Attenzione: `forge lint` può lasciare in `out/` artefatti senza bytecode. Il `f
 
 ## Decisioni dell'utente da rispettare
 
+- **ABI congelate dal 2026-10-24** (fine Fase 1): firme, eventi ed errori dei contratti in `packages/abi` non si cambiano senza una decisione esplicita dell'utente. Riferimento (sha256 di `generated.ts`) e procedura con l'elenco dei pacchetti da aggiornare: `localHelpers/roadmap.md`, Fase 1, voce "Congelamento". Una modifica che cambia l'ABI va segnalata all'utente prima di farla.
 - **SwapManager non emette eventi.**
 - **Schema Prisma** (`indexer/prisma/schema.prisma`): non modificarlo né rigenerarlo finché l'utente non lo chiede, anche se gli eventi sono cambiati.
 - **EIP-170 / EIP-3860**: risolto il 2026-10-14 con optimizer acceso (100 runs) e `IndexFactory` split-code. Runtime: `Index` 17.645 B, `SwapManager` 10.012, `IndexManager` 9.407, `IndexFactory` 1.737 (limite 24.576). Non rimettere `type(Index).creationCode` nell'IndexManager.
 - **Timelock degli upgrade senza finestra di esecuzione**: le operazioni superate si cancellano a mano.
 - **Fork test fissati** al blocco `MAINNET_FORK_BLOCK` (`test/integration/ForkConstants.sol`, oggi 26.178.000). Serve un RPC archive. Se si cambia blocco, il pool WBTC/WETH deve restare entro l'1% dal prezzo Chainlink, altrimenti i test di rebalance falliscono con `V3TooLittleReceived`.
 - **`lib/v4-periphery` fissata a `5da22e60`** (in `foundry.lock` e nel gitlink). Non aggiornarla alla punta di `main`: le versioni successive cambiano `IV4Router.ExactInputSingleParams` (campo `minHopPriceX36`) e diventano incompatibili con il Universal Router deployato su mainnet (`0x66a9893c…8Af`, che usa v4-periphery `3779387e`). Un aggiornamento va allineato alla versione del Universal Router usato.
-- Ignorare i pacchetti Node.js (`node_modules`, `indexer/`, `sdk/`) quando si lavora sulle dipendenze Foundry.
+- Ignorare i pacchetti Node.js (`node_modules`, `indexer/`, `sdk/`, `packages/`) quando si lavora sulle dipendenze Foundry.
 
 ## Stato della security review
 
