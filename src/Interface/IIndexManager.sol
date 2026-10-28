@@ -22,8 +22,11 @@ interface IIndexManager {
     /**
      * @notice Rebalances a single initialized index towards its target weights.
      * @dev Callable only by REBALANCER_ROLE. Reverts with IndexManager__NotIndexInitialized if the index is not initialized.
-     *      Does not revert if the rebalance fails: emits IndexActionFailed (REBALANCE) with the raw revert data instead;
-     *      emits IndexActionTriggered (REBALANCE) on success.
+     *      If the index reverts with a custom error, does not revert: emits IndexActionFailed (REBALANCE) with the raw
+     *      revert data instead. If it reverts with a common error (revert data shorter than 4 bytes (out of gas, bare revert()),
+     *      Error(string) or Panic(uint256)),
+     *      reverts with exactly the same revert data, so a gas estimate never covers a failed rebalance.
+     *      Emits IndexActionTriggered (REBALANCE) on success.
      * @param _indexAddress The address of the index to rebalance.
      */
     function rebalanceSingleIndex(address _indexAddress) external;
@@ -47,8 +50,13 @@ interface IIndexManager {
     /**
      * @notice Executes the pending target weights update of a single initialized index.
      * @dev Callable only by ASSET_MANAGER_ROLE. Reverts with IndexManager__NotIndexInitialized if the index is not initialized.
-     *      Does not revert if the execution fails: emits IndexActionFailed (EXECUTE_WEIGHTS) with the raw revert data instead;
-     *      emits IndexActionTriggered (EXECUTE_WEIGHTS) on success.
+     *      If the index reverts with a custom error, does not revert: emits IndexActionFailed (EXECUTE_WEIGHTS) with the raw
+     *      revert data instead. If it reverts with a common error (revert data shorter than 4 bytes (out of gas, bare revert()),
+     *      Error(string) or Panic(uint256)),
+     *      reverts with exactly the same revert data, so a gas estimate never covers a failed execution.
+     *      This includes a common error of the rebalance attempted inside executeWeightUpdate, which the index re-throws
+     *      unchanged; in that case the weights update stays pending.
+     *      Emits IndexActionTriggered (EXECUTE_WEIGHTS) on success.
      * @param _indexAddress The address of the index whose weights update is executed.
      */
     function executeSingleWeightUpdate(address _indexAddress) external;
@@ -58,7 +66,9 @@ interface IIndexManager {
     /**
      * @notice Executes the pending target weights update of several initialized indexes in a single transaction.
      * @dev Callable only by ASSET_MANAGER_ROLE. Reverts with IndexManager__NotIndexInitialized if any index is not initialized.
-     *      A failing index does not revert the batch: it emits IndexActionFailed (EXECUTE_WEIGHTS) and the loop continues.
+     *      A failing index does not revert the batch: it emits IndexActionFailed (EXECUTE_WEIGHTS) with the raw revert data,
+     *      whatever the error, and the loop continues. This includes a common error (e.g. out of gas) of the rebalance
+     *      attempted inside executeWeightUpdate: the index reverts, so its weights update stays pending.
      *      To act on every index, pass getInitializedIndexes().
      * @param _indexAddresses The addresses of the indexes whose weights update is executed.
      */
@@ -69,8 +79,11 @@ interface IIndexManager {
     /**
      * @notice Collects the accrued fees of a single initialized index and sends them to the caller.
      * @dev Callable only by FEE_COLLECTOR_ROLE. Reverts with IndexManager__NotIndexInitialized if the index is not initialized.
-     *      Does not revert if the collection fails: emits IndexActionFailed (COLLECT_FEES) with the raw revert data instead;
-     *      on success emits IndexActionTriggered (COLLECT_FEES) and adds the amount, in USDC units (6 decimals),
+     *      If the index reverts with a custom error, does not revert: emits IndexActionFailed (COLLECT_FEES) with the raw
+     *      revert data instead. If it reverts with a common error (revert data shorter than 4 bytes (out of gas, bare revert()),
+     *      Error(string) or Panic(uint256)),
+     *      reverts with exactly the same revert data, so a gas estimate never covers a failed collection.
+     *      On success emits IndexActionTriggered (COLLECT_FEES) and adds the amount, in USDC units (6 decimals),
      *      to getTotalFeesCollected().
      * @param _indexAddress The address of the index to collect fees from.
      */

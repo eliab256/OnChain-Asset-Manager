@@ -23,6 +23,7 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIndex} from "./Interface/IIndex.sol";
+import {RevertData} from "./libraries/RevertData.sol";
 
 contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     using SafeERC20 for IERC20;
@@ -291,7 +292,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         isIndexInitialized(_indexAddress)
         onlyRole(REBALANCER_ROLE)
     {
-        _tryIndexAction(_indexAddress, IndexAction.REBALANCE);
+        _tryIndexAction(_indexAddress, IndexAction.REBALANCE, true);
     }
 
     /// @dev Inherit from IIndexManager. See interface for details.
@@ -327,7 +328,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
         isIndexInitialized(_indexAddress)
         onlyRole(ASSET_MANAGER_ROLE)
     {
-        _tryIndexAction(_indexAddress, IndexAction.EXECUTE_WEIGHTS);
+        _tryIndexAction(_indexAddress, IndexAction.EXECUTE_WEIGHTS, true);
     }
 
     /**
@@ -358,7 +359,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     ) public isIndexInitialized(_indexAddress) onlyRole(FEE_COLLECTOR_ROLE) {
         s_totalFeesCollected += _tryIndexAction(
             _indexAddress,
-            IndexAction.COLLECT_FEES
+            IndexAction.COLLECT_FEES,
+            true
         );
     }
 
@@ -474,20 +476,28 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     }
 
     /**
-     * @notice Triggers a rebalance, a weights update execution or a fee collection on an index without reverting on failure.
+     * @notice Triggers a rebalance, a weights update execution or a fee collection on an index, reporting a failure
+     *         through an event or, for common errors when requested, by reverting.
      * @dev Low-level call to the index with the calldata selected by `_action`: rebalanceIndex(), executeWeightUpdate()
      *      or collectFees(msg.sender) (fees are always sent to the caller of the IndexManager).
      *      The target is always a registered and initialized index, so it has code.
-     *      On success emits IndexActionTriggered(_index, msg.sender, _action); on failure emits
-     *      IndexActionFailed(_index, msg.sender, _action, reason) with the raw revert data and returns 0.
+     *      On success emits IndexActionTriggered(_index, msg.sender, _action).
+     *      On failure, if `_revertOnCommonError` is true and the revert data is a common error (see RevertData.isCommonError:
+     *      less than 4 bytes, e.g. out of gas or a bare revert(), Error(string) or Panic(uint256)), reverts bubbling up
+     *      exactly the same revert data, so that eth_estimateGas never returns a gas limit at which the action fails.
+     *      Otherwise emits IndexActionFailed(_index, msg.sender, _action, reason) with the raw revert data and returns 0.
+     *      The single-index entry points pass true, the batch ones (via _tryIndexActions) pass false.
      *      Only REBALANCE, EXECUTE_WEIGHTS and COLLECT_FEES are passed by the callers.
      * @param _index The address of the index to act on.
      * @param _action The action to trigger (REBALANCE, EXECUTE_WEIGHTS or COLLECT_FEES).
+     * @param _revertOnCommonError True to revert with the original revert data when the call fails with a common error;
+     *        false to always emit IndexActionFailed and continue.
      * @return feeAmount The fees collected, in USDC units (6 decimals); 0 for other actions or on failure.
      */
     function _tryIndexAction(
         address _index,
-        IndexAction _action
+        IndexAction _action,
+        bool _revertOnCommonError
     ) internal returns (uint256 feeAmount) {
         bytes memory callData;
         if (_action == IndexAction.REBALANCE) {
@@ -500,6 +510,11 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
 
         (bool success, bytes memory result) = _index.call(callData);
         if (!success) {
+            if (_revertOnCommonError && RevertData.isCommonError(result)) {
+                assembly ("memory-safe") {
+                    revert(add(result, 32), mload(result))
+                }
+            }
             emit IndexActionFailed(_index, msg.sender, _action, result);
             return 0;
         }
@@ -511,7 +526,8 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
 
     /**
      * @notice Triggers the same action on several indexes, continuing past the ones that fail.
-     * @dev Calls _tryIndexAction for each index; the caller has already checked that all of them are initialized.
+     * @dev Calls _tryIndexAction for each index without reverting on common errors: every failure emits
+     *      IndexActionFailed. The caller has already checked that all of them are initialized.
      * @param _indexes The addresses of the indexes to act on.
      * @param _action The action to trigger (REBALANCE, EXECUTE_WEIGHTS or COLLECT_FEES).
      * @return totalFees The sum of the fees collected, in USDC units (6 decimals); 0 for other actions.
@@ -522,7 +538,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     ) internal returns (uint256 totalFees) {
         uint256 length = _indexes.length;
         for (uint256 i = 0; i < length; i++) {
-            totalFees += _tryIndexAction(_indexes[i], _action);
+            totalFees += _tryIndexAction(_indexes[i], _action, false);
         }
     }
 

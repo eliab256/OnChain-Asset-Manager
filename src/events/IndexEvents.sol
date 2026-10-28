@@ -93,9 +93,11 @@ event WeightsUpdateProposed(
 event WeightsUpdated(uint128 asset0Weight, uint128 asset1Weight);
 
 /**
- * @notice Emitted when the rebalance attempted after a weights update reverts for a reason other than "rebalance not needed".
- * @dev The weights update itself is not reverted.
- * @param reasonData Raw revert data of the rebalance call, unchanged (ABI-encoded custom error, Error(string) or Panic(uint256); may be empty).
+ * @notice Emitted when the rebalance attempted after a weights update reverts with a custom error other than Index__RebalanceNotNeeded.
+ * @dev The weights update itself is kept. Not emitted for common errors (revert data shorter than 4 bytes, e.g. out of gas,
+ *      Error(string) or Panic(uint256)): in that case executeWeightUpdate reverts with the same revert data.
+ * @param reasonData Raw revert data of the rebalance call, unchanged: always an ABI-encoded custom error (at least 4 bytes,
+ *        selector other than Index__RebalanceNotNeeded, Error(string) and Panic(uint256)), never empty.
  */
 event WeightsUpdateRebalanceFailed(bytes reasonData);
 

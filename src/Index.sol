@@ -19,6 +19,7 @@ import {
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {UnderlyingMath} from "./libraries/UnderlyingMath.sol";
 import {SharesMath} from "./libraries/SharesMath.sol";
+import {RevertData} from "./libraries/RevertData.sol";
 import {IndexAsset, InitStateCache, SwapType} from "./types.sol";
 import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {ISwapManager} from "./Interface/ISwapManager.sol";
@@ -644,13 +645,7 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
         );
     }
 
-    /**
-     * @notice Executes the pending weight update and triggers a rebalance.
-     * @notice Rebalance is attempted even if the update fails to execute to avoid getting stuck with pending weights that cannot be implemented.
-     * @dev Executable only within WEIGHT_UPDATE_EXECUTION_WINDOW after s_weightUpdateExecutableAt; after that the proposal is expired.
-     * @dev Emits WeightsUpdated, then WeightsUpdateRebalanceSkipped if the rebalance reverts with Index__RebalanceNotNeeded,
-     *      or WeightsUpdateRebalanceFailed with the raw revert data for any other revert. A successful rebalance emits IndexRebalanced.
-     */
+    /// @dev Inherit from IIndex. See interface for details.
     function executeWeightUpdate() external onlyIndexManager {
         // 1. Check if there is a pending weight update ready to be executed, if not revert.
         if (
@@ -679,10 +674,15 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
         // 5. Trigger rebalance; "not needed" is the normal case and is reported as skipped.
         (bool rebalanceSuccess, bytes memory reasonData) = _tryRebalanceIndex();
         if (!rebalanceSuccess) {
-            if (
-                reasonData.length >= 4 &&
-                bytes4(reasonData) == Index__RebalanceNotNeeded.selector
-            ) emit WeightsUpdateRebalanceSkipped();
+            // Common errors (out of gas, Error(string), Panic) revert the whole update, so that eth_estimateGas
+            // never returns a gas limit at which the weights change but the rebalance fails.
+            if (RevertData.isCommonError(reasonData)) {
+                assembly ("memory-safe") {
+                    revert(add(reasonData, 32), mload(reasonData))
+                }
+            }
+            if (bytes4(reasonData) == Index__RebalanceNotNeeded.selector)
+                emit WeightsUpdateRebalanceSkipped();
             else emit WeightsUpdateRebalanceFailed(reasonData);
         }
     }
@@ -1333,8 +1333,12 @@ contract Index is IIndex, ERC20Permit, ContractCodeConstants {
     }
 
     /**
-     * @notice Used on the executeWeightUpdate function to attempt the rebalance and catch any error that may occur during the process to emit it in an event instead of reverting the transaction.
-     * @dev Attempts to rebalance the index.
+     * @notice Attempts the rebalance of the index from executeWeightUpdate, catching its revert instead of propagating it.
+     * @dev External self-call to rebalanceIndex() (the index is allowed by onlyIndexManager), so its state changes are
+     *      rolled back on failure while the weights update is kept. The caller, executeWeightUpdate, classifies the
+     *      revert data: Index__RebalanceNotNeeded emits WeightsUpdateRebalanceSkipped, any other custom error emits
+     *      WeightsUpdateRebalanceFailed, and a common error (see RevertData.isCommonError: less than 4 bytes, e.g. out
+     *      of gas, Error(string) or Panic(uint256)) is re-thrown with the same revert data, reverting the whole update.
      * @return success True if the rebalance was successful, false otherwise.
      * @return reasonData Raw revert data of the rebalance call, unchanged (may be empty); empty on success.
      */

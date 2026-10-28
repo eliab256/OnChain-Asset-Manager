@@ -10,7 +10,6 @@
     "check-abi": "packages/abi/check-abi.sh"
   },
   "devDependencies": {
-    "@wagmi/cli": "^2.10.0",
     "typescript": "^6.0.3",
     "viem": "^2.52.2"
   }

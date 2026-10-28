@@ -2,7 +2,7 @@
   "name": "@oam/abi",
   "version": "0.1.0",
   "private": true,
-  "description": "ABIs generated from the Foundry artifacts. Do not edit src/generated.ts by hand.",
+  "description": "ABIs generated from the Foundry artifacts and addresses from deployments/. Do not edit src/generated.ts by hand.",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -15,5 +15,8 @@
   },
   "peerDependencies": {
     "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "@wagmi/cli": "^2.10.0"
   }
 }

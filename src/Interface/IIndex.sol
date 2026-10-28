@@ -42,6 +42,19 @@ interface IIndex is IERC20, IERC20Metadata, IERC20Permit {
         uint128 _newWeightAsset0
     ) external returns (uint256 implementationTimestamp);
 
+    /**
+     * @notice Executes the pending weights update, making the pending weights the new target, and then attempts a rebalance.
+     * @dev Callable only by the IndexManager. Reverts with Index__NotPendingWeightUpdate if there is no pending update or
+     *      s_weightUpdateExecutableAt is not reached yet, and with Index__WeightUpdateExpired after
+     *      WEIGHT_UPDATE_EXECUTION_WINDOW past it.
+     *      Emits WeightsUpdated, then attempts rebalanceIndex() through a self-call:
+     *      - success: emits IndexRebalanced;
+     *      - Index__RebalanceNotNeeded: emits WeightsUpdateRebalanceSkipped, the update is kept;
+     *      - any other custom error: emits WeightsUpdateRebalanceFailed with the raw revert data, the update is kept;
+     *      - common error (revert data shorter than 4 bytes (out of gas, bare revert()), Error(string) or Panic(uint256)):
+     *        reverts with exactly the same revert data, so target weights, pending weights and the executable timestamp
+     *        stay unchanged and eth_estimateGas never returns a gas limit at which the rebalance fails.
+     */
     function executeWeightUpdate() external;
 
     function cancelWeightUpdate() external;

@@ -35,6 +35,7 @@
 15. **Rebalance preserves total supply**: `rebalanceIndex` non minta né brucia shares; `totalSupply()` resta invariato.
 
 16. **Weight update delay**: `executeWeightUpdate` può essere chiamato solo se `s_weightUpdateExecutableAt > 0` e `s_weightUpdateExecutableAt <= block.timestamp <= s_weightUpdateExecutableAt + WEIGHT_UPDATE_EXECUTION_WINDOW`. `cancelWeightUpdate` azzera sempre pesi pendenti e timestamp.
+16b. **Weight update e rebalance interno**: dopo aver applicato i pesi, `executeWeightUpdate` tenta il rebalance. `Index__RebalanceNotNeeded` → `WeightsUpdateRebalanceSkipped`; un altro custom error → `WeightsUpdateRebalanceFailed(reasonData)` con i pesi applicati; un errore comune (revert data sotto 4 byte, out-of-gas incluso, `Error(string)`, `Panic(uint256)`, vedi `src/libraries/RevertData.sol`) fa revert di tutta l'esecuzione con lo stesso revert data, quindi pesi target, pesi pendenti e timestamp restano invariati (dal 2026-10-28).
 
 17. **No double pending**: `proposeUpdateWeights` reverta se esiste già un update pendente non ancora eseguibile (`s_weightUpdateExecutableAt != 0 && block.timestamp < s_weightUpdateExecutableAt`).
 
@@ -88,7 +89,7 @@
 
 19. **Price feed registration**: `createIndex` reverta se asset0, asset1 o USDC non hanno un feed registrato nel PriceFeedManager.
 
-20. **Rebalance/fee collection non-reverting batch**: rebalance, esecuzione dei pesi e raccolta fee (varianti single e multiple, tutte via `_tryIndexAction`) non revertano se un index fallisce: emettono `IndexActionFailed(index, caller, action, reasonData)` con il revert data originale. Le varianti multiple revertano solo se un indirizzo della lista non è un index inizializzato.
+20. **Rebalance/fee collection non-reverting batch**: rebalance, esecuzione dei pesi e raccolta fee (varianti single e multiple, tutte via `_tryIndexAction`) non revertano se un index fallisce con un custom error: emettono `IndexActionFailed(index, caller, action, reasonData)` con il revert data originale. Le varianti multiple assorbono anche gli errori comuni (revert data sotto 4 byte, out-of-gas incluso, `Error(string)`, `Panic(uint256)`); le varianti single su un errore comune fanno revert con lo stesso revert data e non emettono `IndexActionFailed` (dal 2026-10-27). Le varianti multiple revertano solo se un indirizzo della lista non è un index inizializzato.
 
 21. **Proxy upgrade timelock**: SwapManager, PriceFeedManager e Router hanno come `upgrader` (`UpgraderAuth`, storage ERC-7201 `onchainassetmanager.storage.UpgraderAuth`) il `TimelockController` passato al costruttore dell'IndexManager (mai zero, `IndexManager__ZeroAddress`). Solo l'upgrader può chiamare `upgradeToAndCall`: IndexManager, owner, admin o chiunque altro ricevono `UpgraderAuth__Unauthorized(caller)`. Ogni upgrade richiede quindi `schedule` + attesa di almeno `getMinDelay()` (2 giorni) + `execute` da parte del MultiSig; `cancel` è possibile finché non è eseguito. L'upgrader non ha setter: cambia solo con un upgrade. L'IndexManager non ha più funzioni di upgrade.
 
