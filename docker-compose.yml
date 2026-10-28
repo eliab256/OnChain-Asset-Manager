@@ -1,0 +1,23 @@
+# Local development database (Postgres for the indexer and, later, the API).
+# Credentials are for local use only. Data survives `docker compose down` in the
+# oam-pgdata volume; `docker compose down -v` wipes it.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: oam-postgres
+    environment:
+      POSTGRES_USER: oam
+      POSTGRES_PASSWORD: oam
+      POSTGRES_DB: oam
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - oam-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oam -d oam"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  oam-pgdata:

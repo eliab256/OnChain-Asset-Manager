@@ -33,9 +33,7 @@ export function decodeProtocolError(data: Hex): DecodedProtocolError | undefined
 export function encodeProtocolError(
   params: Omit<EncodeErrorResultParameters<typeof protocolErrorsAbi>, "abi">,
 ): Hex {
-  return encodeErrorResult({ abi: protocolErrorsAbi, ...params } as EncodeErrorResultParameters<
-    typeof protocolErrorsAbi
-  >);
+  return encodeErrorResult({ abi: protocolErrorsAbi, ...params });
 }
 
 /**

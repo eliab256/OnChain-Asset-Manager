@@ -143,7 +143,7 @@ describe("buildConfirmTypedData", () => {
     ["txId", { txId: 4n }],
     ["target", { target: ATTACKER }],
     ["value", { value: 1n }],
-    ["data", { data: "0xdeadbeee" as Hex }],
+    ["data", { data: "0xdeadbeee" }],
     ["nonce (bumped by revoke)", { nonce: 2n }],
   ] as const)("security: a different %s gives a different digest", (_name, change) => {
     const base = hashTypedData(buildConfirmTypedData({ domain, ...proposal }));
@@ -168,7 +168,7 @@ describe("assertConfirmSignature", () => {
     ["not hex", `0x${"zz".repeat(65)}`],
     ["v = 29", `0x${"11".repeat(64)}1d`],
   ] as const)("rejects %s with InvalidSignatureError", (_name, signature) => {
-    expect(() => assertConfirmSignature(signature as Hex)).toThrow(InvalidSignatureError);
+    expect(() => assertConfirmSignature(signature)).toThrow(InvalidSignatureError);
   });
 
   // The MultiSig receives the raw bytes and OpenZeppelin ECDSA.recover returns address(0) for v = 0/1:
@@ -215,7 +215,7 @@ describe("normalizeConfirmSignature", () => {
   ])("rewrites %s as 27/28 with the same r and s, and the signer still recovers", async (_name, vByte) => {
     const typed = buildConfirmTypedData({ domain, ...proposal });
     const signed = await owner.signTypedData(typed);
-    const raw = concat([slice(signed, 0, 64), `0x${vByte}` as Hex]);
+    const raw = concat([slice(signed, 0, 64), `0x${vByte}`]);
     const normalized = normalizeConfirmSignature(raw);
     expect(slice(normalized, 0, 64)).toBe(slice(raw, 0, 64));
     expect(hexToNumber(slice(normalized, 64, 65))).toBe(Number(vByte) + 27);
@@ -254,7 +254,7 @@ describe("normalizeConfirmSignature", () => {
     ["v = 2", `0x${"11".repeat(64)}02`],
     ["v = 29", `0x${"11".repeat(64)}1d`],
   ] as const)("rejects %s with InvalidSignatureError", (_name, signature) => {
-    expect(() => normalizeConfirmSignature(signature as Hex)).toThrow(InvalidSignatureError);
+    expect(() => normalizeConfirmSignature(signature)).toThrow(InvalidSignatureError);
   });
 });
 

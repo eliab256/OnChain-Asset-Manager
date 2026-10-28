@@ -27,10 +27,13 @@ function decode(calldata: Hex) {
   return decodeFunctionData({ abi: multiSigWalletAbi, data: calldata });
 }
 
+// Arrows keep the static builders bound to their class (unbound-method).
+type TxParams = Parameters<typeof MultiSigCalls.confirmCallParameters>[0];
+
 const txCalls = [
-  ["confirmCallParameters", MultiSigCalls.confirmCallParameters, "confirmTransaction"],
-  ["executeCallParameters", MultiSigCalls.executeCallParameters, "executeTransaction"],
-  ["revokeCallParameters", MultiSigCalls.revokeCallParameters, "revokeConfirmation"],
+  ["confirmCallParameters", (p: TxParams) => MultiSigCalls.confirmCallParameters(p), "confirmTransaction"],
+  ["executeCallParameters", (p: TxParams) => MultiSigCalls.executeCallParameters(p), "executeTransaction"],
+  ["revokeCallParameters", (p: TxParams) => MultiSigCalls.revokeCallParameters(p), "revokeConfirmation"],
 ] as const;
 
 describe("submitCallParameters", () => {
@@ -127,7 +130,7 @@ describe("confirmWithSigCallParameters", () => {
     ["not hex", `0x${"gg".repeat(65)}`],
   ] as const)("signature %s -> InvalidSignatureError", (_name, signature) => {
     expect(() =>
-      MultiSigCalls.confirmWithSigCallParameters({ multiSig: MULTISIG, txId: 0n, signer: owner.address, signature: signature as Hex }),
+      MultiSigCalls.confirmWithSigCallParameters({ multiSig: MULTISIG, txId: 0n, signer: owner.address, signature: signature }),
     ).toThrow(InvalidSignatureError);
   });
 
@@ -136,7 +139,7 @@ describe("confirmWithSigCallParameters", () => {
     const signed = await owner.signTypedData(
       buildConfirmTypedData({ domain, txId: 2n, target: INDEX_MANAGER, value: 0n, data: "0x", nonce: 0n }),
     );
-    const signature = concat([slice(signed, 0, 64), `0x${vByte}` as Hex]);
+    const signature = concat([slice(signed, 0, 64), `0x${vByte}`]);
     const call = MultiSigCalls.confirmWithSigCallParameters({ multiSig: MULTISIG, txId: 2n, signer: owner.address, signature });
     const forwarded = decode(call.calldata).args?.[2] as Hex;
     expect(slice(forwarded, 0, 64)).toBe(slice(signature, 0, 64));

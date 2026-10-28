@@ -2,15 +2,21 @@
   "name": "onchain-asset-manager",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "abi": "npm run generate --workspace @oam/abi",
     "abi:watch": "npm run watch --workspace @oam/abi",
-    "check-abi": "packages/abi/check-abi.sh"
+    "check-abi": "packages/abi/check-abi.sh",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
     "viem": "^2.52.2"
   }
 }

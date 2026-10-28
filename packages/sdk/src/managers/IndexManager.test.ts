@@ -51,7 +51,7 @@ describe("snapshotReads", () => {
     for (const read of reads) {
       const item = indexAbi.find((entry) => entry.type === "function" && entry.name === read.functionName);
       expect(item?.type === "function" ? item.stateMutability : undefined).toMatch(/^(view|pure)$/);
-      expect(() => encodeFunctionData({ abi: indexAbi, functionName: read.functionName } as never)).not.toThrow();
+      expect(() => encodeFunctionData({ abi: indexAbi, functionName: read.functionName })).not.toThrow();
     }
   });
 
@@ -77,8 +77,8 @@ describe("snapshotReads", () => {
         abi: indexAbi,
         functionName: read.functionName,
         result: value,
-      } as never);
-      return decodeFunctionResult({ abi: read.abi, functionName: read.functionName, data: encoded } as never);
+      });
+      return decodeFunctionResult({ abi: read.abi, functionName: read.functionName, data: encoded });
     }) as unknown as IndexSnapshotResults;
     expect(IndexManager.toSnapshot(INDEX, decoded, prices)).toEqual({
       address: INDEX,

@@ -12,7 +12,6 @@ import {
   TransactionExecutionError,
   UnknownRpcError,
   type AbiParameter,
-  type Hex,
 } from "viem";
 import { describe, expect, it } from "vitest";
 import { protocolErrorsAbi, routerWithErrorsAbi } from "../abis/fragments.js";
@@ -70,7 +69,7 @@ function sendTransactionRevert(data: unknown) {
   return new TransactionExecutionError(new UnknownRpcError(rpcRevert(data)), {
     account: null,
     to: ROUTER,
-    data: "0x12345678" as Hex,
+    data: "0x12345678",
   });
 }
 

@@ -44,7 +44,7 @@ function assertFee(fee: number, field: string): void {
   }
 }
 
-function assertAddress(value: Address, field: string): void {
+function assertAddress(value: string, field: string): void {
   if (!isAddress(value, { strict: false })) throw new InvalidSwapRouteError(`${field} ${value} is not an address`);
 }
 

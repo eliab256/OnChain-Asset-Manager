@@ -6,6 +6,8 @@ RPC_URL 			?= http://127.0.0.1:8545
 # with its own chain id so nothing can be confused with or replayed on mainnet.
 FORK_BLOCK 			?= 26178000
 FORK_CHAIN_ID 		?= 31338
+# State saved by make snapshot (anvil only) and loaded by make anvil-load / make dev
+STATE_DIR 			?= .anvil
 
 # Anvil default accounts 0..2: deployer (and multisig owner 1), owners 2 and 3
 ANVIL_KEY_0 		?= 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
@@ -27,8 +29,8 @@ FUZZ_TEST_PATH 			?= test/fuzz/**/*.sol
 .PHONY: build test unittest indextest indexmanagertest integrationtest fuzztest \
         test-index test-indexmanager test-router test-swap-manager test-single \
         test-manager coverage coverage-report \
-        abi check-abi anvil anvil-fork deploy-periphery deploy-index fund-fork \
-        deploy-anvil deploy-fork
+        abi check-abi anvil anvil-fork anvil-load deploy-periphery deploy-index fund \
+        refresh-feeds deploy-anvil deploy-fork snapshot db db-down dev lint typecheck
 
 build:
 	forge build
@@ -92,14 +94,46 @@ deploy-index:
 		--rpc-url $(RPC_URL) --broadcast --slow --legacy \
 		--private-keys $(ANVIL_KEY_0) --private-keys $(ANVIL_KEY_1) --private-keys $(ANVIL_KEY_2)
 
-# Writes WETH, WBTC and USDC balances of the deployer straight into storage (no swaps,
-# so the WBTC/WETH pool stays aligned with Chainlink). Runs only on the fork chain id.
-fund-fork:
-	forge script script/FundForkAccount.s.sol:FundForkAccount --rpc-url $(RPC_URL)
+# Tops up WETH, WBTC and USDC of the first 10 anvil accounts (FUND_ACCOUNTS / FUND_ACCOUNT_COUNT
+# to change them). Fork: balances written straight into storage, no swaps, so the WBTC/WETH pool
+# stays aligned with Chainlink. Anvil: mints the mocks listed in deployments/31337.json.
+fund:
+	forge script script/FundAccounts.s.sol:FundAccounts --rpc-url $(RPC_URL) \
+		--broadcast --legacy --private-key $(ANVIL_KEY_0)
 
-deploy-anvil: deploy-periphery deploy-index
+# Anvil only: re-publishes the current answer of every mock feed, so it is fresh again
+# (needed after anvil-load, when the chain time jumps to the wall clock)
+refresh-feeds:
+	forge script script/RefreshMockFeeds.s.sol:RefreshMockFeeds --rpc-url $(RPC_URL) \
+		--broadcast --legacy --private-key $(ANVIL_KEY_0)
 
-deploy-fork: fund-fork deploy-periphery deploy-index
+# Fund after the deploy: the mock tokens exist only from then
+deploy-anvil: deploy-periphery deploy-index fund
+
+# Fund before the deploy: the deployer needs the assets of the initial deposit
+deploy-fork: fund deploy-periphery deploy-index
+
+# ─── Snapshot and dev environment ────────────────────────────────────────────
+# Anvil only: on the fork the Chainlink feeds go stale anyway (localHelpers/roadmap.md §6).
+
+# Fresh anvil + deploy + fund, state saved to $(STATE_DIR)/31337.json. Port 8545 must be free.
+snapshot:
+	STATE_DIR=$(STATE_DIR) bin/snapshot.sh
+
+# Restart from the snapshot, then run make refresh-feeds in another terminal
+anvil-load:
+	anvil --load-state $(STATE_DIR)/31337.json
+
+# Postgres + chain + contracts + funded accounts. DEV_PROFILE=fork for the mainnet fork.
+dev:
+	STATE_DIR=$(STATE_DIR) bin/dev.sh
+
+# Local Postgres (docker-compose.yml); data survives db-down
+db:
+	docker compose up -d --wait
+
+db-down:
+	docker compose down
 
 # ─── ABI ─────────────────────────────────────────────────────────────────────
 
@@ -110,6 +144,14 @@ abi:
 # Fail if the generated ABIs differ from the ones staged/committed
 check-abi:
 	npm run check-abi
+
+# ─── TypeScript ──────────────────────────────────────────────────────────────
+
+lint:
+	npm run lint
+
+typecheck:
+	npm run typecheck
 
 # ─── Coverage ────────────────────────────────────────────────────────────────
 

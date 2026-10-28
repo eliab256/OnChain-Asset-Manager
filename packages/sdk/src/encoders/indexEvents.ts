@@ -270,7 +270,7 @@ export function failureReasonOf(reasonData: Hex): FailureReason {
 
 function decodeOrUndefined<const abi extends typeof indexAbi | typeof indexManagerAbi>(abi: abi, log: ReceiptLog) {
   try {
-    return decodeEventLog({ abi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+    return decodeEventLog({ abi, data: log.data, topics: log.topics });
   } catch {
     return undefined;
   }

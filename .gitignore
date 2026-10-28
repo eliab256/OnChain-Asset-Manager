@@ -15,8 +15,9 @@ docs/
 # Dotenv file
 .env
 
-indexer/dist/
+apps/indexer/dist/
 
 node_modules
 
 localHelpers/
+.anvil/

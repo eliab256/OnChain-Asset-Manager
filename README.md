@@ -115,7 +115,7 @@ Integration and rebalance tests run against a mainnet fork using Alchemy. The fo
 
 ### Environment variables
 
-Create a `.env` file in the project root (never commit this file):
+Copy `.env.example` to `.env` in the project root (never commit `.env`):
 
 ```bash
 # Ethereum mainnet — used by foundry.toml [rpc_endpoints] and fork tests
@@ -123,7 +123,12 @@ MAINNET_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/<YOUR_ALCHEMY_KEY>
 
 # Deployer address — read by HelperConfig when running on mainnet
 MAINNET_DEPLOYER=0xYourDeployerAddressHere
+
+# Host port of the local Postgres (docker-compose.yml); 5432 is often taken by a system Postgres
+POSTGRES_PORT=5434
 ```
+
+The indexer reads its own `apps/indexer/.env` (copy `apps/indexer/.env.example`): `DATABASE_URL` points at the Postgres of `docker-compose.yml`.
 
 > **Note:** the `[rpc_endpoints]` section in `foundry.toml` references `${MAINNET_RPC_URL}`. Make sure the variable name in your `.env` matches exactly.
 
@@ -163,11 +168,16 @@ make integrationtest
 │   ├── DeployPeriphery.s.sol        # Deploys MultiSig, TimelockController (upgrader), SwapManager/PriceFeedManager/Router implementations, IndexFactory and IndexManager (creates the three proxies); registers the USDC feed
 │   ├── DeployAndInitNewIndex.s.sol  # Registers missing asset feeds, deploys and seeds a new Index (CLI: --sig "run()", params from env)
 │   ├── DeploymentFile.sol           # Path of deployments/<chainId>.json and write guard (only under --broadcast)
-│   ├── FundForkAccount.s.sol        # Fork only: writes WETH/WBTC/USDC balances of the deployer with anvil_setStorageAt
+│   ├── FundAccounts.s.sol           # Tops up WETH/WBTC/USDC of the test accounts: anvil_setStorageAt on the fork, mock mint on Anvil
 │   ├── HelperConfig.s.sol           # Network config (mainnet, fork 31338) and mock setup for Anvil
-│   └── HelperConfigFromDeployment.s.sol # Same config, but Anvil mocks loaded from deployments/ instead of redeployed
+│   ├── HelperConfigFromDeployment.s.sol # Same config, but Anvil mocks loaded from deployments/ instead of redeployed
+│   └── RefreshMockFeeds.s.sol       # Anvil only: re-publishes the answer of every mock feed (after loading a snapshot)
 │
 ├── deployments/                     # <chainId>.json: addresses, start block, indexes (written by the scripts)
+├── bin/                             # dev.sh (make dev), snapshot.sh (make snapshot), anvil-common.sh
+├── docker-compose.yml               # Local Postgres for the indexer
+├── tsconfig.base.json               # Compiler options shared by packages/* and apps/*
+├── eslint.config.mjs                # ESLint for every TypeScript workspace
 │
 ├── src/
 │   ├── ContractCodeConstants.sol    # Protocol-wide constants (fees, weights, thresholds)
@@ -259,9 +269,16 @@ make coverage               # coverage summary for src/ only
 make coverage-report        # full lcov HTML report (requires lcov installed)
 make test-single NAME=<fn>  # run a single test by name with -vvvv
 make anvil / make anvil-fork   # start plain Anvil / the mainnet fork (chain id 31338)
-make deploy-anvil           # periphery + WETH/WBTC index on plain Anvil
-make deploy-fork            # fund the deployer, periphery + WETH/WBTC index on the fork
+make deploy-anvil           # periphery + WETH/WBTC index on plain Anvil, then fund the test accounts
+make deploy-fork            # fund the test accounts, periphery + WETH/WBTC index on the fork
 make deploy-index           # one more index on an existing deployment (INDEX_* env vars)
+make fund                   # top up WETH/WBTC/USDC of anvil accounts 0-9 (Anvil or fork)
+make refresh-feeds          # Anvil only: make every mock feed fresh again
+make snapshot               # fresh Anvil + deploy + fund, state saved to .anvil/31337.json
+make anvil-load             # start Anvil from the snapshot
+make dev                    # Postgres + chain + contracts + funded accounts (DEV_PROFILE=fork for the fork)
+make db / make db-down      # start / stop the local Postgres
+make lint / make typecheck  # ESLint and tsc on every TypeScript workspace
 ```
 
 ---
@@ -301,9 +318,19 @@ make anvil-fork
 make deploy-fork
 ```
 
-`deploy-fork` runs three steps: `FundForkAccount` (100 WETH, 5 WBTC and 1,000,000 USDC written into the deployer's balance slots, no swaps, so the WBTC/WETH pool stays aligned with Chainlink), `DeployPeriphery` and `DeployAndInitNewIndex`. The broadcasts use `--legacy` because Anvil forwards `eth_feeHistory` with reward percentiles to the upstream RPC, which may answer 503.
+`deploy-fork` runs three steps: `FundAccounts` (100 WETH, 5 WBTC and 1,000,000 USDC written into the balance slots of Anvil accounts 0-9, no swaps, so the WBTC/WETH pool stays aligned with Chainlink), `DeployPeriphery` and `DeployAndInitNewIndex`. `deploy-anvil` runs `DeployPeriphery`, `DeployAndInitNewIndex` and then `FundAccounts`, which mints the same amounts of the mock tokens. `FundAccounts` only tops up: a balance already at the target is left alone, so `make fund` can be run again at any time. `FUND_ACCOUNTS` (comma-separated addresses), `FUND_ACCOUNT_COUNT`, `FUND_WETH`, `FUND_WBTC` and `FUND_USDC` change accounts and amounts. The broadcasts use `--legacy` because Anvil forwards `eth_feeHistory` with reward percentiles to the upstream RPC, which may answer 503.
 
 Every run writes `deployments/<chainId>.json`: chain id, `startBlock`, deployer, multisig (owners, threshold), timelock, IndexManager, IndexFactory, the three proxies with their implementations, the network config, the Anvil mocks and an `indexes` object keyed by index address. `DeployPeriphery` rewrites the file; `DeployAndInitNewIndex` adds one entry under `indexes`. The file is written only with `--broadcast`, never during `forge test`. Block numbers are the ones the script sees, so they are lower bounds for an indexer.
+
+### One-command dev environment
+
+```bash
+make snapshot        # once: fresh Anvil, deploy, fund, state saved to .anvil/31337.json
+make dev             # Postgres (docker compose) + Anvil from the snapshot + fresh mock feeds
+DEV_PROFILE=fork make dev   # Postgres + mainnet fork + deploy + fund (no snapshot)
+```
+
+`make dev` needs port 8545 free and Docker running. Without a snapshot it deploys from scratch. After loading a snapshot it runs `make refresh-feeds`, because the chain time jumps to the wall clock and the mock feeds would be stale. If `deployments/31337.json` no longer matches the snapshot (no code at the IndexManager address), it stops and asks for a new `make snapshot`. Anvil logs go to `.anvil/anvil.log`; Ctrl-C stops Anvil and leaves Postgres running (`make db-down`). Snapshots are for plain Anvil only: on the fork the real Chainlink feeds go stale about an hour after the fork starts.
 
 To add another index to an existing deployment:
 

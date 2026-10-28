@@ -42,17 +42,22 @@ function decode(calldata: Hex) {
   return decodeFunctionData({ abi: indexManagerAbi, data: calldata });
 }
 
+// Static builders are wrapped in arrows: passing them bare would detach them from the class (unbound-method).
+type SingleIndexParams = Parameters<typeof IndexManagerCalls.rebalanceCallParameters>[0];
+type ManyIndexesParams = Parameters<typeof IndexManagerCalls.rebalanceManyCallParameters>[0];
+type RoleParams = Parameters<typeof IndexManagerCalls.grantRoleCallParameters>[0];
+
 const single = [
-  ["rebalanceCallParameters", IndexManagerCalls.rebalanceCallParameters, "rebalanceSingleIndex"],
-  ["executeWeightUpdateCallParameters", IndexManagerCalls.executeWeightUpdateCallParameters, "executeSingleWeightUpdate"],
-  ["collectFeesCallParameters", IndexManagerCalls.collectFeesCallParameters, "collectFeesFromSingleIndex"],
-  ["cancelWeightUpdateCallParameters", IndexManagerCalls.cancelWeightUpdateCallParameters, "cancelWeightUpdate"],
+  ["rebalanceCallParameters", (p: SingleIndexParams) => IndexManagerCalls.rebalanceCallParameters(p), "rebalanceSingleIndex"],
+  ["executeWeightUpdateCallParameters", (p: SingleIndexParams) => IndexManagerCalls.executeWeightUpdateCallParameters(p), "executeSingleWeightUpdate"],
+  ["collectFeesCallParameters", (p: SingleIndexParams) => IndexManagerCalls.collectFeesCallParameters(p), "collectFeesFromSingleIndex"],
+  ["cancelWeightUpdateCallParameters", (p: SingleIndexParams) => IndexManagerCalls.cancelWeightUpdateCallParameters(p), "cancelWeightUpdate"],
 ] as const;
 
 const many = [
-  ["rebalanceManyCallParameters", IndexManagerCalls.rebalanceManyCallParameters, "rebalanceMultipleIndexes"],
-  ["executeWeightUpdateManyCallParameters", IndexManagerCalls.executeWeightUpdateManyCallParameters, "executeWeightUpdateForMultipleIndexes"],
-  ["collectFeesManyCallParameters", IndexManagerCalls.collectFeesManyCallParameters, "collectFeesFromMultipleIndexes"],
+  ["rebalanceManyCallParameters", (p: ManyIndexesParams) => IndexManagerCalls.rebalanceManyCallParameters(p), "rebalanceMultipleIndexes"],
+  ["executeWeightUpdateManyCallParameters", (p: ManyIndexesParams) => IndexManagerCalls.executeWeightUpdateManyCallParameters(p), "executeWeightUpdateForMultipleIndexes"],
+  ["collectFeesManyCallParameters", (p: ManyIndexesParams) => IndexManagerCalls.collectFeesManyCallParameters(p), "collectFeesFromMultipleIndexes"],
 ] as const;
 
 describe("single-Index calls", () => {
@@ -254,8 +259,8 @@ describe("createIndexCallParameters", () => {
   });
 
   it("without the usdc option USDC is left to the contract", () => {
-    const { usdc: _usdc, ...rest } = base;
-    expect(() => IndexManagerCalls.createIndexCallParameters({ ...rest, assetA: { asset: USDC, weight: 400_000n } })).not.toThrow();
+    const { indexManager, feePercentage, assetB } = base;
+    expect(() => IndexManagerCalls.createIndexCallParameters({ indexManager, feePercentage, assetA: { asset: USDC, weight: 400_000n }, assetB })).not.toThrow();
   });
 
   // createIndex: each weight strictly between MIN_WEIGHT and MAX_WEIGHT, and their sum equal to MAX_WEIGHT.
@@ -399,8 +404,8 @@ describe("grantRole / revokeRole", () => {
   const ACCOUNT = KEEPER;
   const roles: IndexManagerRole[] = ["DEFAULT_ADMIN", "ASSET_MANAGER", "REBALANCER", "FEE_COLLECTOR"];
   const builders = [
-    ["grantRoleCallParameters", IndexManagerCalls.grantRoleCallParameters, "grantRole"],
-    ["revokeRoleCallParameters", IndexManagerCalls.revokeRoleCallParameters, "revokeRole"],
+    ["grantRoleCallParameters", (p: RoleParams) => IndexManagerCalls.grantRoleCallParameters(p), "grantRole"],
+    ["revokeRoleCallParameters", (p: RoleParams) => IndexManagerCalls.revokeRoleCallParameters(p), "revokeRole"],
   ] as const;
 
   it.each(builders.flatMap(([name, build, fn]) => roles.map((role) => [name, role, build, fn] as const)))(

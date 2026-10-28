@@ -226,8 +226,10 @@ Comandi (da `packages/sdk`):
 ```bash
 npm run typecheck    # tsc --noEmit
 npm test             # unit e property
-npm run test:fork    # fork test, con anvil acceso e deploy fatto
+npm run test:fork    # fork test, con anvil acceso e deploy fatto (anche `make dev` dalla root)
 ```
+
+Lint dalla root: `npm run lint` (ESLint 10, `typescript-eslint` `recommendedTypeChecked`, configurazione in `eslint.config.mjs`; il `tsconfig.json` dell'SDK estende `tsconfig.base.json`). Deve dare 0 segnalazioni. Dopo `npx eslint --fix` rilanciare sempre `npm run typecheck`: togliere un cast "inutile" può lasciare un import di tipo inutilizzato, o allargare un letterale in una tabella di `it.each` senza `as const`. In quel caso la tabella si tipizza con `satisfies` invece di rimettere il cast. I metodi statici dei manager non si passano come valore (`unbound-method`): nelle tabelle dei test si avvolgono in una arrow function, con il tipo del parametro preso da `Parameters<typeof X.metodo>[0]`.
 
 ## 10. Deviazioni dalla skill `web3-sdk-structure`
 

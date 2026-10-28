@@ -54,6 +54,10 @@ abstract contract CodeConstants {
     address public constant UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET =
         0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
 
+    // Default mnemonic of anvil: account i is derived at m/44'/60'/0'/0/i
+    string public constant ANVIL_MNEMONIC =
+        "test test test test test test test test test test test junk";
+
     address public constant ANVIL_DEPLOYER =
         0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 

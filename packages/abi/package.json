@@ -11,12 +11,14 @@
   },
   "scripts": {
     "generate": "forge build --root ../.. && wagmi generate",
-    "watch": "forge build --root ../.. && (forge build --root ../.. --watch & wagmi generate --watch)"
+    "watch": "forge build --root ../.. && (forge build --root ../.. --watch & wagmi generate --watch)",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "viem": "^2.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.9.9",
     "@wagmi/cli": "^2.10.0"
   }
 }

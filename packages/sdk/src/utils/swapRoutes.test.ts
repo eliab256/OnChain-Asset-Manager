@@ -66,7 +66,7 @@ describe("v3Route", () => {
     ["a fee above uint24", [WBTC, WETH], [MAX_UINT24 + 1]],
     ["a fractional fee", [WBTC, WETH], [0.5]],
     ["a zero-address token", [WBTC, zeroAddress], [3000]],
-    ["a malformed address", [WBTC, "0x1234" as Address], [3000]],
+    ["a malformed address", [WBTC, "0x1234"], [3000]],
   ] as const)("rejects %s with InvalidSwapRouteError", (_name, tokens, fees) => {
     expect(() => v3Route(tokens, fees)).toThrow(InvalidSwapRouteError);
   });
@@ -105,8 +105,8 @@ describe("v4Route", () => {
     ["a tickSpacing above int24", { ...poolKey, tickSpacing: 2 ** 23 }],
     ["a tickSpacing below int24", { ...poolKey, tickSpacing: -(2 ** 23) - 1 }],
     ["a fractional tickSpacing", { ...poolKey, tickSpacing: 1.5 }],
-    ["a malformed hooks address", { ...poolKey, hooks: "0xdead" as Address }],
-  ])("rejects %s with InvalidSwapRouteError", (_name, key) => {
+    ["a malformed hooks address", { ...poolKey, hooks: "0xdead" }],
+  ] satisfies [string, PoolKey][])("rejects %s with InvalidSwapRouteError", (_name, key) => {
     expect(() => v4Route(key)).toThrow(InvalidSwapRouteError);
   });
 
@@ -125,7 +125,7 @@ describe("routeEndpoints on hand-built routes", () => {
     ["42 bytes", slice(valid, 0, 42)],
     ["44 bytes", concat([valid, "0x00"])],
     ["43 + 22 bytes", concat([valid, slice(valid, 0, 22)])],
-    ["not hex", "0xzz" as Hex],
+    ["not hex", "0xzz"],
   ] as const)("V3 path %s -> InvalidSwapRouteError", (_name, v3Path) => {
     expect(() => routeEndpoints(v3(v3Path))).toThrow(InvalidSwapRouteError);
   });

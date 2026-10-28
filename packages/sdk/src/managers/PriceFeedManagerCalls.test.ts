@@ -21,14 +21,18 @@ function decode(calldata: Hex) {
   return decodeFunctionData({ abi: priceFeedManagerAbi, data: calldata });
 }
 
+// Arrows keep the static builders bound to their class (unbound-method).
+type FeedParams = Parameters<typeof PriceFeedManagerCalls.registerPriceFeedCallParameters>[0];
+type AssetParams = Parameters<typeof PriceFeedManagerCalls.executePriceFeedUpdateCallParameters>[0];
+
 const feedCalls = [
-  ["registerPriceFeedCallParameters", PriceFeedManagerCalls.registerPriceFeedCallParameters, "registerPriceFeed"],
-  ["proposePriceFeedUpdateCallParameters", PriceFeedManagerCalls.proposePriceFeedUpdateCallParameters, "proposePriceFeedUpdate"],
+  ["registerPriceFeedCallParameters", (p: FeedParams) => PriceFeedManagerCalls.registerPriceFeedCallParameters(p), "registerPriceFeed"],
+  ["proposePriceFeedUpdateCallParameters", (p: FeedParams) => PriceFeedManagerCalls.proposePriceFeedUpdateCallParameters(p), "proposePriceFeedUpdate"],
 ] as const;
 
 const assetCalls = [
-  ["executePriceFeedUpdateCallParameters", PriceFeedManagerCalls.executePriceFeedUpdateCallParameters, "executePriceFeedUpdate"],
-  ["cancelPriceFeedUpdateCallParameters", PriceFeedManagerCalls.cancelPriceFeedUpdateCallParameters, "cancelPriceFeedUpdate"],
+  ["executePriceFeedUpdateCallParameters", (p: AssetParams) => PriceFeedManagerCalls.executePriceFeedUpdateCallParameters(p), "executePriceFeedUpdate"],
+  ["cancelPriceFeedUpdateCallParameters", (p: AssetParams) => PriceFeedManagerCalls.cancelPriceFeedUpdateCallParameters(p), "cancelPriceFeedUpdate"],
 ] as const;
 
 describe("register / propose", () => {

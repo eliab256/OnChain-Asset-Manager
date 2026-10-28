@@ -11,10 +11,10 @@
   "indexFactory": "0xf268088a5b9f52445eb0C7C19ad78a0793Ca8943",
   "indexManager": "0x5618e2A22a11C30D7024364c9D13fA5fb2CE1D70",
   "indexes": {
-    "0xBfD11c3C4B3C6870b4D54053a1B4bE5710e732A6": {
+    "0x0fBbd852C3687b2ad9a56b84fb849f34189d88e9": {
       "asset0": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
       "asset1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      "block": 26178002,
+      "block": 26178003,
       "feePercentage": 10000,
       "weight0": 500000,
       "weight1": 500000
