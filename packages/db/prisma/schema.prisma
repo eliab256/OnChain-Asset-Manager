@@ -1,0 +1,745 @@
+// Database of the off-chain services (indexer, API, keeper). See packages/db/db.md.
+//
+// Conventions:
+// - addresses lowercase, VarChar(42); hashes and bytes32 Char(66); bytes as 0x-prefixed hex (Text);
+// - uint256 / int256 as Decimal(78, 0) (raw on-chain units, no scaling), weights / fee / maxDelay as Int;
+// - every row derived from a log carries chainId, blockNumber, txHash, logIndex, timestamp and is
+//   unique on (chainId, txHash, logIndex): the indexer upserts on that key, so replaying a block is a no-op;
+// - natural keys are composite with chainId (anvil 31337 and the mainnet fork 31338 share one DB).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+/// Same order as `enum IndexAction` in src/types.sol (the on-chain uint8 is the position).
+enum IndexAction {
+  INITIALIZE
+  REBALANCE
+  PROPOSE_WEIGHTS
+  EXECUTE_WEIGHTS
+  CANCEL_WEIGHTS
+  COLLECT_FEES
+}
+
+enum ContractKind {
+  INDEX_MANAGER
+  INDEX
+  PRICE_FEED_MANAGER
+  SWAP_MANAGER
+  ROUTER
+  MULTISIG_WALLET
+  TIMELOCK
+  PRICE_FEED_AGGREGATOR
+}
+
+enum TradeKind {
+  SEED
+  MINT
+  REDEEM
+}
+
+enum ProposalStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+}
+
+enum RebalanceOrigin {
+  DIRECT
+  WEIGHTS_UPDATE
+}
+
+enum RebalanceOutcome {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum NavTrigger {
+  EVENT
+  PRICE
+}
+
+enum TimelockOpStatus {
+  SCHEDULED
+  EXECUTED
+  CANCELLED
+}
+
+enum SignatureStatus {
+  VALID
+  USED
+  INVALIDATED
+  ARCHIVED
+}
+
+enum NotificationType {
+  TRADE_CONFIRMED
+  REBALANCE_EXECUTED
+  REBALANCE_FAILED
+  WEIGHTS_PROPOSED
+  WEIGHTS_UPDATED
+  WEIGHTS_CANCELLED
+  PRICE_FEED_STALE
+  MULTISIG_TO_SIGN
+  MULTISIG_READY
+}
+
+enum KeeperJob {
+  REBALANCE
+  EXECUTE_WEIGHTS
+  COLLECT_FEES
+}
+
+enum KeeperAttemptStatus {
+  PENDING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+// ─── Indexer infrastructure ──────────────────────────────────────────────────
+
+/// Every block the indexer processed, to detect reorgs (parentHash of the next block must match hash).
+model Block {
+  chainId    Int
+  number     BigInt
+  hash       String   @db.Char(66)
+  parentHash String   @db.Char(66)
+  timestamp  DateTime
+
+  @@id([chainId, number])
+  @@unique([chainId, hash])
+}
+
+/// Last block fully processed, one row per chain.
+model Checkpoint {
+  chainId         Int      @id
+  lastBlockNumber BigInt
+  lastBlockHash   String   @db.Char(66)
+  updatedAt       DateTime @updatedAt
+}
+
+/// Faithful log of every decoded event the indexer stored. Domain tables are derived from these rows.
+model RawEvent {
+  id          BigInt   @id @default(autoincrement())
+  chainId     Int
+  blockNumber BigInt
+  blockHash   String   @db.Char(66)
+  txHash      String   @db.Char(66)
+  logIndex    Int
+  timestamp   DateTime
+  /// Emitting contract.
+  address     String   @db.VarChar(42)
+  eventName   String
+  /// Decoded arguments by name; bigint values as decimal strings.
+  args        Json
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, address, eventName])
+  @@index([chainId, eventName, blockNumber])
+  @@index([chainId, blockNumber])
+}
+
+/// Contracts the indexer listens to: fixed ones from deployments/<chainId>.json, indexes from IndexCreated,
+/// price feed aggregators resolved from the feed proxy.
+model Contract {
+  chainId       Int
+  address       String       @db.VarChar(42)
+  kind          ContractKind
+  /// First block to scan for this contract.
+  startBlock    BigInt
+  /// For PRICE_FEED_AGGREGATOR: the feed proxy it sits behind.
+  parentAddress String?      @db.VarChar(42)
+  /// False once an aggregator has been replaced behind its proxy.
+  active        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+
+  @@id([chainId, address])
+  @@index([chainId, kind, active])
+}
+
+/// Errors of the indexer loop, for getIndexerStatus.
+model IndexerError {
+  id          BigInt   @id @default(autoincrement())
+  chainId     Int
+  blockNumber BigInt?
+  context     String?
+  message     String
+  createdAt   DateTime @default(now())
+
+  @@index([chainId, createdAt])
+}
+
+// ─── Tokens and indexes ──────────────────────────────────────────────────────
+
+/// ERC20 metadata, read once through RPC the first time an asset appears.
+model Token {
+  chainId  Int
+  address  String @db.VarChar(42)
+  symbol   String
+  name     String
+  decimals Int
+
+  @@id([chainId, address])
+}
+
+/// Current state of a registered index (from IndexCreated onward). Rebuilt from the event tables after a reorg.
+model Index {
+  chainId          Int
+  address          String    @db.VarChar(42)
+  asset0           String    @db.VarChar(42)
+  asset1           String    @db.VarChar(42)
+  /// Basis points of 1_000_000 (10_000 = 1%).
+  feePercentage    Int
+  assetManager     String    @db.VarChar(42)
+  /// Weights in units of 1_000_000 = 100%.
+  initialWeight0   Int
+  initialWeight1   Int
+  weight0          Int
+  weight1          Int
+  /// Reserves in the asset token decimals.
+  reserve0         Decimal   @default(0) @db.Decimal(78, 0)
+  reserve1         Decimal   @default(0) @db.Decimal(78, 0)
+  /// Shares, 18 decimals.
+  totalSupply      Decimal   @default(0) @db.Decimal(78, 0)
+  /// Fees accrued since the last FeesCollected, USDC 6 decimals.
+  accruedFees      Decimal   @default(0) @db.Decimal(78, 0)
+  holderCount      Int       @default(0)
+  createdBlock     BigInt
+  createdTxHash    String    @db.Char(66)
+  createdAt        DateTime
+  initialized      Boolean   @default(false)
+  initializer      String?   @db.VarChar(42)
+  initializedBlock BigInt?
+  initializedAt    DateTime?
+  updatedBlock     BigInt
+
+  trades          Trade[]
+  transfers       ShareTransfer[]
+  positions       Position[]
+  allowances      Allowance[]
+  rebalances      Rebalance[]
+  weightProposals WeightProposal[]
+  feeCollections  FeeCollection[]
+  actions         IndexActionLog[]
+  navSnapshots    NavSnapshot[]
+
+  @@id([chainId, address])
+  @@index([chainId, asset0])
+  @@index([chainId, asset1])
+}
+
+/// Seed (IndexInitialized), mint (SharesMinted) and redeem (SharesBurned).
+model Trade {
+  id             BigInt    @id @default(autoincrement())
+  chainId        Int
+  indexAddress   String    @db.VarChar(42)
+  kind           TradeKind
+  /// depositor for SEED, user for MINT / REDEEM.
+  user           String    @db.VarChar(42)
+  /// Shares minted or burned, 18 decimals.
+  shares         Decimal   @db.Decimal(78, 0)
+  asset0Amount   Decimal   @db.Decimal(78, 0)
+  asset1Amount   Decimal   @db.Decimal(78, 0)
+  /// usdcAmountIn (gross) for MINT, usdcAmountOut (net) for REDEEM, null for SEED. USDC 6 decimals.
+  usdcAmount     Decimal?  @db.Decimal(78, 0)
+  /// USDC 6 decimals, null for SEED.
+  feeAmount      Decimal?  @db.Decimal(78, 0)
+  /// Only for SEED, USD 18 decimals.
+  asset0UsdValue Decimal?  @db.Decimal(78, 0)
+  asset1UsdValue Decimal?  @db.Decimal(78, 0)
+  blockNumber    BigInt
+  txHash         String    @db.Char(66)
+  logIndex       Int
+  timestamp      DateTime
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, indexAddress, timestamp])
+  @@index([chainId, user, timestamp])
+}
+
+/// Every Transfer of shares, mint (from = 0) and burn (to = 0) included. Single source of the balances.
+model ShareTransfer {
+  id           BigInt   @id @default(autoincrement())
+  chainId      Int
+  indexAddress String   @db.VarChar(42)
+  from         String   @db.VarChar(42)
+  to           String   @db.VarChar(42)
+  /// Shares, 18 decimals.
+  value        Decimal  @db.Decimal(78, 0)
+  blockNumber  BigInt
+  txHash       String   @db.Char(66)
+  logIndex     Int
+  timestamp    DateTime
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, indexAddress, blockNumber])
+  @@index([chainId, from])
+  @@index([chainId, to])
+}
+
+/// Position of a user in an index. balance comes only from ShareTransfer; USDC totals from Trade.
+model Position {
+  chainId          Int
+  indexAddress     String  @db.VarChar(42)
+  user             String  @db.VarChar(42)
+  /// Shares, 18 decimals.
+  balance          Decimal @default(0) @db.Decimal(78, 0)
+  sharesMinted     Decimal @default(0) @db.Decimal(78, 0)
+  sharesBurned     Decimal @default(0) @db.Decimal(78, 0)
+  /// USDC 6 decimals.
+  usdcIn           Decimal @default(0) @db.Decimal(78, 0)
+  usdcOut          Decimal @default(0) @db.Decimal(78, 0)
+  feesPaid         Decimal @default(0) @db.Decimal(78, 0)
+  /// USD 18 decimals, only from the seed.
+  seedUsdValue     Decimal @default(0) @db.Decimal(78, 0)
+  /// True if the user ever received shares by transfer: those shares count at zero cost.
+  hasTransferredIn Boolean @default(false)
+  updatedBlock     BigInt
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@id([chainId, indexAddress, user])
+  @@index([chainId, user])
+}
+
+/// Last allowance per (owner, spender) from Approval (approve and permit).
+/// transferFrom lowers it without an Approval in OZ v5: the indexer subtracts it from the Transfer.
+model Allowance {
+  chainId      Int
+  indexAddress String  @db.VarChar(42)
+  owner        String  @db.VarChar(42)
+  spender      String  @db.VarChar(42)
+  /// Shares, 18 decimals.
+  value        Decimal @db.Decimal(78, 0)
+  updatedBlock BigInt
+  updatedTx    String  @db.Char(66)
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@id([chainId, indexAddress, owner, spender])
+  @@index([chainId, owner])
+}
+
+/// Rebalances, attempted and done: IndexRebalanced, WeightsUpdateRebalanceFailed / Skipped,
+/// IndexActionFailed with action REBALANCE. The coordinates are those of that log.
+model Rebalance {
+  id                  BigInt           @id @default(autoincrement())
+  chainId             Int
+  indexAddress        String           @db.VarChar(42)
+  origin              RebalanceOrigin
+  outcome             RebalanceOutcome
+  /// From IndexActionTriggered / IndexActionFailed of the same tx, null if the index was called otherwise.
+  caller              String?          @db.VarChar(42)
+  /// Asset token decimals, only for SUCCESS.
+  asset0ReserveBefore Decimal?         @db.Decimal(78, 0)
+  asset1ReserveBefore Decimal?         @db.Decimal(78, 0)
+  asset0ReserveAfter  Decimal?         @db.Decimal(78, 0)
+  asset1ReserveAfter  Decimal?         @db.Decimal(78, 0)
+  /// Raw revert data, only for FAILED.
+  reasonData          String?          @db.Text
+  blockNumber         BigInt
+  txHash              String           @db.Char(66)
+  logIndex            Int
+  timestamp           DateTime
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, indexAddress, timestamp])
+  @@index([chainId, outcome])
+}
+
+/// Weight proposals: WeightsUpdateProposed opens, WeightsUpdated or WeightsUpdateCancelled closes.
+model WeightProposal {
+  id           BigInt         @id @default(autoincrement())
+  chainId      Int
+  indexAddress String         @db.VarChar(42)
+  oldWeight0   Int
+  oldWeight1   Int
+  newWeight0   Int
+  newWeight1   Int
+  executableAt DateTime
+  /// executableAt + WEIGHT_UPDATE_EXECUTION_WINDOW (3 days, constant not in the event).
+  expiresAt    DateTime
+  status       ProposalStatus @default(PENDING)
+  /// From IndexActionTriggered(PROPOSE_WEIGHTS) of the same tx.
+  proposer     String?        @db.VarChar(42)
+  blockNumber  BigInt
+  txHash       String         @db.Char(66)
+  logIndex     Int
+  timestamp    DateTime
+  closedBy     String?        @db.VarChar(42)
+  closedBlock  BigInt?
+  closedTxHash String?        @db.Char(66)
+  closedAt     DateTime?
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, indexAddress, status])
+  @@index([chainId, status, executableAt])
+}
+
+/// FeesCollected.
+model FeeCollection {
+  id           BigInt   @id @default(autoincrement())
+  chainId      Int
+  indexAddress String   @db.VarChar(42)
+  feeCollector String   @db.VarChar(42)
+  /// USDC 6 decimals.
+  amount       Decimal  @db.Decimal(78, 0)
+  /// From IndexActionTriggered(COLLECT_FEES) of the same tx.
+  caller       String?  @db.VarChar(42)
+  blockNumber  BigInt
+  txHash       String   @db.Char(66)
+  logIndex     Int
+  timestamp    DateTime
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, indexAddress, timestamp])
+}
+
+/// IndexActionTriggered (success = true) and IndexActionFailed (success = false) of the IndexManager.
+model IndexActionLog {
+  id           BigInt      @id @default(autoincrement())
+  chainId      Int
+  indexAddress String      @db.VarChar(42)
+  caller       String      @db.VarChar(42)
+  action       IndexAction
+  success      Boolean
+  reasonData   String?     @db.Text
+  blockNumber  BigInt
+  txHash       String      @db.Char(66)
+  logIndex     Int
+  timestamp    DateTime
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, indexAddress, action, timestamp])
+  @@index([chainId, caller])
+  @@index([chainId, success, action])
+}
+
+/// NAV of an index at the end of a block, written when reserves, supply or a price change. One row per block.
+model NavSnapshot {
+  id            BigInt     @id @default(autoincrement())
+  chainId       Int
+  indexAddress  String     @db.VarChar(42)
+  blockNumber   BigInt
+  timestamp     DateTime
+  trigger       NavTrigger
+  reserve0      Decimal    @db.Decimal(78, 0)
+  reserve1      Decimal    @db.Decimal(78, 0)
+  totalSupply   Decimal    @db.Decimal(78, 0)
+  /// Prices normalised to USD 18 decimals.
+  price0Usd     Decimal    @db.Decimal(78, 0)
+  price1Usd     Decimal    @db.Decimal(78, 0)
+  /// USD 18 decimals.
+  navUsd        Decimal    @db.Decimal(78, 0)
+  sharePriceUsd Decimal    @db.Decimal(78, 0)
+
+  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, indexAddress, blockNumber])
+  @@index([chainId, indexAddress, timestamp])
+}
+
+// ─── Price feeds ─────────────────────────────────────────────────────────────
+
+/// Current feed per asset (PriceFeedRegistered, PriceFeedUpdated) plus the last answer seen.
+model PriceFeed {
+  chainId         Int
+  asset           String    @db.VarChar(42)
+  /// Chainlink proxy registered in the PriceFeedManager.
+  feed            String    @db.VarChar(42)
+  /// Aggregator behind the proxy, the one that emits AnswerUpdated.
+  aggregator      String?   @db.VarChar(42)
+  /// Seconds.
+  maxDelay        Int
+  decimals        Int?
+  lastRoundId     Decimal?  @db.Decimal(78, 0)
+  lastAnswer      Decimal?  @db.Decimal(78, 0)
+  lastUpdatedAt   DateTime?
+  registeredBlock BigInt
+  updatedBlock    BigInt
+
+  @@id([chainId, asset])
+  @@index([chainId, feed])
+}
+
+/// PriceFeedUpdateProposed, closed by PriceFeedUpdated or PriceFeedUpdateCancelled.
+model PriceFeedProposal {
+  id           BigInt         @id @default(autoincrement())
+  chainId      Int
+  asset        String         @db.VarChar(42)
+  feed         String         @db.VarChar(42)
+  maxDelay     Int
+  executableAt DateTime
+  /// executableAt + PRICE_FEED_UPDATE_EXECUTION_WINDOW (3 days).
+  expiresAt    DateTime
+  status       ProposalStatus @default(PENDING)
+  blockNumber  BigInt
+  txHash       String         @db.Char(66)
+  logIndex     Int
+  timestamp    DateTime
+  closedBlock  BigInt?
+  closedTxHash String?        @db.Char(66)
+  closedAt     DateTime?
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, asset, status])
+}
+
+/// AnswerUpdated of the aggregators: price history for NAV and stale-feed checks.
+model PricePoint {
+  id          BigInt   @id @default(autoincrement())
+  chainId     Int
+  /// Feed proxy (the address the protocol knows).
+  feed        String   @db.VarChar(42)
+  aggregator  String   @db.VarChar(42)
+  roundId     Decimal  @db.Decimal(78, 0)
+  /// int256, feed decimals.
+  answer      Decimal  @db.Decimal(78, 0)
+  updatedAt   DateTime
+  blockNumber BigInt
+  txHash      String   @db.Char(66)
+  logIndex    Int
+  timestamp   DateTime
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, feed, updatedAt])
+}
+
+// ─── Governance ──────────────────────────────────────────────────────────────
+
+/// Current members of each role of the IndexManager and of the TimelockController.
+model RoleMember {
+  chainId       Int
+  contract      String @db.VarChar(42)
+  /// bytes32 role id (0x00…00 = DEFAULT_ADMIN_ROLE); the API maps it to the name.
+  role          String @db.Char(66)
+  account       String @db.VarChar(42)
+  grantedBy     String @db.VarChar(42)
+  grantedBlock  BigInt
+  grantedTxHash String @db.Char(66)
+
+  @@id([chainId, contract, role, account])
+  @@index([chainId, account])
+}
+
+/// MultiSigInitialized: owners and threshold never change.
+model MultisigWallet {
+  chainId               Int
+  address               String   @db.VarChar(42)
+  owners                String[]
+  requiredConfirmations Int
+  createdBlock          BigInt
+
+  transactions  MultisigTransaction[]
+  confirmations MultisigConfirmation[]
+  signatures    MultisigSignature[]
+
+  @@id([chainId, address])
+}
+
+/// TransactionSubmitted, with the counters and the execution state kept up to date.
+model MultisigTransaction {
+  chainId        Int
+  wallet         String    @db.VarChar(42)
+  txId           Decimal   @db.Decimal(78, 0)
+  proposer       String    @db.VarChar(42)
+  target         String    @db.VarChar(42)
+  /// Wei.
+  value          Decimal   @db.Decimal(78, 0)
+  data           String    @db.Text
+  /// Active on-chain confirmations.
+  confirmations  Int       @default(0)
+  executed       Boolean   @default(false)
+  executor       String?   @db.VarChar(42)
+  executedBlock  BigInt?
+  executedTxHash String?   @db.Char(66)
+  executedAt     DateTime?
+  blockNumber    BigInt
+  txHash         String    @db.Char(66)
+  logIndex       Int
+  timestamp      DateTime
+
+  multisig MultisigWallet @relation(fields: [chainId, wallet], references: [chainId, address], onDelete: Cascade)
+
+  @@id([chainId, wallet, txId])
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, wallet, executed])
+}
+
+/// On-chain confirmation of an owner (TransactionConfirmed), deactivated by ConfirmationRevoked.
+model MultisigConfirmation {
+  chainId         Int
+  wallet          String  @db.VarChar(42)
+  txId            Decimal @db.Decimal(78, 0)
+  owner           String  @db.VarChar(42)
+  active          Boolean
+  confirmedBlock  BigInt
+  confirmedTxHash String  @db.Char(66)
+  revokedBlock    BigInt?
+  revokedTxHash   String? @db.Char(66)
+
+  multisig MultisigWallet @relation(fields: [chainId, wallet], references: [chainId, address], onDelete: Cascade)
+
+  @@id([chainId, wallet, txId, owner])
+}
+
+/// Off-chain EIP-712 confirmations collected by the API (submitMultisigSignature). Not chain data:
+/// a reorg changes their status, it does not delete them. One signature per (txId, signer), a new one replaces it.
+model MultisigSignature {
+  id          BigInt          @id @default(autoincrement())
+  chainId     Int
+  wallet      String          @db.VarChar(42)
+  txId        Decimal         @db.Decimal(78, 0)
+  signer      String          @db.VarChar(42)
+  signature   String          @db.Text
+  /// getConfirmNonce(txId, signer) the signature was made with.
+  nonce       Decimal         @db.Decimal(78, 0)
+  digest      String          @db.Char(66)
+  status      SignatureStatus @default(VALID)
+  /// Tx of confirmTransactionWithSig that used it.
+  usedTxHash  String?         @db.Char(66)
+  submittedAt DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  multisig MultisigWallet @relation(fields: [chainId, wallet], references: [chainId, address], onDelete: Cascade)
+
+  @@unique([chainId, wallet, txId, signer])
+  @@index([chainId, wallet, status])
+}
+
+/// Current minimum delay of the TimelockController (MinDelayChange).
+model TimelockConfig {
+  chainId      Int
+  address      String @db.VarChar(42)
+  /// Seconds.
+  minDelay     BigInt
+  updatedBlock BigInt
+
+  @@id([chainId, address])
+}
+
+/// TimelockController operation (one CallScheduled per call of the batch, same id).
+/// An id cancelled and scheduled again reuses the row; the full history stays in RawEvent.
+model TimelockOperation {
+  chainId         Int
+  timelock        String           @db.VarChar(42)
+  operationId     String           @db.Char(66)
+  predecessor     String           @db.Char(66)
+  /// From CallSalt, null when the salt is zero.
+  salt            String?          @db.Char(66)
+  /// Seconds.
+  delay           BigInt
+  /// Block timestamp of the scheduling + delay.
+  readyAt         DateTime
+  status          TimelockOpStatus @default(SCHEDULED)
+  scheduledBlock  BigInt
+  scheduledTxHash String           @db.Char(66)
+  scheduledAt     DateTime
+  closedBlock     BigInt?
+  closedTxHash    String?          @db.Char(66)
+  closedAt        DateTime?
+
+  calls TimelockCall[]
+
+  @@id([chainId, timelock, operationId])
+  @@index([chainId, status])
+}
+
+model TimelockCall {
+  chainId     Int
+  timelock    String  @db.VarChar(42)
+  operationId String  @db.Char(66)
+  /// Position in the batch (indexed `index` of CallScheduled).
+  callIndex   Int
+  target      String  @db.VarChar(42)
+  /// Wei.
+  value       Decimal @db.Decimal(78, 0)
+  data        String  @db.Text
+  executed    Boolean @default(false)
+
+  operation TimelockOperation @relation(fields: [chainId, timelock, operationId], references: [chainId, timelock, operationId], onDelete: Cascade)
+
+  @@id([chainId, timelock, operationId, callIndex])
+}
+
+/// Upgraded of the three proxies (SwapManager, PriceFeedManager, Router), creation included.
+model ProxyUpgrade {
+  id                  BigInt   @id @default(autoincrement())
+  chainId             Int
+  proxy               String   @db.VarChar(42)
+  implementation      String   @db.VarChar(42)
+  /// CallExecuted of the timelock in the same tx, null for the proxy creation.
+  timelockOperationId String?  @db.Char(66)
+  blockNumber         BigInt
+  txHash              String   @db.Char(66)
+  logIndex            Int
+  timestamp           DateTime
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, proxy, blockNumber])
+}
+
+// ─── Notifications and keeper ────────────────────────────────────────────────
+
+/// In-app notifications, written by the indexer in the same DB transaction as the event that causes them.
+model Notification {
+  id           BigInt           @id @default(autoincrement())
+  chainId      Int
+  recipient    String           @db.VarChar(42)
+  type         NotificationType
+  indexAddress String?          @db.VarChar(42)
+  payload      Json
+  /// Idempotency key: "<txHash>:<logIndex>" for event notifications, "stale:<feed>:<lastUpdatedAt>" for stale feeds.
+  dedupKey     String
+  read         Boolean          @default(false)
+  readAt       DateTime?
+  /// Source log, null for notifications without an event (stale feed).
+  blockNumber  BigInt?
+  txHash       String?          @db.Char(66)
+  createdAt    DateTime         @default(now())
+
+  @@unique([chainId, recipient, type, dedupKey])
+  @@index([chainId, recipient, read, createdAt])
+  @@index([chainId, blockNumber])
+}
+
+/// Every keeper attempt, failed ones included, with the decoded revert.
+model KeeperAttempt {
+  id           BigInt              @id @default(autoincrement())
+  chainId      Int
+  job          KeeperJob
+  /// Null for batch calls.
+  indexAddress String?             @db.VarChar(42)
+  status       KeeperAttemptStatus @default(PENDING)
+  txHash       String?             @db.Char(66)
+  nonce        Int?
+  gasLimit     Decimal?            @db.Decimal(78, 0)
+  reasonData   String?             @db.Text
+  decodedError String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([chainId, job, createdAt])
+  @@index([chainId, status])
+}

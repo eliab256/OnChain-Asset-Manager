@@ -2,12 +2,11 @@
   "name": "@oam/indexer",
   "version": "0.1.0",
   "private": true,
-  "description": "Off-chain indexer: reads the protocol events and stores them in the DB (roadmap phases 3-4). Prisma schema to be redesigned in phase 4.",
+  "description": "Off-chain indexer: reads the protocol events and stores them in the DB of @oam/db (roadmap phases 3-4).",
   "type": "module",
   "dependencies": {
-    "@prisma/client": "^7.8.0",
-    "dotenv": "^17.4.2",
-    "prisma": "^7.8.0"
+    "@oam/db": "*",
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

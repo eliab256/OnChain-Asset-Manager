@@ -14,7 +14,7 @@ export default tseslint.config(
       "broadcast/",
       "coverage/",
       "packages/abi/src/generated.ts",
-      "apps/indexer/src/generated/",
+      "packages/db/src/generated/",
     ],
   },
   js.configs.recommended,
@@ -25,7 +25,7 @@ export default tseslint.config(
         projectService: {
           // Config files outside every tsconfig "include"
           defaultProject: "tsconfig.base.json",
-          allowDefaultProject: ["packages/*/vitest.config.ts", "apps/*/prisma.config.ts"],
+          allowDefaultProject: ["packages/*/vitest.config.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
       },

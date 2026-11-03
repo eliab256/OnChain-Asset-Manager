@@ -9,9 +9,10 @@ Index fund on-chain a due asset, denominato in USDC. Foundry, solc 0.8.26, `evm_
 Cartelle:
 - `src/`: contratti. `script/`: deploy (`DeployPeriphery.s.sol`, `DeployAndInitNewIndex.s.sol`, `FundAccounts.s.sol`, `RefreshMockFeeds.s.sol`, `HelperConfig.s.sol`, `HelperConfigFromDeployment.s.sol`, `DeploymentFile.sol`, `CodeConstants.sol`). `deployments/<chainId>.json`: indirizzi scritti dagli script (solo sotto `--broadcast`), si committano. `test/`: unit (`test/unit/`) e fork su mainnet (`test/integration/`).
 - `bin/`: script shell di sviluppo (`dev.sh`, `snapshot.sh`, `anvil-common.sh`). `docker-compose.yml`: Postgres locale (porta host 5434). `.anvil/`: snapshot e log di anvil, non si committa. TypeScript: `tsconfig.base.json` nella root (i pacchetti lo estendono), ESLint in `eslint.config.mjs`.
-- `apps/indexer/` (`@oam/indexer`, Node + Prisma, ESM): indexer off-chain, oggi solo schema Prisma e configurazione (il codice si riscrive con viem nelle Fasi 3-4). `packages/` e `apps/`: workspace npm, `abi` (`@oam/abi`, ABI generate e indirizzi dei deploy) e `sdk` (`@oam/sdk`).
+- `apps/indexer/` (`@oam/indexer`, Node, ESM): indexer off-chain, oggi solo configurazione (il codice si riscrive con viem nelle Fasi 3-4). `packages/` e `apps/`: workspace npm, `abi` (`@oam/abi`, ABI generate e indirizzi dei deploy), `sdk` (`@oam/sdk`) e `db` (`@oam/db`).
+- **DB**: `packages/db` (`@oam/db`, Prisma 7 + `@prisma/adapter-pg`): schema, migrazioni e `createPrismaClient`, condivisi da indexer, API e keeper. Convenzioni, mappa evento → tabella e regole di reorg in `packages/db/db.md`; il perché delle scelte in `localHelpers/prisma-explain.md`. Il client generato (`src/generated/`) non si committa.
 - **SDK**: tutto ciò che riguarda `packages/sdk` (struttura, regole, errori, test, deviazioni dalla skill `web3-sdk-structure`) è in `packages/sdk/sdk.md`. Leggerlo prima di modificare l'SDK e aggiornarlo nello stesso commit. In breve: l'SDK non fa I/O, restituisce calldata, descrittori di lettura, typed data e parser; front-end e keeper eseguono. Dal 2026-10-28 copre anche il MultiSig (`MultiSigCalls`, conferme EIP-712 con `buildConfirmTypedData`, `decodeProposal`) e le azioni admin che passano da lì (`createIndex`, `initializeIndex`, ruoli, `PriceFeedManagerCalls`); restano fuori Timelock e upgrade.
-- Documenti: `README.md` (architettura e uso), `invariant.md` (invarianti per contratto). In `localHelpers/`: `roadmap.md` (piano di lavoro off-chain: monorepo, SDK, indexer, API, keeper, notifiche, front-end), `codeReview.md` (security review corrente), `eventCheck.md` (audit degli eventi per l'indexer), `apis.md` (elenco delle API del backend), `eventResume.md` (eventi per contratto e mappa API → eventi), `architettura-progetto-defi.md` (ruoli di indexer, SDK, API e backend, con esempi del progetto), `sdkModify.md` (analisi del vecchio SDK, superata dalla riorganizzazione del 2026-10-27), `TODO.md`.
+- Documenti: `README.md` (architettura e uso), `invariant.md` (invarianti per contratto). In `localHelpers/`: `roadmap.md` (piano di lavoro off-chain: monorepo, SDK, indexer, API, keeper, notifiche, front-end), `codeReview.md` (security review corrente), `eventCheck.md` (audit degli eventi per l'indexer), `apis.md` (elenco delle API del backend), `eventResume.md` (eventi per contratto e mappa API → eventi), `architettura-progetto-defi.md` (ruoli di indexer, SDK, API e backend, con esempi del progetto), `prisma-explain.md` (motivazioni dello schema del DB), `sdkModify.md` (analisi del vecchio SDK, superata dalla riorganizzazione del 2026-10-27), `TODO.md`.
 
 ## Architettura
 
@@ -47,6 +48,8 @@ make fund                  # WETH/WBTC/USDC agli account 0-9 di anvil (anvil o f
 make snapshot              # anvil pulito + deploy + fund, stato in .anvil/31337.json
 make dev                   # Postgres + chain + contratti + account finanziati (DEV_PROFILE=fork per il fork)
 make db / make db-down     # Postgres di docker-compose.yml
+npm run migrate --workspace @oam/db    # applica/crea migrazioni (serve packages/db/.env)
+npm run generate --workspace @oam/db   # rigenera il client Prisma (lo fa anche npm install)
 npm run lint / npm run typecheck   # ESLint e tsc su tutti i workspace
 ```
 
@@ -73,7 +76,7 @@ Attenzione: `forge lint` può lasciare in `out/` artefatti senza bytecode. Il `f
 
 - **ABI congelate dal 2026-10-24** (fine Fase 1): firme, eventi ed errori dei contratti in `packages/abi` non si cambiano senza una decisione esplicita dell'utente. Riferimento (sha256 di `generated.ts`) e procedura con l'elenco dei pacchetti da aggiornare: `localHelpers/roadmap.md`, Fase 1, voce "Congelamento". Una modifica che cambia l'ABI va segnalata all'utente prima di farla.
 - **SwapManager non emette eventi.**
-- **Schema Prisma** (`apps/indexer/prisma/schema.prisma`): non modificarlo né rigenerarlo finché l'utente non lo chiede, anche se gli eventi sono cambiati.
+- **Schema Prisma** (`packages/db/prisma/schema.prisma`): ridisegnato il 2026-11-03 su richiesta dell'utente (registro `RawEvent` + tabelle di dominio, copertura delle Fasi 4-8). Ogni modifica successiva passa da una migrazione nuova (`npm run migrate`), mai da modifiche alle migrazioni esistenti, e va proposta all'utente prima di farla. Aggiornare `packages/db/db.md` nello stesso commit.
 - **EIP-170 / EIP-3860**: risolto il 2026-10-14 con optimizer acceso (100 runs) e `IndexFactory` split-code. Runtime: `Index` 17.735 B (dal 2026-10-28), `SwapManager` 10.012, `IndexManager` 9.584 (dal 2026-10-27), `IndexFactory` 1.737 (limite 24.576). Non rimettere `type(Index).creationCode` nell'IndexManager.
 - **Timelock degli upgrade senza finestra di esecuzione**: le operazioni superate si cancellano a mano.
 - **Fork test fissati** al blocco `MAINNET_FORK_BLOCK` (`test/integration/ForkConstants.sol`, oggi 26.178.000). Serve un RPC archive. Se si cambia blocco, il pool WBTC/WETH deve restare entro l'1% dal prezzo Chainlink, altrimenti i test di rebalance falliscono con `V3TooLittleReceived`.
