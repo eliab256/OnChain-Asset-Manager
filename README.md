@@ -436,6 +436,7 @@ make integrationtest  # integration tests only, fork required
 ├── packages/sdk/                    # @oam/sdk: TypeScript SDK (viem, no I/O)
 ├── packages/db/                     # @oam/db: Prisma schema, migrations and client
 ├── apps/indexer/                    # @oam/indexer: off-chain indexer
+├── apps/web/                        # @oam/web: front-end dApp (Vite + React + wagmi), skeleton only
 ├── deployments/                     # <chainId>.json written by the scripts
 ├── bin/                             # dev.sh (make dev), snapshot.sh (make snapshot), anvil-common.sh
 ├── .githooks/pre-commit             # Fails the commit if the generated ABIs are stale
