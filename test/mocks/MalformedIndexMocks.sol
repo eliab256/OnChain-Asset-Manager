@@ -6,19 +6,19 @@ pragma solidity ^0.8.0;
  *      on every call. Used to prove the SwapManager maps a reverting getter to `NotAnIndex`.
  */
 contract RevertingIndexGettersMock {
-    error RevertingIndexGettersMock__GetterReverted();
+  error RevertingIndexGettersMock__GetterReverted();
 
-    function getAsset0() external pure returns (address) {
-        revert RevertingIndexGettersMock__GetterReverted();
-    }
+  function getAsset0() external pure returns (address) {
+    revert RevertingIndexGettersMock__GetterReverted();
+  }
 
-    function getAsset1() external pure returns (address) {
-        revert RevertingIndexGettersMock__GetterReverted();
-    }
+  function getAsset1() external pure returns (address) {
+    revert RevertingIndexGettersMock__GetterReverted();
+  }
 
-    function getUsdc() external pure returns (address) {
-        revert RevertingIndexGettersMock__GetterReverted();
-    }
+  function getUsdc() external pure returns (address) {
+    revert RevertingIndexGettersMock__GetterReverted();
+  }
 }
 
 /**
@@ -27,25 +27,25 @@ contract RevertingIndexGettersMock {
  *      bits) simulates a getter whose return value is not a valid ABI-encoded address.
  */
 contract RawWordIndexGettersMock {
-    uint256 private immutable i_asset0Word;
-    uint256 private immutable i_asset1Word;
-    uint256 private immutable i_usdcWord;
+  uint256 private immutable i_asset0Word;
+  uint256 private immutable i_asset1Word;
+  uint256 private immutable i_usdcWord;
 
-    constructor(uint256 _asset0Word, uint256 _asset1Word, uint256 _usdcWord) {
-        i_asset0Word = _asset0Word;
-        i_asset1Word = _asset1Word;
-        i_usdcWord = _usdcWord;
-    }
+  constructor(uint256 _asset0Word, uint256 _asset1Word, uint256 _usdcWord) {
+    i_asset0Word = _asset0Word;
+    i_asset1Word = _asset1Word;
+    i_usdcWord = _usdcWord;
+  }
 
-    function getAsset0() external view returns (uint256) {
-        return i_asset0Word;
-    }
+  function getAsset0() external view returns (uint256) {
+    return i_asset0Word;
+  }
 
-    function getAsset1() external view returns (uint256) {
-        return i_asset1Word;
-    }
+  function getAsset1() external view returns (uint256) {
+    return i_asset1Word;
+  }
 
-    function getUsdc() external view returns (uint256) {
-        return i_usdcWord;
-    }
+  function getUsdc() external view returns (uint256) {
+    return i_usdcWord;
+  }
 }

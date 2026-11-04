@@ -14,13 +14,13 @@ import {IndexAction} from "../types.sol";
  * @param assetManager Address that created the index.
  */
 event IndexCreated(
-    address indexed indexAddress,
-    address indexed asset0,
-    address indexed asset1,
-    uint128 asset0Weight,
-    uint128 asset1Weight,
-    uint32 feePercentage,
-    address assetManager
+  address indexed indexAddress,
+  address indexed asset0,
+  address indexed asset1,
+  uint128 asset0Weight,
+  uint128 asset1Weight,
+  uint32 feePercentage,
+  address assetManager
 );
 
 /**
@@ -34,11 +34,7 @@ event IndexCreated(
  * @param caller msg.sender of the IndexManager call (the multisig or the EOA holding the required role).
  * @param action Action triggered on the index.
  */
-event IndexActionTriggered(
-    address indexed indexAddress,
-    address indexed caller,
-    IndexAction indexed action
-);
+event IndexActionTriggered(address indexed indexAddress, address indexed caller, IndexAction indexed action);
 
 /**
  * @notice Emitted when a rebalance, weights update execution or fee collection triggered by the manager reverts.
@@ -54,8 +50,5 @@ event IndexActionTriggered(
  *        possibly empty.
  */
 event IndexActionFailed(
-    address indexed indexAddress,
-    address indexed caller,
-    IndexAction indexed action,
-    bytes reasonData
+  address indexed indexAddress, address indexed caller, IndexAction indexed action, bytes reasonData
 );

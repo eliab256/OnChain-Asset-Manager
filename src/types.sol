@@ -14,8 +14,8 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
  *      registered beforehand in the PriceFeedManager.
  */
 struct IndexAsset {
-    address asset;
-    uint128 weightPercentage;
+  address asset;
+  uint128 weightPercentage;
 }
 
 /**
@@ -25,8 +25,8 @@ struct IndexAsset {
  *                 Set per feed as heartbeat + safety margin.
  */
 struct FeedConfig {
-    address feed;
-    uint32 maxDelay;
+  address feed;
+  uint32 maxDelay;
 }
 
 /**
@@ -36,9 +36,9 @@ struct FeedConfig {
  * @param executableAt Timestamp from which the update can be executed (0 if no pending update).
  */
 struct PendingFeed {
-    address feed;
-    uint32 maxDelay;
-    uint64 executableAt;
+  address feed;
+  uint32 maxDelay;
+  uint64 executableAt;
 }
 
 /**
@@ -57,16 +57,16 @@ struct PendingFeed {
  * @param feePercentage    Fee percentage with 4 decimals (1_000_000 = 100%).
  */
 struct IndexDeployParams {
-    string name;
-    string symbol;
-    address router;
-    address usdc;
-    address priceFeedManager;
-    address swapManager;
-    address universalRouter;
-    IndexAsset asset0;
-    IndexAsset asset1;
-    uint32 feePercentage;
+  string name;
+  string symbol;
+  address router;
+  address usdc;
+  address priceFeedManager;
+  address swapManager;
+  address universalRouter;
+  IndexAsset asset0;
+  IndexAsset asset1;
+  uint32 feePercentage;
 }
 
 /**
@@ -85,14 +85,14 @@ struct IndexDeployParams {
  * @param totalAssetUsdValue    Sum of asset0UsdValue and asset1UsdValue, in 18-decimal standard.
  */
 struct InitStateCache {
-    uint256 priceAsset0;
-    uint256 priceAsset1;
-    uint256 priceUsdc;
-    uint128 initialAsset0Reserve;
-    uint128 initialAsset1Reserve;
-    uint256 asset0UsdValue;
-    uint256 asset1UsdValue;
-    uint256 totalAssetUsdValue;
+  uint256 priceAsset0;
+  uint256 priceAsset1;
+  uint256 priceUsdc;
+  uint128 initialAsset0Reserve;
+  uint128 initialAsset1Reserve;
+  uint256 asset0UsdValue;
+  uint256 asset1UsdValue;
+  uint256 totalAssetUsdValue;
 }
 
 /**
@@ -101,10 +101,10 @@ struct InitStateCache {
  *      each supported token on a given network.
  */
 enum AssetAvailable {
-    WETH,
-    WBTC,
-    LINK,
-    COMP
+  WETH,
+  WBTC,
+  LINK,
+  COMP
 }
 
 /**
@@ -117,12 +117,12 @@ enum AssetAvailable {
  * @param COLLECT_FEES    Collection of the accrued fees.
  */
 enum IndexAction {
-    INITIALIZE,
-    REBALANCE,
-    PROPOSE_WEIGHTS,
-    EXECUTE_WEIGHTS,
-    CANCEL_WEIGHTS,
-    COLLECT_FEES
+  INITIALIZE,
+  REBALANCE,
+  PROPOSE_WEIGHTS,
+  EXECUTE_WEIGHTS,
+  CANCEL_WEIGHTS,
+  COLLECT_FEES
 }
 
 /**
@@ -133,9 +133,9 @@ enum IndexAction {
  * @param ASSET0_ASSET1 Route between asset0 and asset1 (used during rebalancing).
  */
 enum SwapType {
-    ASSET0_USDC,
-    ASSET1_USDC,
-    ASSET0_ASSET1
+  ASSET0_USDC,
+  ASSET1_USDC,
+  ASSET0_ASSET1
 }
 
 /**
@@ -145,8 +145,8 @@ enum SwapType {
  * @param V4 Uniswap V4 — route identified by a PoolKey struct.
  */
 enum PoolVersion {
-    V3,
-    V4
+  V3,
+  V4
 }
 
 /**
@@ -161,9 +161,9 @@ enum PoolVersion {
  *                 Populated only when version == V3; ignored for V4 routes.
  */
 struct SwapRoute {
-    PoolVersion version;
-    PoolKey poolKey;
-    bytes v3Path;
+  PoolVersion version;
+  PoolKey poolKey;
+  bytes v3Path;
 }
 
 /**
@@ -176,9 +176,9 @@ struct SwapRoute {
  *                      Must reach `i_requiredConfirmations` before the transaction can be executed.
  */
 struct Transaction {
-    address target;
-    uint256 value;
-    bytes data;
-    bool executed;
-    uint256 confirmations;
+  address target;
+  uint256 value;
+  bytes data;
+  bool executed;
+  uint256 confirmations;
 }

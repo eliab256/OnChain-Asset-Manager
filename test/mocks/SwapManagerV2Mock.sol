@@ -10,39 +10,31 @@ import {SwapManager} from "../../src/SwapManager.sol";
  *        upgrade calldata to prove the `data` of a timelocked upgrade is executed on the proxy.
  */
 contract SwapManagerV2Mock is SwapManager {
-    /// @custom:storage-location erc7201:onchainassetmanager.storage.SwapManagerV2Mock
-    struct SwapManagerV2MockStorage {
-        uint256 marker;
-    }
+  /// @custom:storage-location erc7201:onchainassetmanager.storage.SwapManagerV2Mock
+  struct SwapManagerV2MockStorage {
+    uint256 marker;
+  }
 
-    bytes32 private constant V2_MOCK_STORAGE_LOCATION =
-        keccak256(
-            abi.encode(
-                uint256(keccak256("onchainassetmanager.storage.SwapManagerV2Mock")) -
-                    1
-            )
-        ) & ~bytes32(uint256(0xff));
+  bytes32 private constant V2_MOCK_STORAGE_LOCATION = keccak256(
+    abi.encode(uint256(keccak256("onchainassetmanager.storage.SwapManagerV2Mock")) - 1)
+  ) & ~bytes32(uint256(0xff));
 
-    function initializeV2(uint256 _marker) external reinitializer(2) {
-        _getV2MockStorage().marker = _marker;
-    }
+  function initializeV2(uint256 _marker) external reinitializer(2) {
+    _getV2MockStorage().marker = _marker;
+  }
 
-    function version() external pure returns (uint256) {
-        return 2;
-    }
+  function version() external pure returns (uint256) {
+    return 2;
+  }
 
-    function getV2Marker() external view returns (uint256) {
-        return _getV2MockStorage().marker;
-    }
+  function getV2Marker() external view returns (uint256) {
+    return _getV2MockStorage().marker;
+  }
 
-    function _getV2MockStorage()
-        private
-        pure
-        returns (SwapManagerV2MockStorage storage $)
-    {
-        bytes32 location = V2_MOCK_STORAGE_LOCATION;
-        assembly {
-            $.slot := location
-        }
+  function _getV2MockStorage() private pure returns (SwapManagerV2MockStorage storage $) {
+    bytes32 location = V2_MOCK_STORAGE_LOCATION;
+    assembly {
+      $.slot := location
     }
+  }
 }

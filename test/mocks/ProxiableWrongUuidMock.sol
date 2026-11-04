@@ -6,9 +6,9 @@ pragma solidity ^0.8.0;
  *      reproducing a non-compatible UUPS implementation.
  */
 contract ProxiableWrongUuidMock {
-    bytes32 public constant WRONG_UUID = bytes32(uint256(1));
+  bytes32 public constant WRONG_UUID = bytes32(uint256(1));
 
-    function proxiableUUID() external pure returns (bytes32) {
-        return WRONG_UUID;
-    }
+  function proxiableUUID() external pure returns (bytes32) {
+    return WRONG_UUID;
+  }
 }

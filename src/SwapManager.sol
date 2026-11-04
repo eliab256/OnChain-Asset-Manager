@@ -2,19 +2,11 @@
 pragma solidity ^0.8.0;
 
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import {
-    Commands
-} from "@uniswap/universal-router/contracts/libraries/Commands.sol";
-import {
-    Initializable
-} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {
-    OwnableUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {Commands} from "@uniswap/universal-router/contracts/libraries/Commands.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UpgraderAuth} from "./UpgraderAuth.sol";
-import {
-    ERC1967Utils
-} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 import {SwapType, PoolKey, PoolVersion, SwapRoute} from "./types.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -28,527 +20,406 @@ import {ISwapManager} from "./Interface/ISwapManager.sol";
  *      Only the upgrader (the TimelockController) can upgrade it, see UpgraderAuth.
  *      Storage follows ERC-7201 namespaced layout.
  */
-contract SwapManager is
-    ISwapManager,
-    Initializable,
-    OwnableUpgradeable,
-    UpgraderAuth
-{
-    // Errors
-    error SwapManager__IndexNotRegistered();
-    error SwapManager__RouteNotRegistered();
-    error SwapManager__InvalidV3Path();
-    error SwapManager__InvalidV4PoolKey();
-    error SwapManager__RouteTokensMismatch(
-        address expectedTokenA,
-        address expectedTokenB
+contract SwapManager is ISwapManager, Initializable, OwnableUpgradeable, UpgraderAuth {
+  // Errors
+  error SwapManager__IndexNotRegistered();
+  error SwapManager__RouteNotRegistered();
+  error SwapManager__InvalidV3Path();
+  error SwapManager__InvalidV4PoolKey();
+  error SwapManager__RouteTokensMismatch(address expectedTokenA, address expectedTokenB);
+  error SwapManager__NotAnIndex(address indexAddress);
+
+  /// @custom:storage-location erc7201:onchainassetmanager.storage.SwapManager
+  struct SwapManagerStorage {
+    // Index address => swap type => swap route
+    mapping(address => mapping(SwapType => SwapRoute)) routes;
+  }
+
+  // keccak256(abi.encode(uint256(keccak256("onchainassetmanager.storage.SwapManager")) - 1)) & ~bytes32(uint256(0xff))
+  bytes32 private constant SWAP_MANAGER_STORAGE_LOCATION =
+    0xe73f6e11bb678fc34c939722e07052d9d9f51b2455d3737e0b4ef584a3258e00;
+
+  modifier onlyRegisteredIndex(address _indexAddress) {
+    _checkIfRegisteredIndex(_indexAddress);
+    _;
+  }
+
+  /// @custom:oz-upgrades-unsafe-allow constructor
+  constructor() {
+    _disableInitializers();
+  }
+
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function initialize(address _indexManager, address _upgrader) external initializer {
+    __Ownable_init(_indexManager);
+    __UpgraderAuth_init(_upgrader);
+  }
+
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function registerIndex(
+    address _indexAddress,
+    SwapRoute memory _routeAsset0Usdc,
+    SwapRoute memory _routeAsset1Usdc,
+    SwapRoute memory _routeAsset0Asset1
+  ) external onlyOwner {
+    address asset0 = _readIndexToken(_indexAddress, IIndex.getAsset0.selector);
+    address asset1 = _readIndexToken(_indexAddress, IIndex.getAsset1.selector);
+    address usdc = _readIndexToken(_indexAddress, IIndex.getUsdc.selector);
+
+    _validateRoute(_routeAsset0Usdc, asset0, usdc);
+    _validateRoute(_routeAsset1Usdc, asset1, usdc);
+    _validateRoute(_routeAsset0Asset1, asset0, asset1);
+
+    SwapManagerStorage storage $ = _getSwapManagerStorage();
+    $.routes[_indexAddress][SwapType.ASSET0_USDC] = _routeAsset0Usdc;
+    $.routes[_indexAddress][SwapType.ASSET1_USDC] = _routeAsset1Usdc;
+    $.routes[_indexAddress][SwapType.ASSET0_ASSET1] = _routeAsset0Asset1;
+  }
+
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function updateRoute(address _indexAddress, SwapType _swapType, SwapRoute memory _newRoute)
+    external
+    onlyOwner
+    onlyRegisteredIndex(_indexAddress)
+  {
+    (address tokenA, address tokenB) = _getExpectedRouteTokens(_indexAddress, _swapType);
+    _validateRoute(_newRoute, tokenA, tokenB);
+    _getSwapManagerStorage().routes[_indexAddress][_swapType] = _newRoute;
+  }
+
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function buildSingleSwapParams(
+    address _indexAddress,
+    SwapType _swapType,
+    address _tokenIn,
+    uint128 _amountIn,
+    uint128 _amountOutMinimum
+  )
+    public
+    view
+    onlyRegisteredIndex(_indexAddress)
+    returns (bytes memory commands, bytes[] memory inputs, address tokenIn, address tokenOut)
+  {
+    SwapRoute memory route = _getSwapManagerStorage().routes[_indexAddress][_swapType];
+
+    if (route.version == PoolVersion.V4) {
+      return _buildV4Params(route.poolKey, _tokenIn, _amountIn, _amountOutMinimum);
+    } else {
+      return _buildV3Params(route.v3Path, _tokenIn, _amountIn, _amountOutMinimum);
+    }
+  }
+
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function buildDoubleSwapParams(
+    address _indexAddress,
+    SwapType _swapType0,
+    SwapType _swapType1,
+    address _tokenIn0,
+    address _tokenIn1,
+    uint128 _amountIn0,
+    uint128 _amountIn1,
+    uint128 _amountOutMinimum0,
+    uint128 _amountOutMinimum1
+  ) external view returns (bytes memory commands, bytes[] memory inputs) {
+    (bytes memory commands0, bytes[] memory inputs0,,) =
+      buildSingleSwapParams(_indexAddress, _swapType0, _tokenIn0, _amountIn0, _amountOutMinimum0);
+
+    (bytes memory commands1, bytes[] memory inputs1,,) =
+      buildSingleSwapParams(_indexAddress, _swapType1, _tokenIn1, _amountIn1, _amountOutMinimum1);
+
+    commands = abi.encodePacked(commands0, commands1);
+
+    inputs = new bytes[](2);
+    inputs[0] = inputs0[0];
+    inputs[1] = inputs1[0];
+  }
+
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function getRoute(address _indexAddress, SwapType _swapType) external view returns (SwapRoute memory) {
+    return _getSwapManagerStorage().routes[_indexAddress][_swapType];
+  }
+
+  /**
+   * @dev Builds the router parameters for a Uniswap V4 swap.
+   * @param _key The V4 pool key.
+   * @param _tokenIn The input token address.
+   * @param _amountIn The input amount.
+   * @param _amountOutMinimum The minimum output amount.
+   * @return commands The encoded router command.
+   * @return inputs The encoded router input array.
+   * @return tokenIn The input token address.
+   * @return tokenOut The output token address.
+   */
+  function _buildV4Params(PoolKey memory _key, address _tokenIn, uint128 _amountIn, uint128 _amountOutMinimum)
+    internal
+    pure
+    returns (bytes memory commands, bytes[] memory inputs, address tokenIn, address tokenOut)
+  {
+    tokenIn = _tokenIn;
+    bool zeroForOne = _tokenIn == Currency.unwrap(_key.currency0);
+    tokenOut = zeroForOne ? Currency.unwrap(_key.currency1) : Currency.unwrap(_key.currency0);
+
+    IV4Router.ExactInputSingleParams memory swapParams = IV4Router.ExactInputSingleParams({
+      poolKey: _key, zeroForOne: zeroForOne, amountIn: _amountIn, amountOutMinimum: _amountOutMinimum, hookData: ""
+    });
+
+    bytes memory actions =
+      abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE), uint8(Actions.TAKE_ALL));
+
+    bytes[] memory actionParams = new bytes[](3);
+    actionParams[0] = abi.encode(swapParams);
+    actionParams[1] = abi.encode(Currency.wrap(tokenIn), _amountIn, false);
+    actionParams[2] = abi.encode(Currency.wrap(tokenOut), uint256(0));
+
+    commands = abi.encodePacked(uint8(Commands.V4_SWAP));
+    inputs = new bytes[](1);
+    inputs[0] = abi.encode(actions, actionParams);
+  }
+
+  /**
+   * @dev Builds the router parameters for a Uniswap V3 swap.
+   * @param _v3Path  Path encoded: abi.encodePacked(tokenIn, fee, tokenOut)
+   *                 For multi-hop: abi.encodePacked(tokenIn, fee, tokenMid, fee, tokenOut)
+   * @param _tokenIn The input token address.
+   * @param _amountIn The input amount.
+   * @param _amountOutMinimum The minimum output amount.
+   * @return commands The encoded router command.
+   * @return inputs The encoded router input array.
+   * @return tokenIn The input token address.
+   * @return tokenOut The output token address.
+   */
+  function _buildV3Params(bytes memory _v3Path, address _tokenIn, uint128 _amountIn, uint128 _amountOutMinimum)
+    internal
+    pure
+    returns (bytes memory commands, bytes[] memory inputs, address tokenIn, address tokenOut)
+  {
+    tokenIn = _tokenIn;
+
+    // Extract tokenOut from the last address in the path.
+    // Path format: [address(20) | fee(3) | address(20) | ...]
+    // The last token starts at offset: pathLen - 20.
+    // Ensure the V3 path goes from _tokenIn → tokenOut.
+    // The stored path may be in either direction; reverse it if needed.
+    bytes memory directionalPath = _getDirectionalV3Path(_v3Path, _tokenIn);
+    tokenOut = _extractTokenOutFromV3Path(directionalPath);
+
+    // V3_SWAP_EXACT_IN params:
+    // (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
+    // recipient = address(1) → Universal Router maps this to msg.sender (the Index).
+    // payerIsUser = false → the router pays from its own balance (tokens pre-transferred).
+    commands = abi.encodePacked(uint8(Commands.V3_SWAP_EXACT_IN));
+
+    inputs = new bytes[](1);
+    inputs[0] = abi.encode(
+      address(1), // recipient: MSG_SENDER → maps to the Index (caller of execute)
+      uint256(_amountIn),
+      uint256(_amountOutMinimum),
+      directionalPath,
+      false // payerIsUser: false, tokens are pre-transferred to the Universal Router
     );
-    error SwapManager__NotAnIndex(address indexAddress);
+  }
 
-    /// @custom:storage-location erc7201:onchainassetmanager.storage.SwapManager
-    struct SwapManagerStorage {
-        // Index address => swap type => swap route
-        mapping(address => mapping(SwapType => SwapRoute)) routes;
+  /**
+   * @dev Validates a swap route before registration, checking that it connects `_tokenA` and `_tokenB`.
+   *      For V4 routes, the pool currencies must be exactly {`_tokenA`, `_tokenB`} in any order.
+   *      Since index tokens are ERC20, this also rejects native ETH (currency = address(0)).
+   *      For V3 routes, the path must be well-formed (20 bytes token + n * (3 bytes fee + 20 bytes token),
+   *      n >= 1) and its first and last tokens must be {`_tokenA`, `_tokenB`} in either direction.
+   *      Intermediate hops are allowed.
+   * @param _route The swap route struct to validate.
+   * @param _tokenA One of the two tokens the route must connect.
+   * @param _tokenB The other token the route must connect.
+   */
+  function _validateRoute(SwapRoute memory _route, address _tokenA, address _tokenB) internal pure {
+    address firstToken;
+    address lastToken;
+
+    if (_route.version == PoolVersion.V4) {
+      firstToken = Currency.unwrap(_route.poolKey.currency0);
+      lastToken = Currency.unwrap(_route.poolKey.currency1);
+      // For V4, currency0 and currency1 cannot both be address(0).
+      if (firstToken == address(0) && lastToken == address(0)) {
+        revert SwapManager__InvalidV4PoolKey();
+      }
+    } else {
+      bytes memory path = _route.v3Path;
+      if (path.length < 43 || (path.length - 20) % 23 != 0) {
+        revert SwapManager__InvalidV3Path();
+      }
+      assembly {
+        firstToken := shr(96, mload(add(path, 0x20)))
+      }
+      lastToken = _extractTokenOutFromV3Path(path);
     }
 
-    // keccak256(abi.encode(uint256(keccak256("onchainassetmanager.storage.SwapManager")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant SWAP_MANAGER_STORAGE_LOCATION =
-        0xe73f6e11bb678fc34c939722e07052d9d9f51b2455d3737e0b4ef584a3258e00;
-
-    modifier onlyRegisteredIndex(address _indexAddress) {
-        _checkIfRegisteredIndex(_indexAddress);
-        _;
+    if (!((firstToken == _tokenA && lastToken == _tokenB) || (firstToken == _tokenB && lastToken == _tokenA))) {
+      revert SwapManager__RouteTokensMismatch(_tokenA, _tokenB);
     }
+  }
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
+  /**
+   * @dev Returns the pair of tokens a route of `_swapType` must connect for the given index,
+   *      reading the index assets and USDC from the index contract through `_readIndexToken`.
+   *      Reverts with `SwapManager__NotAnIndex` if `_indexAddress` is not an index.
+   * @param _indexAddress The index contract address.
+   * @param _swapType The swap type of the route.
+   * @return The first expected token (asset0 for ASSET0_USDC / ASSET0_ASSET1, asset1 for ASSET1_USDC).
+   * @return The second expected token (USDC for *_USDC routes, asset1 for ASSET0_ASSET1).
+   */
+  function _getExpectedRouteTokens(address _indexAddress, SwapType _swapType) internal view returns (address, address) {
+    if (_swapType == SwapType.ASSET0_USDC) {
+      return (
+        _readIndexToken(_indexAddress, IIndex.getAsset0.selector),
+        _readIndexToken(_indexAddress, IIndex.getUsdc.selector)
+      );
     }
-
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function initialize(
-        address _indexManager,
-        address _upgrader
-    ) external initializer {
-        __Ownable_init(_indexManager);
-        __UpgraderAuth_init(_upgrader);
+    if (_swapType == SwapType.ASSET1_USDC) {
+      return (
+        _readIndexToken(_indexAddress, IIndex.getAsset1.selector),
+        _readIndexToken(_indexAddress, IIndex.getUsdc.selector)
+      );
     }
+    return (
+      _readIndexToken(_indexAddress, IIndex.getAsset0.selector),
+      _readIndexToken(_indexAddress, IIndex.getAsset1.selector)
+    );
+  }
 
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function registerIndex(
-        address _indexAddress,
-        SwapRoute memory _routeAsset0Usdc,
-        SwapRoute memory _routeAsset1Usdc,
-        SwapRoute memory _routeAsset0Asset1
-    ) external onlyOwner {
-        address asset0 = _readIndexToken(
-            _indexAddress,
-            IIndex.getAsset0.selector
-        );
-        address asset1 = _readIndexToken(
-            _indexAddress,
-            IIndex.getAsset1.selector
-        );
-        address usdc = _readIndexToken(_indexAddress, IIndex.getUsdc.selector);
-
-        _validateRoute(_routeAsset0Usdc, asset0, usdc);
-        _validateRoute(_routeAsset1Usdc, asset1, usdc);
-        _validateRoute(_routeAsset0Asset1, asset0, asset1);
-
-        SwapManagerStorage storage $ = _getSwapManagerStorage();
-        $.routes[_indexAddress][SwapType.ASSET0_USDC] = _routeAsset0Usdc;
-        $.routes[_indexAddress][SwapType.ASSET1_USDC] = _routeAsset1Usdc;
-        $.routes[_indexAddress][SwapType.ASSET0_ASSET1] = _routeAsset0Asset1;
+  /**
+   * @notice Reads a token address from an index through one of its zero-argument getters.
+   * @dev Uses a low-level staticcall so that every non-index target fails with the same custom error
+   *      instead of an empty revert or an ABI decoding panic. Reverts with `SwapManager__NotAnIndex` if
+   *      the call reverts, returns less than 32 bytes (this also covers addresses without code, whose
+   *      calls succeed with empty return data), or returns a word that is not a valid address.
+   * @param _indexAddress The index contract address.
+   * @param _selector The selector of the getter to call (`getAsset0`, `getAsset1` or `getUsdc`).
+   * @return The token address returned by the getter.
+   */
+  function _readIndexToken(address _indexAddress, bytes4 _selector) internal view returns (address) {
+    (bool success, bytes memory data) = _indexAddress.staticcall(abi.encodeWithSelector(_selector));
+    if (!success || data.length < 32) {
+      revert SwapManager__NotAnIndex(_indexAddress);
     }
-
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function updateRoute(
-        address _indexAddress,
-        SwapType _swapType,
-        SwapRoute memory _newRoute
-    ) external onlyOwner onlyRegisteredIndex(_indexAddress) {
-        (address tokenA, address tokenB) = _getExpectedRouteTokens(
-            _indexAddress,
-            _swapType
-        );
-        _validateRoute(_newRoute, tokenA, tokenB);
-        _getSwapManagerStorage().routes[_indexAddress][_swapType] = _newRoute;
+    uint256 word = abi.decode(data, (uint256));
+    if (word > type(uint160).max) {
+      revert SwapManager__NotAnIndex(_indexAddress);
     }
+    return address(uint160(word));
+  }
 
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function buildSingleSwapParams(
-        address _indexAddress,
-        SwapType _swapType,
-        address _tokenIn,
-        uint128 _amountIn,
-        uint128 _amountOutMinimum
-    )
-        public
-        view
-        onlyRegisteredIndex(_indexAddress)
-        returns (
-            bytes memory commands,
-            bytes[] memory inputs,
-            address tokenIn,
-            address tokenOut
-        )
-    {
-        SwapRoute memory route = _getSwapManagerStorage().routes[
-            _indexAddress
-        ][_swapType];
+  /**
+   * @dev Checks whether an index has been registered in the SwapManager by verifying
+   *      that its ASSET0_ASSET1 route contains a valid, non-default configuration.
+   *      For V4 routes this means at least one currency must be non-zero; for V3 routes
+   *      the encoded path must be at least 43 bytes. An unregistered index holds the struct
+   *      default (version V3, empty path), so it is caught by the V3 branch. Reverts with
+   *      `SwapManager__IndexNotRegistered` if the index is not registered.
+   * @param _indexAddress The index contract address to check.
+   */
+  function _checkIfRegisteredIndex(address _indexAddress) internal view {
+    SwapRoute memory route = _getSwapManagerStorage().routes[_indexAddress][SwapType.ASSET0_ASSET1];
 
-        if (route.version == PoolVersion.V4) {
-            return
-                _buildV4Params(
-                    route.poolKey,
-                    _tokenIn,
-                    _amountIn,
-                    _amountOutMinimum
-                );
-        } else {
-            return
-                _buildV3Params(
-                    route.v3Path,
-                    _tokenIn,
-                    _amountIn,
-                    _amountOutMinimum
-                );
+    if (route.version == PoolVersion.V4) {
+      // The index is not registered if both currencies are zero, which is the struct default.
+      if (
+        Currency.unwrap(route.poolKey.currency0) == address(0) && Currency.unwrap(route.poolKey.currency1) == address(0)
+      ) {
+        revert SwapManager__IndexNotRegistered();
+      }
+    } else {
+      if (route.v3Path.length < 43) {
+        revert SwapManager__IndexNotRegistered();
+      }
+    }
+  }
+
+  /**
+   * @dev Extracts the output token address from the last 20 bytes of an ABI-encoded
+   *      Uniswap V3 path. The path must already be oriented so that the desired output
+   *      token sits at the end (use `_getDirectionalV3Path` beforehand if needed).
+   *      Path layout: [token0 (20)] [fee (3)] [token1 (20)] ... [tokenN (20)]
+   * @param _path The ABI-encoded V3 swap path, oriented from tokenIn to tokenOut.
+   * @return tokenOut The address of the output token (last 20 bytes of `_path`).
+   */
+  function _extractTokenOutFromV3Path(bytes memory _path) internal pure returns (address tokenOut) {
+    uint256 offset = _path.length - 20;
+    assembly {
+      tokenOut := shr(96, mload(add(add(_path, 0x20), offset)))
+    }
+  }
+
+  /**
+   * @dev Returns the V3 path oriented so that it starts with `_tokenIn`.
+   *      If the first address encoded in `_path` already matches `_tokenIn`,
+   *      the original bytes are returned unchanged. Otherwise the path is reversed
+   *      via `_reverseV3Path` so that `_tokenIn` leads the encoding.
+   *      This allows routes to be stored in either direction and resolved correctly
+   *      at swap time without requiring two separate storage entries.
+   * @param _path    The stored V3 path bytes (may be in either direction).
+   * @param _tokenIn The address that must appear first in the returned path.
+   * @return         The directional path starting with `_tokenIn`.
+   */
+  function _getDirectionalV3Path(bytes memory _path, address _tokenIn) internal pure returns (bytes memory) {
+    address firstToken;
+    assembly {
+      firstToken := shr(96, mload(add(_path, 0x20)))
+    }
+    if (firstToken == _tokenIn) return _path;
+    return _reverseV3Path(_path);
+  }
+
+  /**
+   * @dev Reverses a Uniswap V3 encoded path so that the token order and associated
+   *      fees are mirrored end-to-end. This is used to derive the tokenOut→tokenIn
+   *      direction from a stored tokenIn→tokenOut path without duplicating storage.
+   *
+   *      Single-hop example:
+   *        Input:  [A (20)] [fAB (3)] [B (20)]
+   *        Output: [B (20)] [fAB (3)] [A (20)]
+   *
+   *      Multi-hop example:
+   *        Input:  [A (20)] [fAB (3)] [B (20)] [fBC (3)] [C (20)]
+   *        Output: [C (20)] [fBC (3)] [B (20)] [fAB (3)] [A (20)]
+   *
+   * @param _path    The original ABI-encoded V3 path to reverse.
+   * @return reversed The reversed path with the same total length as `_path`.
+   */
+  function _reverseV3Path(bytes memory _path) internal pure returns (bytes memory reversed) {
+    uint256 len = _path.length;
+    uint256 numPools = (len - 20) / 23;
+    reversed = new bytes(len);
+
+    for (uint256 i = 0; i <= numPools; i++) {
+      uint256 srcOff = i * 23;
+      uint256 dstOff = (numPools - i) * 23;
+
+      // Copy 20-byte token address
+      for (uint256 j = 0; j < 20; j++) {
+        reversed[dstOff + j] = _path[srcOff + j];
+      }
+
+      // Copy 3-byte fee (between token[i] and token[i+1])
+      if (i < numPools) {
+        uint256 srcFee = srcOff + 20;
+        uint256 dstFee = (numPools - 1 - i) * 23 + 20;
+        for (uint256 j = 0; j < 3; j++) {
+          reversed[dstFee + j] = _path[srcFee + j];
         }
+      }
     }
+  }
 
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function buildDoubleSwapParams(
-        address _indexAddress,
-        SwapType _swapType0,
-        SwapType _swapType1,
-        address _tokenIn0,
-        address _tokenIn1,
-        uint128 _amountIn0,
-        uint128 _amountIn1,
-        uint128 _amountOutMinimum0,
-        uint128 _amountOutMinimum1
-    ) external view returns (bytes memory commands, bytes[] memory inputs) {
-        (
-            bytes memory commands0,
-            bytes[] memory inputs0,
-            ,
+  /// @dev Inherit from ISwapManager. See interface for details.
+  function getImplementation() external view returns (address) {
+    return ERC1967Utils.getImplementation();
+  }
 
-        ) = buildSingleSwapParams(
-                _indexAddress,
-                _swapType0,
-                _tokenIn0,
-                _amountIn0,
-                _amountOutMinimum0
-            );
-
-        (
-            bytes memory commands1,
-            bytes[] memory inputs1,
-            ,
-
-        ) = buildSingleSwapParams(
-                _indexAddress,
-                _swapType1,
-                _tokenIn1,
-                _amountIn1,
-                _amountOutMinimum1
-            );
-
-        commands = abi.encodePacked(commands0, commands1);
-
-        inputs = new bytes[](2);
-        inputs[0] = inputs0[0];
-        inputs[1] = inputs1[0];
+  /**
+   * @dev Returns the ERC-7201 namespaced storage struct.
+   */
+  function _getSwapManagerStorage() internal pure returns (SwapManagerStorage storage $) {
+    assembly {
+      $.slot := SWAP_MANAGER_STORAGE_LOCATION
     }
-
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function getRoute(
-        address _indexAddress,
-        SwapType _swapType
-    ) external view returns (SwapRoute memory) {
-        return _getSwapManagerStorage().routes[_indexAddress][_swapType];
-    }
-
-    /**
-     * @dev Builds the router parameters for a Uniswap V4 swap.
-     * @param _key The V4 pool key.
-     * @param _tokenIn The input token address.
-     * @param _amountIn The input amount.
-     * @param _amountOutMinimum The minimum output amount.
-     * @return commands The encoded router command.
-     * @return inputs The encoded router input array.
-     * @return tokenIn The input token address.
-     * @return tokenOut The output token address.
-     */
-    function _buildV4Params(
-        PoolKey memory _key,
-        address _tokenIn,
-        uint128 _amountIn,
-        uint128 _amountOutMinimum
-    )
-        internal
-        pure
-        returns (
-            bytes memory commands,
-            bytes[] memory inputs,
-            address tokenIn,
-            address tokenOut
-        )
-    {
-        tokenIn = _tokenIn;
-        bool zeroForOne = _tokenIn == Currency.unwrap(_key.currency0);
-        tokenOut = zeroForOne
-            ? Currency.unwrap(_key.currency1)
-            : Currency.unwrap(_key.currency0);
-
-        IV4Router.ExactInputSingleParams memory swapParams = IV4Router
-            .ExactInputSingleParams({
-                poolKey: _key,
-                zeroForOne: zeroForOne,
-                amountIn: _amountIn,
-                amountOutMinimum: _amountOutMinimum,
-                hookData: ""
-            });
-
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE),
-            uint8(Actions.TAKE_ALL)
-        );
-
-        bytes[] memory actionParams = new bytes[](3);
-        actionParams[0] = abi.encode(swapParams);
-        actionParams[1] = abi.encode(Currency.wrap(tokenIn), _amountIn, false);
-        actionParams[2] = abi.encode(Currency.wrap(tokenOut), uint256(0));
-
-        commands = abi.encodePacked(uint8(Commands.V4_SWAP));
-        inputs = new bytes[](1);
-        inputs[0] = abi.encode(actions, actionParams);
-    }
-
-    /**
-     * @dev Builds the router parameters for a Uniswap V3 swap.
-     * @param _v3Path  Path encoded: abi.encodePacked(tokenIn, fee, tokenOut)
-     *                 For multi-hop: abi.encodePacked(tokenIn, fee, tokenMid, fee, tokenOut)
-     * @param _tokenIn The input token address.
-     * @param _amountIn The input amount.
-     * @param _amountOutMinimum The minimum output amount.
-     * @return commands The encoded router command.
-     * @return inputs The encoded router input array.
-     * @return tokenIn The input token address.
-     * @return tokenOut The output token address.
-     */
-    function _buildV3Params(
-        bytes memory _v3Path,
-        address _tokenIn,
-        uint128 _amountIn,
-        uint128 _amountOutMinimum
-    )
-        internal
-        pure
-        returns (
-            bytes memory commands,
-            bytes[] memory inputs,
-            address tokenIn,
-            address tokenOut
-        )
-    {
-        tokenIn = _tokenIn;
-
-        // Extract tokenOut from the last address in the path.
-        // Path format: [address(20) | fee(3) | address(20) | ...]
-        // The last token starts at offset: pathLen - 20.
-        // Ensure the V3 path goes from _tokenIn → tokenOut.
-        // The stored path may be in either direction; reverse it if needed.
-        bytes memory directionalPath = _getDirectionalV3Path(_v3Path, _tokenIn);
-        tokenOut = _extractTokenOutFromV3Path(directionalPath);
-
-        // V3_SWAP_EXACT_IN params:
-        // (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
-        // recipient = address(1) → Universal Router maps this to msg.sender (the Index).
-        // payerIsUser = false → the router pays from its own balance (tokens pre-transferred).
-        commands = abi.encodePacked(uint8(Commands.V3_SWAP_EXACT_IN));
-
-        inputs = new bytes[](1);
-        inputs[0] = abi.encode(
-            address(1), // recipient: MSG_SENDER → maps to the Index (caller of execute)
-            uint256(_amountIn),
-            uint256(_amountOutMinimum),
-            directionalPath,
-            false // payerIsUser: false, tokens are pre-transferred to the Universal Router
-        );
-    }
-
-    /**
-     * @dev Validates a swap route before registration, checking that it connects `_tokenA` and `_tokenB`.
-     *      For V4 routes, the pool currencies must be exactly {`_tokenA`, `_tokenB`} in any order.
-     *      Since index tokens are ERC20, this also rejects native ETH (currency = address(0)).
-     *      For V3 routes, the path must be well-formed (20 bytes token + n * (3 bytes fee + 20 bytes token),
-     *      n >= 1) and its first and last tokens must be {`_tokenA`, `_tokenB`} in either direction.
-     *      Intermediate hops are allowed.
-     * @param _route The swap route struct to validate.
-     * @param _tokenA One of the two tokens the route must connect.
-     * @param _tokenB The other token the route must connect.
-     */
-    function _validateRoute(
-        SwapRoute memory _route,
-        address _tokenA,
-        address _tokenB
-    ) internal pure {
-        address firstToken;
-        address lastToken;
-
-        if (_route.version == PoolVersion.V4) {
-            firstToken = Currency.unwrap(_route.poolKey.currency0);
-            lastToken = Currency.unwrap(_route.poolKey.currency1);
-            // For V4, currency0 and currency1 cannot both be address(0).
-            if (firstToken == address(0) && lastToken == address(0)) {
-                revert SwapManager__InvalidV4PoolKey();
-            }
-        } else {
-            bytes memory path = _route.v3Path;
-            if (path.length < 43 || (path.length - 20) % 23 != 0) {
-                revert SwapManager__InvalidV3Path();
-            }
-            assembly {
-                firstToken := shr(96, mload(add(path, 0x20)))
-            }
-            lastToken = _extractTokenOutFromV3Path(path);
-        }
-
-        if (
-            !((firstToken == _tokenA && lastToken == _tokenB) ||
-                (firstToken == _tokenB && lastToken == _tokenA))
-        ) {
-            revert SwapManager__RouteTokensMismatch(_tokenA, _tokenB);
-        }
-    }
-
-    /**
-     * @dev Returns the pair of tokens a route of `_swapType` must connect for the given index,
-     *      reading the index assets and USDC from the index contract through `_readIndexToken`.
-     *      Reverts with `SwapManager__NotAnIndex` if `_indexAddress` is not an index.
-     * @param _indexAddress The index contract address.
-     * @param _swapType The swap type of the route.
-     * @return The first expected token (asset0 for ASSET0_USDC / ASSET0_ASSET1, asset1 for ASSET1_USDC).
-     * @return The second expected token (USDC for *_USDC routes, asset1 for ASSET0_ASSET1).
-     */
-    function _getExpectedRouteTokens(
-        address _indexAddress,
-        SwapType _swapType
-    ) internal view returns (address, address) {
-        if (_swapType == SwapType.ASSET0_USDC) {
-            return (
-                _readIndexToken(_indexAddress, IIndex.getAsset0.selector),
-                _readIndexToken(_indexAddress, IIndex.getUsdc.selector)
-            );
-        }
-        if (_swapType == SwapType.ASSET1_USDC) {
-            return (
-                _readIndexToken(_indexAddress, IIndex.getAsset1.selector),
-                _readIndexToken(_indexAddress, IIndex.getUsdc.selector)
-            );
-        }
-        return (
-            _readIndexToken(_indexAddress, IIndex.getAsset0.selector),
-            _readIndexToken(_indexAddress, IIndex.getAsset1.selector)
-        );
-    }
-
-    /**
-     * @notice Reads a token address from an index through one of its zero-argument getters.
-     * @dev Uses a low-level staticcall so that every non-index target fails with the same custom error
-     *      instead of an empty revert or an ABI decoding panic. Reverts with `SwapManager__NotAnIndex` if
-     *      the call reverts, returns less than 32 bytes (this also covers addresses without code, whose
-     *      calls succeed with empty return data), or returns a word that is not a valid address.
-     * @param _indexAddress The index contract address.
-     * @param _selector The selector of the getter to call (`getAsset0`, `getAsset1` or `getUsdc`).
-     * @return The token address returned by the getter.
-     */
-    function _readIndexToken(
-        address _indexAddress,
-        bytes4 _selector
-    ) internal view returns (address) {
-        (bool success, bytes memory data) = _indexAddress.staticcall(
-            abi.encodeWithSelector(_selector)
-        );
-        if (!success || data.length < 32) {
-            revert SwapManager__NotAnIndex(_indexAddress);
-        }
-        uint256 word = abi.decode(data, (uint256));
-        if (word > type(uint160).max) {
-            revert SwapManager__NotAnIndex(_indexAddress);
-        }
-        return address(uint160(word));
-    }
-
-    /**
-     * @dev Checks whether an index has been registered in the SwapManager by verifying
-     *      that its ASSET0_ASSET1 route contains a valid, non-default configuration.
-     *      For V4 routes this means at least one currency must be non-zero; for V3 routes
-     *      the encoded path must be at least 43 bytes. An unregistered index holds the struct
-     *      default (version V3, empty path), so it is caught by the V3 branch. Reverts with
-     *      `SwapManager__IndexNotRegistered` if the index is not registered.
-     * @param _indexAddress The index contract address to check.
-     */
-    function _checkIfRegisteredIndex(address _indexAddress) internal view {
-        SwapRoute memory route = _getSwapManagerStorage().routes[
-            _indexAddress
-        ][SwapType.ASSET0_ASSET1];
-
-        if (route.version == PoolVersion.V4) {
-            // The index is not registered if both currencies are zero, which is the struct default.
-            if (
-                Currency.unwrap(route.poolKey.currency0) == address(0) &&
-                Currency.unwrap(route.poolKey.currency1) == address(0)
-            ) {
-                revert SwapManager__IndexNotRegistered();
-            }
-        } else {
-            if (route.v3Path.length < 43) {
-                revert SwapManager__IndexNotRegistered();
-            }
-        }
-    }
-
-    /**
-     * @dev Extracts the output token address from the last 20 bytes of an ABI-encoded
-     *      Uniswap V3 path. The path must already be oriented so that the desired output
-     *      token sits at the end (use `_getDirectionalV3Path` beforehand if needed).
-     *      Path layout: [token0 (20)] [fee (3)] [token1 (20)] ... [tokenN (20)]
-     * @param _path The ABI-encoded V3 swap path, oriented from tokenIn to tokenOut.
-     * @return tokenOut The address of the output token (last 20 bytes of `_path`).
-     */
-    function _extractTokenOutFromV3Path(
-        bytes memory _path
-    ) internal pure returns (address tokenOut) {
-        uint256 offset = _path.length - 20;
-        assembly {
-            tokenOut := shr(96, mload(add(add(_path, 0x20), offset)))
-        }
-    }
-
-    /**
-     * @dev Returns the V3 path oriented so that it starts with `_tokenIn`.
-     *      If the first address encoded in `_path` already matches `_tokenIn`,
-     *      the original bytes are returned unchanged. Otherwise the path is reversed
-     *      via `_reverseV3Path` so that `_tokenIn` leads the encoding.
-     *      This allows routes to be stored in either direction and resolved correctly
-     *      at swap time without requiring two separate storage entries.
-     * @param _path    The stored V3 path bytes (may be in either direction).
-     * @param _tokenIn The address that must appear first in the returned path.
-     * @return         The directional path starting with `_tokenIn`.
-     */
-    function _getDirectionalV3Path(
-        bytes memory _path,
-        address _tokenIn
-    ) internal pure returns (bytes memory) {
-        address firstToken;
-        assembly {
-            firstToken := shr(96, mload(add(_path, 0x20)))
-        }
-        if (firstToken == _tokenIn) return _path;
-        return _reverseV3Path(_path);
-    }
-
-    /**
-     * @dev Reverses a Uniswap V3 encoded path so that the token order and associated
-     *      fees are mirrored end-to-end. This is used to derive the tokenOut→tokenIn
-     *      direction from a stored tokenIn→tokenOut path without duplicating storage.
-     *
-     *      Single-hop example:
-     *        Input:  [A (20)] [fAB (3)] [B (20)]
-     *        Output: [B (20)] [fAB (3)] [A (20)]
-     *
-     *      Multi-hop example:
-     *        Input:  [A (20)] [fAB (3)] [B (20)] [fBC (3)] [C (20)]
-     *        Output: [C (20)] [fBC (3)] [B (20)] [fAB (3)] [A (20)]
-     *
-     * @param _path    The original ABI-encoded V3 path to reverse.
-     * @return reversed The reversed path with the same total length as `_path`.
-     */
-    function _reverseV3Path(
-        bytes memory _path
-    ) internal pure returns (bytes memory reversed) {
-        uint256 len = _path.length;
-        uint256 numPools = (len - 20) / 23;
-        reversed = new bytes(len);
-
-        for (uint256 i = 0; i <= numPools; i++) {
-            uint256 srcOff = i * 23;
-            uint256 dstOff = (numPools - i) * 23;
-
-            // Copy 20-byte token address
-            for (uint256 j = 0; j < 20; j++) {
-                reversed[dstOff + j] = _path[srcOff + j];
-            }
-
-            // Copy 3-byte fee (between token[i] and token[i+1])
-            if (i < numPools) {
-                uint256 srcFee = srcOff + 20;
-                uint256 dstFee = (numPools - 1 - i) * 23 + 20;
-                for (uint256 j = 0; j < 3; j++) {
-                    reversed[dstFee + j] = _path[srcFee + j];
-                }
-            }
-        }
-    }
-
-    /// @dev Inherit from ISwapManager. See interface for details.
-    function getImplementation() external view returns (address) {
-        return ERC1967Utils.getImplementation();
-    }
-
-    /**
-     * @dev Returns the ERC-7201 namespaced storage struct.
-     */
-    function _getSwapManagerStorage()
-        internal
-        pure
-        returns (SwapManagerStorage storage $)
-    {
-        assembly {
-            $.slot := SWAP_MANAGER_STORAGE_LOCATION
-        }
-    }
+  }
 }

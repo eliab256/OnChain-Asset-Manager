@@ -7,509 +7,384 @@ import {VmSafe} from "forge-std/Vm.sol";
 import {MockUSDC} from "../test/mocks/USDCMock.sol";
 import {UniversalRouterMock} from "../test/mocks/UniversalRouterMock.sol";
 import {AssetTokenMock} from "../test/mocks/AssetTokenMock.sol";
-import {
-    MockV3Aggregator
-} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
+import {MockV3Aggregator} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {AssetAvailable, PoolVersion, SwapRoute} from "../src/types.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 struct AssetConfig {
-    address token;
-    address priceFeed;
-    uint32 priceFeedMaxDelay;
+  address token;
+  address priceFeed;
+  uint32 priceFeedMaxDelay;
 }
 
 struct NetworkConfig {
-    address usdcAddress;
-    address usdcPriceFeedAddress;
-    uint32 usdcPriceFeedMaxDelay;
-    address uniswapUniversalRouter;
-    address deployerAccount;
-    address feeCollector;
-    address rebalancer;
-    address[] multiSigOwners;
+  address usdcAddress;
+  address usdcPriceFeedAddress;
+  uint32 usdcPriceFeedMaxDelay;
+  address uniswapUniversalRouter;
+  address deployerAccount;
+  address feeCollector;
+  address rebalancer;
+  address[] multiSigOwners;
 }
 
 contract HelperConfig is CodeConstants, Script {
-    error HelperConfig__InvalidChainId();
-    error HelperConfig__InvalidIndexConfig();
-    error HelperConfig__GetRealContractsOnMainnet();
-    error HelperConfig__UnknownAssetSymbol(string symbol);
+  error HelperConfig__InvalidChainId();
+  error HelperConfig__InvalidIndexConfig();
+  error HelperConfig__GetRealContractsOnMainnet();
+  error HelperConfig__UnknownAssetSymbol(string symbol);
 
-    uint24 public constant DEFAULT_V4_POOL_FEE = 3000;
-    int24 public constant DEFAULT_V4_TICK_SPACING = 60;
-    uint24 public constant DEFAULT_V3_POOL_FEE = 3000;
+  uint24 public constant DEFAULT_V4_POOL_FEE = 3000;
+  int24 public constant DEFAULT_V4_TICK_SPACING = 60;
+  uint24 public constant DEFAULT_V3_POOL_FEE = 3000;
 
-    NetworkConfig public activeNetworkConfig;
+  NetworkConfig public activeNetworkConfig;
 
-    mapping(AssetAvailable => mapping(uint256 => AssetConfig))
-        public assetConfigByChainId;
+  mapping(AssetAvailable => mapping(uint256 => AssetConfig)) public assetConfigByChainId;
 
-    /**
-     * @notice Initializes HelperConfig and sets active network configuration based on current chain
-     * @dev Automatically detects chain ID and loads appropriate configuration
-     * @dev Reverts with HelperConfig__InvalidChainId if chain is not supported
-     */
-    constructor() {
-        if (block.chainid == MAINNET_CHAIN_ID) {
-            activeNetworkConfig = getMainnetConfig();
-        } else if (block.chainid == ANVIL_CHAIN_ID) {
-            activeNetworkConfig = getAnvilConfig();
-        } else if (block.chainid == FORK_CHAIN_ID) {
-            activeNetworkConfig = getForkConfig();
-        } else {
-            revert HelperConfig__InvalidChainId();
-        }
+  /**
+   * @notice Initializes HelperConfig and sets active network configuration based on current chain
+   * @dev Automatically detects chain ID and loads appropriate configuration
+   * @dev Reverts with HelperConfig__InvalidChainId if chain is not supported
+   */
+  constructor() {
+    if (block.chainid == MAINNET_CHAIN_ID) {
+      activeNetworkConfig = getMainnetConfig();
+    } else if (block.chainid == ANVIL_CHAIN_ID) {
+      activeNetworkConfig = getAnvilConfig();
+    } else if (block.chainid == FORK_CHAIN_ID) {
+      activeNetworkConfig = getForkConfig();
+    } else {
+      revert HelperConfig__InvalidChainId();
     }
-    function getActiveNetworkConfig()
-        public
-        view
-        returns (NetworkConfig memory)
-    {
-        return activeNetworkConfig;
+  }
+
+  function getActiveNetworkConfig() public view returns (NetworkConfig memory) {
+    return activeNetworkConfig;
+  }
+
+  function getActiveAssetConfig(AssetAvailable asset) public view returns (AssetConfig memory) {
+    return assetConfigByChainId[asset][block.chainid];
+  }
+
+  /**
+   * @notice Returns network configuration for Ethereum mainnet.
+   * @return NetworkConfig Configuration struct with Ethereum mainnet parameters.
+   */
+  function getMainnetConfig() public returns (NetworkConfig memory) {
+    address mainnetDeployer = vm.envAddress("MAINNET_DEPLOYER");
+
+    address[] memory owners = new address[](3);
+    owners[0] = vm.envAddress("MULTISIG_OWNER_1");
+    owners[1] = vm.envAddress("MULTISIG_OWNER_2");
+    owners[2] = vm.envAddress("MULTISIG_OWNER_3");
+
+    _registerMainnetAssetConfigs(MAINNET_CHAIN_ID);
+
+    return NetworkConfig({
+      usdcAddress: USDC_MAINNET,
+      usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
+      usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
+      uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
+      deployerAccount: mainnetDeployer,
+      feeCollector: mainnetDeployer,
+      rebalancer: mainnetDeployer,
+      multiSigOwners: owners
+    });
+  }
+
+  /**
+   * @notice Returns network configuration for the local anvil fork of mainnet (FORK_CHAIN_ID).
+   * @dev Uses the real mainnet tokens, Chainlink feeds and Universal Router, and the anvil default
+   *      accounts, so no env var is needed. Asset configs are stored under FORK_CHAIN_ID.
+   * @return NetworkConfig Configuration struct with the mainnet fork parameters.
+   */
+  function getForkConfig() public returns (NetworkConfig memory) {
+    _registerMainnetAssetConfigs(FORK_CHAIN_ID);
+
+    address[] memory owners = new address[](3);
+    owners[0] = ANVIL_OWNER_1;
+    owners[1] = ANVIL_OWNER_2;
+    owners[2] = ANVIL_OWNER_3;
+
+    return NetworkConfig({
+      usdcAddress: USDC_MAINNET,
+      usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
+      usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
+      uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
+      deployerAccount: ANVIL_DEPLOYER,
+      feeCollector: makeAddr("feeCollector"),
+      rebalancer: makeAddr("rebalancer"),
+      multiSigOwners: owners
+    });
+  }
+
+  /**
+   * @notice Registers the mainnet token and Chainlink feed of every available asset.
+   * @dev Shared by mainnet and the local mainnet fork, which use the same contracts.
+   * @param _chainId The chain id under which the asset configs are stored.
+   */
+  function _registerMainnetAssetConfigs(uint256 _chainId) internal {
+    assetConfigByChainId[AssetAvailable.WETH][_chainId] = AssetConfig({
+      token: WETH_MAINNET, priceFeed: WETH_USD_PRICEFEED_MAINNET, priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    assetConfigByChainId[AssetAvailable.WBTC][_chainId] = AssetConfig({
+      token: WBTC_MAINNET, priceFeed: WBTC_USD_PRICEFEED_MAINNET, priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    assetConfigByChainId[AssetAvailable.LINK][_chainId] = AssetConfig({
+      token: LINK_MAINNET, priceFeed: LINK_USD_PRICEFEED_MAINNET, priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    assetConfigByChainId[AssetAvailable.COMP][_chainId] = AssetConfig({
+      token: COMP_MAINNET, priceFeed: COMP_USD_PRICEFEED_MAINNET, priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+  }
+
+  /**
+   * @notice Returns network configuration for Anvil local development network
+   * @dev Deploys fresh mocks. Virtual so that HelperConfigFromDeployment can load the mocks
+   *      already deployed on a running anvil node instead.
+   * @return NetworkConfig Configuration struct with Anvil local development network parameters
+   */
+  function getAnvilConfig() public virtual returns (NetworkConfig memory) {
+    // Broadcast the mocks so they land on chain under `forge script --broadcast`; skipped in
+    // `forge test` to keep the mock addresses (and the asset0/asset1 sort order) tests rely on.
+    bool isScript = vm.isContext(VmSafe.ForgeContext.ScriptGroup);
+    if (isScript) vm.startBroadcast(ANVIL_DEPLOYER);
+    MockUSDC mockUsdc = new MockUSDC();
+    AssetTokenMock mockWeth = new AssetTokenMock("Wrapped Ether", "WETH", 18);
+    AssetTokenMock mockWbtc = new AssetTokenMock("Wrapped Bitcoin", "WBTC", 8);
+    AssetTokenMock mockLink = new AssetTokenMock("Chainlink Token", "LINK", 18);
+    AssetTokenMock mockComp = new AssetTokenMock("Compound", "COMP", 18);
+
+    MockV3Aggregator mockWethPriceFeed =
+      new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(2000 * 10 ** PRICE_FEED_DECIMALS));
+    MockV3Aggregator mockUsdcPriceFeed =
+      new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(1 * 10 ** PRICE_FEED_DECIMALS));
+    MockV3Aggregator mockWbtcPriceFeed =
+      new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(30000 * 10 ** PRICE_FEED_DECIMALS));
+    MockV3Aggregator mockLinkPriceFeed =
+      new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(7 * 10 ** PRICE_FEED_DECIMALS));
+    MockV3Aggregator mockCompPriceFeed =
+      new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(50 * 10 ** PRICE_FEED_DECIMALS));
+
+    UniversalRouterMock mockUniRouter = new UniversalRouterMock();
+    if (isScript) vm.stopBroadcast();
+
+    assetConfigByChainId[AssetAvailable.WETH][ANVIL_CHAIN_ID] = AssetConfig({
+      token: address(mockWeth), priceFeed: address(mockWethPriceFeed), priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    assetConfigByChainId[AssetAvailable.WBTC][ANVIL_CHAIN_ID] = AssetConfig({
+      token: address(mockWbtc), priceFeed: address(mockWbtcPriceFeed), priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    assetConfigByChainId[AssetAvailable.LINK][ANVIL_CHAIN_ID] = AssetConfig({
+      token: address(mockLink), priceFeed: address(mockLinkPriceFeed), priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    assetConfigByChainId[AssetAvailable.COMP][ANVIL_CHAIN_ID] = AssetConfig({
+      token: address(mockComp), priceFeed: address(mockCompPriceFeed), priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
+    });
+
+    address anvilFeeCollector = makeAddr("feeCollector");
+    address anvilRebalancer = makeAddr("rebalancer");
+
+    address[] memory owners = new address[](3);
+    owners[0] = ANVIL_OWNER_1;
+    owners[1] = ANVIL_OWNER_2;
+    owners[2] = ANVIL_OWNER_3;
+
+    return NetworkConfig({
+      usdcAddress: address(mockUsdc),
+      usdcPriceFeedAddress: address(mockUsdcPriceFeed),
+      usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
+      uniswapUniversalRouter: address(mockUniRouter),
+      deployerAccount: ANVIL_DEPLOYER,
+      feeCollector: anvilFeeCollector,
+      rebalancer: anvilRebalancer,
+      multiSigOwners: owners
+    });
+  }
+
+  /**
+   * @notice Returns network configuration for a specific chain ID
+   * @dev Allows retrieving configuration for chains other than the current one
+   * @dev Useful for testing deployment on multiple chains
+   * @param chainId The chain ID to get configuration for
+   * @return NetworkConfig Configuration struct for the specified chain
+   * @custom:throws HelperConfig__InvalidChainId if chainId is not supported
+   */
+  function getConfigByChainId(uint256 chainId) public returns (NetworkConfig memory) {
+    if (chainId == MAINNET_CHAIN_ID) {
+      return getMainnetConfig();
+    } else if (chainId == ANVIL_CHAIN_ID) {
+      return getAnvilConfig();
+    } else if (chainId == FORK_CHAIN_ID) {
+      return getForkConfig();
+    } else {
+      revert HelperConfig__InvalidChainId();
     }
+  }
 
-    function getActiveAssetConfig(
-        AssetAvailable asset
-    ) public view returns (AssetConfig memory) {
-        return assetConfigByChainId[asset][block.chainid];
+  //Helpers
+  /**
+   * @notice Returns the symbol used for an asset in env vars and in the deployment file.
+   * @param _asset The asset.
+   * @return The asset symbol (WETH, WBTC, LINK or COMP).
+   */
+  function getAssetSymbol(AssetAvailable _asset) public pure returns (string memory) {
+    if (_asset == AssetAvailable.WETH) return "WETH";
+    if (_asset == AssetAvailable.WBTC) return "WBTC";
+    if (_asset == AssetAvailable.LINK) return "LINK";
+    return "COMP";
+  }
+
+  /**
+   * @notice Returns the asset matching a symbol.
+   * @dev Reverts with HelperConfig__UnknownAssetSymbol if the symbol is not WETH, WBTC, LINK or COMP.
+   * @param _symbol The asset symbol, case sensitive.
+   * @return The matching asset.
+   */
+  function getAssetBySymbol(string memory _symbol) public pure returns (AssetAvailable) {
+    bytes32 symbolHash = keccak256(bytes(_symbol));
+    for (uint8 i = 0; i <= uint8(type(AssetAvailable).max); i++) {
+      AssetAvailable asset = AssetAvailable(i);
+      if (keccak256(bytes(getAssetSymbol(asset))) == symbolHash) {
+        return asset;
+      }
     }
-    /**
-     * @notice Returns network configuration for Ethereum mainnet.
-     * @return NetworkConfig Configuration struct with Ethereum mainnet parameters.
-     */
-    function getMainnetConfig() public returns (NetworkConfig memory) {
-        address mainnetDeployer = vm.envAddress("MAINNET_DEPLOYER");
+    revert HelperConfig__UnknownAssetSymbol(_symbol);
+  }
 
-        address[] memory owners = new address[](3);
-        owners[0] = vm.envAddress("MULTISIG_OWNER_1");
-        owners[1] = vm.envAddress("MULTISIG_OWNER_2");
-        owners[2] = vm.envAddress("MULTISIG_OWNER_3");
+  function getFeeCollector() public view returns (address) {
+    return activeNetworkConfig.feeCollector;
+  }
 
-        _registerMainnetAssetConfigs(MAINNET_CHAIN_ID);
+  function getRebalancer() public view returns (address) {
+    return activeNetworkConfig.rebalancer;
+  }
 
-        return
-            NetworkConfig({
-                usdcAddress: USDC_MAINNET,
-                usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
-                usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
-                uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
-                deployerAccount: mainnetDeployer,
-                feeCollector: mainnetDeployer,
-                rebalancer: mainnetDeployer,
-                multiSigOwners: owners
-            });
+  /**
+   * @notice Returns the default swap routes for a pair of sorted index assets.
+   * @dev The generated routes assume Uniswap V4 pools with no hooks, fee tier 3000, and tick spacing 60.
+   * @param _asset0 The sorted asset0 token address.
+   * @param _asset1 The sorted asset1 token address.
+   * @return routeAsset0Usdc The default route for Asset0 ↔ USDC swaps.
+   * @return routeAsset1Usdc The default route for Asset1 ↔ USDC swaps.
+   * @return routeAsset0Asset1 The default route for Asset0 ↔ Asset1 swaps.
+   */
+  function getDefaultSwapRoutes(address _asset0, address _asset1)
+    public
+    view
+    returns (SwapRoute memory routeAsset0Usdc, SwapRoute memory routeAsset1Usdc, SwapRoute memory routeAsset0Asset1)
+  {
+    // USDC ↔ asset routes use V3 (deep, established liquidity).
+    routeAsset0Usdc = _buildDefaultV3Route(_asset0, activeNetworkConfig.usdcAddress);
+    routeAsset1Usdc = _buildDefaultV3Route(_asset1, activeNetworkConfig.usdcAddress);
+    // Asset ↔ asset route also uses V3 (V4 pools currently lack
+    // sufficient liquidity on mainnet).
+    routeAsset0Asset1 = _buildDefaultV3Route(_asset0, _asset1);
+  }
+
+  /**
+   * @notice Builds a default Uniswap V4 route for two tokens.
+   * @dev Tokens are sorted to satisfy the `PoolKey` requirement.
+   * @param _tokenA The first token address.
+   * @param _tokenB The second token address.
+   * @return route The generated V4 route.
+   */
+  function buildDefaultV4Route(address _tokenA, address _tokenB) public pure returns (SwapRoute memory route) {
+    return _buildDefaultV4Route(_tokenA, _tokenB);
+  }
+
+  function _buildDefaultV4Route(address _tokenA, address _tokenB) internal pure returns (SwapRoute memory route) {
+    (address currency0, address currency1) = _tokenA < _tokenB ? (_tokenA, _tokenB) : (_tokenB, _tokenA);
+
+    route = SwapRoute({
+      version: PoolVersion.V4,
+      poolKey: PoolKey({
+        currency0: Currency.wrap(currency0),
+        currency1: Currency.wrap(currency1),
+        fee: DEFAULT_V4_POOL_FEE,
+        tickSpacing: DEFAULT_V4_TICK_SPACING,
+        hooks: IHooks(address(0))
+      }),
+      v3Path: bytes("")
+    });
+  }
+
+  /**
+   * @notice Builds a default Uniswap V3 route for two tokens.
+   * @dev The path is encoded as: tokenA (20 bytes) + fee (3 bytes) + tokenB (20 bytes).
+   *      Direction is adjusted at swap time by SwapManager._getDirectionalV3Path.
+   * @param _tokenA The first token address.
+   * @param _tokenB The second token address.
+   * @return route The generated V3 route.
+   */
+  function _buildDefaultV3Route(address _tokenA, address _tokenB) internal pure returns (SwapRoute memory route) {
+    route = SwapRoute({
+      version: PoolVersion.V3,
+      poolKey: PoolKey({
+        currency0: Currency.wrap(address(0)),
+        currency1: Currency.wrap(address(0)),
+        fee: 0,
+        tickSpacing: 0,
+        hooks: IHooks(address(0))
+      }),
+      v3Path: abi.encodePacked(_tokenA, DEFAULT_V3_POOL_FEE, _tokenB)
+    });
+  }
+
+  function getAssetTokenMocks()
+    public
+    view
+    returns (AssetTokenMock, MockUSDC, AssetTokenMock, AssetTokenMock, AssetTokenMock)
+  {
+    if (block.chainid != ANVIL_CHAIN_ID) {
+      revert HelperConfig__GetRealContractsOnMainnet();
     }
+    AssetConfig memory wethConfig = getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory wbtcConfig = getActiveAssetConfig(AssetAvailable.WBTC);
+    AssetConfig memory linkConfig = getActiveAssetConfig(AssetAvailable.LINK);
+    AssetConfig memory compConfig = getActiveAssetConfig(AssetAvailable.COMP);
 
-    /**
-     * @notice Returns network configuration for the local anvil fork of mainnet (FORK_CHAIN_ID).
-     * @dev Uses the real mainnet tokens, Chainlink feeds and Universal Router, and the anvil default
-     *      accounts, so no env var is needed. Asset configs are stored under FORK_CHAIN_ID.
-     * @return NetworkConfig Configuration struct with the mainnet fork parameters.
-     */
-    function getForkConfig() public returns (NetworkConfig memory) {
-        _registerMainnetAssetConfigs(FORK_CHAIN_ID);
+    return (
+      AssetTokenMock(wethConfig.token),
+      MockUSDC(activeNetworkConfig.usdcAddress),
+      AssetTokenMock(wbtcConfig.token),
+      AssetTokenMock(linkConfig.token),
+      AssetTokenMock(compConfig.token)
+    );
+  }
 
-        address[] memory owners = new address[](3);
-        owners[0] = ANVIL_OWNER_1;
-        owners[1] = ANVIL_OWNER_2;
-        owners[2] = ANVIL_OWNER_3;
-
-        return
-            NetworkConfig({
-                usdcAddress: USDC_MAINNET,
-                usdcPriceFeedAddress: USDC_USD_PRICEFEED_MAINNET,
-                usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
-                uniswapUniversalRouter: UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
-                deployerAccount: ANVIL_DEPLOYER,
-                feeCollector: makeAddr("feeCollector"),
-                rebalancer: makeAddr("rebalancer"),
-                multiSigOwners: owners
-            });
+  function getPriceFeedMocks()
+    public
+    view
+    returns (MockV3Aggregator, MockV3Aggregator, MockV3Aggregator, MockV3Aggregator, MockV3Aggregator)
+  {
+    if (block.chainid != ANVIL_CHAIN_ID) {
+      revert HelperConfig__GetRealContractsOnMainnet();
     }
+    AssetConfig memory wethConfig = getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory wbtcConfig = getActiveAssetConfig(AssetAvailable.WBTC);
+    AssetConfig memory linkConfig = getActiveAssetConfig(AssetAvailable.LINK);
+    AssetConfig memory compConfig = getActiveAssetConfig(AssetAvailable.COMP);
 
-    /**
-     * @notice Registers the mainnet token and Chainlink feed of every available asset.
-     * @dev Shared by mainnet and the local mainnet fork, which use the same contracts.
-     * @param _chainId The chain id under which the asset configs are stored.
-     */
-    function _registerMainnetAssetConfigs(uint256 _chainId) internal {
-        assetConfigByChainId[AssetAvailable.WETH][
-            _chainId
-        ] = AssetConfig({
-            token: WETH_MAINNET,
-            priceFeed: WETH_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
+    return (
+      MockV3Aggregator(wethConfig.priceFeed),
+      MockV3Aggregator(activeNetworkConfig.usdcPriceFeedAddress),
+      MockV3Aggregator(wbtcConfig.priceFeed),
+      MockV3Aggregator(linkConfig.priceFeed),
+      MockV3Aggregator(compConfig.priceFeed)
+    );
+  }
 
-        assetConfigByChainId[AssetAvailable.WBTC][
-            _chainId
-        ] = AssetConfig({
-            token: WBTC_MAINNET,
-            priceFeed: WBTC_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.LINK][
-            _chainId
-        ] = AssetConfig({
-            token: LINK_MAINNET,
-            priceFeed: LINK_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.COMP][
-            _chainId
-        ] = AssetConfig({
-            token: COMP_MAINNET,
-            priceFeed: COMP_USD_PRICEFEED_MAINNET,
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-    }
-
-    /**
-     * @notice Returns network configuration for Anvil local development network
-     * @dev Deploys fresh mocks. Virtual so that HelperConfigFromDeployment can load the mocks
-     *      already deployed on a running anvil node instead.
-     * @return NetworkConfig Configuration struct with Anvil local development network parameters
-     */
-    function getAnvilConfig() public virtual returns (NetworkConfig memory) {
-        // Broadcast the mocks so they land on chain under `forge script --broadcast`; skipped in
-        // `forge test` to keep the mock addresses (and the asset0/asset1 sort order) tests rely on.
-        bool isScript = vm.isContext(VmSafe.ForgeContext.ScriptGroup);
-        if (isScript) vm.startBroadcast(ANVIL_DEPLOYER);
-        MockUSDC mockUsdc = new MockUSDC();
-        AssetTokenMock mockWeth = new AssetTokenMock(
-            "Wrapped Ether",
-            "WETH",
-            18
-        );
-        AssetTokenMock mockWbtc = new AssetTokenMock(
-            "Wrapped Bitcoin",
-            "WBTC",
-            8
-        );
-        AssetTokenMock mockLink = new AssetTokenMock(
-            "Chainlink Token",
-            "LINK",
-            18
-        );
-        AssetTokenMock mockComp = new AssetTokenMock("Compound", "COMP", 18);
-
-        MockV3Aggregator mockWethPriceFeed = new MockV3Aggregator(
-            PRICE_FEED_DECIMALS,
-            int256(2000 * 10 ** PRICE_FEED_DECIMALS)
-        );
-        MockV3Aggregator mockUsdcPriceFeed = new MockV3Aggregator(
-            PRICE_FEED_DECIMALS,
-            int256(1 * 10 ** PRICE_FEED_DECIMALS)
-        );
-        MockV3Aggregator mockWbtcPriceFeed = new MockV3Aggregator(
-            PRICE_FEED_DECIMALS,
-            int256(30000 * 10 ** PRICE_FEED_DECIMALS)
-        );
-        MockV3Aggregator mockLinkPriceFeed = new MockV3Aggregator(
-            PRICE_FEED_DECIMALS,
-            int256(7 * 10 ** PRICE_FEED_DECIMALS)
-        );
-        MockV3Aggregator mockCompPriceFeed = new MockV3Aggregator(
-            PRICE_FEED_DECIMALS,
-            int256(50 * 10 ** PRICE_FEED_DECIMALS)
-        );
-
-        UniversalRouterMock mockUniRouter = new UniversalRouterMock();
-        if (isScript) vm.stopBroadcast();
-
-        assetConfigByChainId[AssetAvailable.WETH][
-            ANVIL_CHAIN_ID
-        ] = AssetConfig({
-            token: address(mockWeth),
-            priceFeed: address(mockWethPriceFeed),
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.WBTC][
-            ANVIL_CHAIN_ID
-        ] = AssetConfig({
-            token: address(mockWbtc),
-            priceFeed: address(mockWbtcPriceFeed),
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.LINK][
-            ANVIL_CHAIN_ID
-        ] = AssetConfig({
-            token: address(mockLink),
-            priceFeed: address(mockLinkPriceFeed),
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        assetConfigByChainId[AssetAvailable.COMP][
-            ANVIL_CHAIN_ID
-        ] = AssetConfig({
-            token: address(mockComp),
-            priceFeed: address(mockCompPriceFeed),
-            priceFeedMaxDelay: ASSET_USD_PRICEFEED_MAX_DELAY
-        });
-
-        address anvilFeeCollector = makeAddr("feeCollector");
-        address anvilRebalancer = makeAddr("rebalancer");
-
-        address[] memory owners = new address[](3);
-        owners[0] = ANVIL_OWNER_1;
-        owners[1] = ANVIL_OWNER_2;
-        owners[2] = ANVIL_OWNER_3;
-
-        return
-            NetworkConfig({
-                usdcAddress: address(mockUsdc),
-                usdcPriceFeedAddress: address(mockUsdcPriceFeed),
-                usdcPriceFeedMaxDelay: USDC_USD_PRICEFEED_MAX_DELAY,
-                uniswapUniversalRouter: address(mockUniRouter),
-                deployerAccount: ANVIL_DEPLOYER,
-                feeCollector: anvilFeeCollector,
-                rebalancer: anvilRebalancer,
-                multiSigOwners: owners
-            });
-    }
-    /**
-     * @notice Returns network configuration for a specific chain ID
-     * @dev Allows retrieving configuration for chains other than the current one
-     * @dev Useful for testing deployment on multiple chains
-     * @param chainId The chain ID to get configuration for
-     * @return NetworkConfig Configuration struct for the specified chain
-     * @custom:throws HelperConfig__InvalidChainId if chainId is not supported
-     */
-    function getConfigByChainId(
-        uint256 chainId
-    ) public returns (NetworkConfig memory) {
-        if (chainId == MAINNET_CHAIN_ID) {
-            return getMainnetConfig();
-        } else if (chainId == ANVIL_CHAIN_ID) {
-            return getAnvilConfig();
-        } else if (chainId == FORK_CHAIN_ID) {
-            return getForkConfig();
-        } else {
-            revert HelperConfig__InvalidChainId();
-        }
-    }
-
-    //Helpers
-    /**
-     * @notice Returns the symbol used for an asset in env vars and in the deployment file.
-     * @param _asset The asset.
-     * @return The asset symbol (WETH, WBTC, LINK or COMP).
-     */
-    function getAssetSymbol(
-        AssetAvailable _asset
-    ) public pure returns (string memory) {
-        if (_asset == AssetAvailable.WETH) return "WETH";
-        if (_asset == AssetAvailable.WBTC) return "WBTC";
-        if (_asset == AssetAvailable.LINK) return "LINK";
-        return "COMP";
-    }
-
-    /**
-     * @notice Returns the asset matching a symbol.
-     * @dev Reverts with HelperConfig__UnknownAssetSymbol if the symbol is not WETH, WBTC, LINK or COMP.
-     * @param _symbol The asset symbol, case sensitive.
-     * @return The matching asset.
-     */
-    function getAssetBySymbol(
-        string memory _symbol
-    ) public pure returns (AssetAvailable) {
-        bytes32 symbolHash = keccak256(bytes(_symbol));
-        for (uint8 i = 0; i <= uint8(type(AssetAvailable).max); i++) {
-            AssetAvailable asset = AssetAvailable(i);
-            if (keccak256(bytes(getAssetSymbol(asset))) == symbolHash) {
-                return asset;
-            }
-        }
-        revert HelperConfig__UnknownAssetSymbol(_symbol);
-    }
-
-    function getFeeCollector() public view returns (address) {
-        return activeNetworkConfig.feeCollector;
-    }
-
-    function getRebalancer() public view returns (address) {
-        return activeNetworkConfig.rebalancer;
-    }
-
-    /**
-     * @notice Returns the default swap routes for a pair of sorted index assets.
-     * @dev The generated routes assume Uniswap V4 pools with no hooks, fee tier 3000, and tick spacing 60.
-     * @param _asset0 The sorted asset0 token address.
-     * @param _asset1 The sorted asset1 token address.
-     * @return routeAsset0Usdc The default route for Asset0 ↔ USDC swaps.
-     * @return routeAsset1Usdc The default route for Asset1 ↔ USDC swaps.
-     * @return routeAsset0Asset1 The default route for Asset0 ↔ Asset1 swaps.
-     */
-    function getDefaultSwapRoutes(
-        address _asset0,
-        address _asset1
-    )
-        public
-        view
-        returns (
-            SwapRoute memory routeAsset0Usdc,
-            SwapRoute memory routeAsset1Usdc,
-            SwapRoute memory routeAsset0Asset1
-        )
-    {
-        // USDC ↔ asset routes use V3 (deep, established liquidity).
-        routeAsset0Usdc = _buildDefaultV3Route(
-            _asset0,
-            activeNetworkConfig.usdcAddress
-        );
-        routeAsset1Usdc = _buildDefaultV3Route(
-            _asset1,
-            activeNetworkConfig.usdcAddress
-        );
-        // Asset ↔ asset route also uses V3 (V4 pools currently lack
-        // sufficient liquidity on mainnet).
-        routeAsset0Asset1 = _buildDefaultV3Route(_asset0, _asset1);
-    }
-
-    /**
-     * @notice Builds a default Uniswap V4 route for two tokens.
-     * @dev Tokens are sorted to satisfy the `PoolKey` requirement.
-     * @param _tokenA The first token address.
-     * @param _tokenB The second token address.
-     * @return route The generated V4 route.
-     */
-    function buildDefaultV4Route(
-        address _tokenA,
-        address _tokenB
-    ) public pure returns (SwapRoute memory route) {
-        return _buildDefaultV4Route(_tokenA, _tokenB);
-    }
-
-    function _buildDefaultV4Route(
-        address _tokenA,
-        address _tokenB
-    ) internal pure returns (SwapRoute memory route) {
-        (address currency0, address currency1) = _tokenA < _tokenB
-            ? (_tokenA, _tokenB)
-            : (_tokenB, _tokenA);
-
-        route = SwapRoute({
-            version: PoolVersion.V4,
-            poolKey: PoolKey({
-                currency0: Currency.wrap(currency0),
-                currency1: Currency.wrap(currency1),
-                fee: DEFAULT_V4_POOL_FEE,
-                tickSpacing: DEFAULT_V4_TICK_SPACING,
-                hooks: IHooks(address(0))
-            }),
-            v3Path: bytes("")
-        });
-    }
-
-    /**
-     * @notice Builds a default Uniswap V3 route for two tokens.
-     * @dev The path is encoded as: tokenA (20 bytes) + fee (3 bytes) + tokenB (20 bytes).
-     *      Direction is adjusted at swap time by SwapManager._getDirectionalV3Path.
-     * @param _tokenA The first token address.
-     * @param _tokenB The second token address.
-     * @return route The generated V3 route.
-     */
-    function _buildDefaultV3Route(
-        address _tokenA,
-        address _tokenB
-    ) internal pure returns (SwapRoute memory route) {
-        route = SwapRoute({
-            version: PoolVersion.V3,
-            poolKey: PoolKey({
-                currency0: Currency.wrap(address(0)),
-                currency1: Currency.wrap(address(0)),
-                fee: 0,
-                tickSpacing: 0,
-                hooks: IHooks(address(0))
-            }),
-            v3Path: abi.encodePacked(_tokenA, DEFAULT_V3_POOL_FEE, _tokenB)
-        });
-    }
-
-    function getAssetTokenMocks()
-        public
-        view
-        returns (
-            AssetTokenMock,
-            MockUSDC,
-            AssetTokenMock,
-            AssetTokenMock,
-            AssetTokenMock
-        )
-    {
-        if (block.chainid != ANVIL_CHAIN_ID) {
-            revert HelperConfig__GetRealContractsOnMainnet();
-        }
-        AssetConfig memory wethConfig = getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory wbtcConfig = getActiveAssetConfig(
-            AssetAvailable.WBTC
-        );
-        AssetConfig memory linkConfig = getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-        AssetConfig memory compConfig = getActiveAssetConfig(
-            AssetAvailable.COMP
-        );
-
-        return (
-            AssetTokenMock(wethConfig.token),
-            MockUSDC(activeNetworkConfig.usdcAddress),
-            AssetTokenMock(wbtcConfig.token),
-            AssetTokenMock(linkConfig.token),
-            AssetTokenMock(compConfig.token)
-        );
-    }
-
-    function getPriceFeedMocks()
-        public
-        view
-        returns (
-            MockV3Aggregator,
-            MockV3Aggregator,
-            MockV3Aggregator,
-            MockV3Aggregator,
-            MockV3Aggregator
-        )
-    {
-        if (block.chainid != ANVIL_CHAIN_ID) {
-            revert HelperConfig__GetRealContractsOnMainnet();
-        }
-        AssetConfig memory wethConfig = getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory wbtcConfig = getActiveAssetConfig(
-            AssetAvailable.WBTC
-        );
-        AssetConfig memory linkConfig = getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-        AssetConfig memory compConfig = getActiveAssetConfig(
-            AssetAvailable.COMP
-        );
-
-        return (
-            MockV3Aggregator(wethConfig.priceFeed),
-            MockV3Aggregator(activeNetworkConfig.usdcPriceFeedAddress),
-            MockV3Aggregator(wbtcConfig.priceFeed),
-            MockV3Aggregator(linkConfig.priceFeed),
-            MockV3Aggregator(compConfig.priceFeed)
-        );
-    }
-
-    function getUniswapUniversalRouter()
-        public
-        view
-        returns (UniversalRouterMock)
-    {
-        return UniversalRouterMock(activeNetworkConfig.uniswapUniversalRouter);
-    }
+  function getUniswapUniversalRouter() public view returns (UniversalRouterMock) {
+    return UniversalRouterMock(activeNetworkConfig.uniswapUniversalRouter);
+  }
 }

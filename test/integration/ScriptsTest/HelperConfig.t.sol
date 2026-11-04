@@ -3,795 +3,463 @@ pragma solidity ^0.8.13;
 
 import {Test} from "forge-std/Test.sol";
 import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
-import {
-    HelperConfig,
-    AssetConfig,
-    NetworkConfig
-} from "../../../script/HelperConfig.s.sol";
+import {HelperConfig, AssetConfig, NetworkConfig} from "../../../script/HelperConfig.s.sol";
 import {CodeConstants} from "../../../script/CodeConstants.sol";
 import {AssetAvailable, SwapRoute, PoolVersion} from "../../../src/types.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {AssetTokenMock} from "../../mocks/AssetTokenMock.sol";
 import {MockUSDC} from "../../mocks/USDCMock.sol";
 import {UniversalRouterMock} from "../../mocks/UniversalRouterMock.sol";
-import {
-    MockV3Aggregator
-} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
+import {MockV3Aggregator} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 
 contract HelperConfigTest is Test, CodeConstants {
-    HelperConfig public anvilHelperConfig;
-    HelperConfig public mainnetHelperConfig;
+  HelperConfig public anvilHelperConfig;
+  HelperConfig public mainnetHelperConfig;
 
-    uint256 mainnetForkId;
+  uint256 mainnetForkId;
 
-    modifier onAnvilFork() {
-        anvilHelperConfig = new HelperConfig();
-        _;
+  modifier onAnvilFork() {
+    anvilHelperConfig = new HelperConfig();
+    _;
+  }
+
+  modifier onMainnetFork() {
+    vm.createSelectFork(vm.rpcUrl("mainnet"), MAINNET_FORK_BLOCK);
+    mainnetHelperConfig = new HelperConfig();
+    _;
+  }
+
+  function setUp() public {}
+
+  function testGetActiveNetworkConfigOnAnvil() public onAnvilFork {
+    // On Anvil: verify all fields are populated with non-zero mock addresses
+    assertEq(block.chainid, 31337, "Should be on Anvil fork");
+    NetworkConfig memory config = anvilHelperConfig.getActiveNetworkConfig();
+
+    assertNotEq(config.usdcAddress, address(0), "USDC address must not be zero");
+    assertNotEq(config.usdcPriceFeedAddress, address(0), "USDC price feed must not be zero");
+    assertNotEq(config.uniswapUniversalRouter, address(0), "Router must not be zero");
+    assertEq(config.deployerAccount, ANVIL_DEPLOYER, "Deployer must be Anvil default");
+    assertNotEq(config.feeCollector, address(0), "Fee collector must not be zero");
+    assertNotEq(config.rebalancer, address(0), "Rebalancer must not be zero");
+
+    // Verify asset configs are populated for all supported assets
+    AssetConfig memory weth = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory wbtc = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WBTC);
+    AssetConfig memory link = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.LINK);
+    // AssetConfig memory usdc = anvilHelperConfig.getActiveAssetConfig(
+    //     AssetAvailable.USDC
+    // );
+
+    assertNotEq(weth.token, WETH_MAINNET, "WETH token must not be mainnet address");
+    assertNotEq(weth.priceFeed, WETH_USD_PRICEFEED_MAINNET, "WETH feed must not be mainnet address");
+    assertNotEq(wbtc.token, WBTC_MAINNET, "WBTC token must not be mainnet address");
+    assertNotEq(wbtc.priceFeed, WBTC_USD_PRICEFEED_MAINNET, "WBTC feed must not be mainnet address");
+    assertNotEq(link.token, LINK_MAINNET, "LINK token must not be mainnet address");
+    assertNotEq(link.priceFeed, LINK_USD_PRICEFEED_MAINNET, "LINK feed must not be mainnet address");
+    assertNotEq(config.usdcAddress, USDC_MAINNET, "USDC token must not be mainnet address");
+    assertNotEq(config.usdcPriceFeedAddress, USDC_USD_PRICEFEED_MAINNET, "USDC feed must not be mainnet address");
+  }
+
+  function testGetActiveNetworkConfigOnMainnet() public onMainnetFork {
+    // Verify network config points to real mainnet contracts
+    NetworkConfig memory config = mainnetHelperConfig.getActiveNetworkConfig();
+
+    assertEq(config.usdcAddress, USDC_MAINNET, "USDC must be mainnet address");
+    assertEq(config.usdcPriceFeedAddress, USDC_USD_PRICEFEED_MAINNET, "USDC feed must be mainnet");
+    assertEq(config.uniswapUniversalRouter, UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET, "Router must be mainnet");
+
+    // Verify asset configs point to real mainnet contracts
+    AssetConfig memory weth = mainnetHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory wbtc = mainnetHelperConfig.getActiveAssetConfig(AssetAvailable.WBTC);
+    AssetConfig memory link = mainnetHelperConfig.getActiveAssetConfig(AssetAvailable.LINK);
+
+    assertEq(weth.token, WETH_MAINNET, "WETH token must be mainnet");
+    assertEq(weth.priceFeed, WETH_USD_PRICEFEED_MAINNET, "WETH feed must be mainnet");
+    assertEq(wbtc.token, WBTC_MAINNET, "WBTC token must be mainnet");
+    assertEq(wbtc.priceFeed, WBTC_USD_PRICEFEED_MAINNET, "WBTC feed must be mainnet");
+    assertEq(link.token, LINK_MAINNET, "LINK token must be mainnet");
+    assertEq(link.priceFeed, LINK_USD_PRICEFEED_MAINNET, "LINK feed must be mainnet");
+    assertEq(config.usdcAddress, USDC_MAINNET, "USDC token must be mainnet");
+    assertEq(config.usdcPriceFeedAddress, USDC_USD_PRICEFEED_MAINNET, "USDC feed must be mainnet");
+  }
+
+  function testHelperConfigRevertIfUnsupportedChain() public {
+    // Create and select a fork of an unsupported chain (e.g., Polygon)
+    vm.createSelectFork(vm.rpcUrl("polygon"));
+
+    // Expect the constructor to revert with the correct error message
+    vm.expectRevert(HelperConfig.HelperConfig__InvalidChainId.selector);
+    HelperConfig unsupportedHelperConfig = new HelperConfig();
+  }
+
+  function testGetActiveAssetConfigWorksOnAnvil() public onAnvilFork {
+    AssetConfig memory wethConfig = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    assertNotEq(wethConfig.token, address(0), "WETH token must not be zero");
+    assertNotEq(wethConfig.priceFeed, address(0), "WETH price feed must not be zero");
+  }
+
+  function testGetActiveAssetConfigWorksOnMainnet() public onMainnetFork {
+    AssetConfig memory wethConfig = mainnetHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    assertEq(wethConfig.token, WETH_MAINNET, "WETH token must be mainnet address");
+    assertEq(wethConfig.priceFeed, WETH_USD_PRICEFEED_MAINNET, "WETH price feed must be mainnet address");
+  }
+
+  function testGetFeeCollectorOnAnvil() public onAnvilFork {
+    address feeCollector = anvilHelperConfig.getFeeCollector();
+    assertEq(
+      feeCollector,
+      anvilHelperConfig.getActiveNetworkConfig().feeCollector,
+      "Fee collector must match active network config"
+    );
+    assertEq(feeCollector, makeAddr("feeCollector"), "Fee collector must match makeAddr('feeCollector')");
+  }
+
+  function testGetRebalancerOnAnvil() public onAnvilFork {
+    address rebalancer = anvilHelperConfig.getRebalancer();
+    assertEq(
+      rebalancer, anvilHelperConfig.getActiveNetworkConfig().rebalancer, "Rebalancer must match active network config"
+    );
+    assertEq(rebalancer, makeAddr("rebalancer"), "Rebalancer must match makeAddr('rebalancer')");
+  }
+
+  function testGetFeeCollectorOnMainnet() public onMainnetFork {
+    address feeCollector = mainnetHelperConfig.getFeeCollector();
+    assertEq(
+      feeCollector,
+      mainnetHelperConfig.getActiveNetworkConfig().feeCollector,
+      "Fee collector must match active network config"
+    );
+    address expectedDeployer = vm.envAddress("MAINNET_DEPLOYER");
+    assertEq(feeCollector, expectedDeployer, "Fee collector must match MAINNET_DEPLOYER from .env");
+  }
+
+  function testGetRebalancerOnMainnet() public onMainnetFork {
+    address rebalancer = mainnetHelperConfig.getRebalancer();
+    assertEq(
+      rebalancer, mainnetHelperConfig.getActiveNetworkConfig().rebalancer, "Rebalancer must match active network config"
+    );
+    address expectedDeployer = vm.envAddress("MAINNET_DEPLOYER");
+    assertEq(rebalancer, expectedDeployer, "Rebalancer must match MAINNET_DEPLOYER from .env");
+  }
+
+  // ──────────────────────────────────────────────
+  //  buildDefaultV4Route
+  // ──────────────────────────────────────────────
+
+  function testBuildDefaultV4RouteSortsCurrencies() public onAnvilFork {
+    address tokenA = makeAddr("tokenA"); // higher address
+    address tokenB = address(1); // lower address
+
+    SwapRoute memory route = anvilHelperConfig.buildDefaultV4Route(tokenA, tokenB);
+
+    // currency0 must be the lower address
+    assertEq(Currency.unwrap(route.poolKey.currency0), tokenB, "currency0 must be lower address");
+    assertEq(Currency.unwrap(route.poolKey.currency1), tokenA, "currency1 must be higher address");
+  }
+
+  function testBuildDefaultV4RouteSetsCorrectPoolParams() public onAnvilFork {
+    address tokenA = makeAddr("tokenA");
+    address tokenB = makeAddr("tokenB");
+
+    SwapRoute memory route = anvilHelperConfig.buildDefaultV4Route(tokenA, tokenB);
+
+    assertEq(uint8(route.version), uint8(PoolVersion.V4), "Version must be V4");
+    assertEq(route.poolKey.fee, 3000, "Fee must be 3000");
+    assertEq(route.poolKey.tickSpacing, 60, "Tick spacing must be 60");
+    assertEq(address(route.poolKey.hooks), address(0), "Hooks must be zero address");
+    assertEq(route.v3Path.length, 0, "v3Path must be empty for V4 route");
+  }
+
+  function testBuildDefaultV4RouteIsSymmetric() public onAnvilFork {
+    address tokenA = makeAddr("tokenA");
+    address tokenB = makeAddr("tokenB");
+
+    SwapRoute memory routeAB = anvilHelperConfig.buildDefaultV4Route(tokenA, tokenB);
+    SwapRoute memory routeBA = anvilHelperConfig.buildDefaultV4Route(tokenB, tokenA);
+
+    assertEq(
+      Currency.unwrap(routeAB.poolKey.currency0),
+      Currency.unwrap(routeBA.poolKey.currency0),
+      "currency0 must be equal regardless of argument order"
+    );
+    assertEq(
+      Currency.unwrap(routeAB.poolKey.currency1),
+      Currency.unwrap(routeBA.poolKey.currency1),
+      "currency1 must be equal regardless of argument order"
+    );
+  }
+
+  // ──────────────────────────────────────────────
+  //  getDefaultSwapRoutes
+  // ──────────────────────────────────────────────
+
+  function testGetDefaultSwapRoutesReturnsThreeRoutes() public onAnvilFork {
+    AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.LINK);
+
+    // Sort assets like the production code expects
+    (address asset0, address asset1) =
+      wethCfg.token < linkCfg.token ? (wethCfg.token, linkCfg.token) : (linkCfg.token, wethCfg.token);
+
+    (SwapRoute memory routeAsset0Usdc, SwapRoute memory routeAsset1Usdc, SwapRoute memory routeAsset0Asset1) =
+      anvilHelperConfig.getDefaultSwapRoutes(asset0, asset1);
+
+    // USDC ↔ asset routes use V3 (deep liquidity), asset ↔ asset uses V4
+    assertEq(uint8(routeAsset0Usdc.version), uint8(PoolVersion.V3), "Route0-USDC must be V3");
+    assertEq(uint8(routeAsset1Usdc.version), uint8(PoolVersion.V3), "Route1-USDC must be V3");
+    assertEq(uint8(routeAsset0Asset1.version), uint8(PoolVersion.V3), "Route0-1 must be V3");
+  }
+
+  function testGetDefaultSwapRoutesAsset0UsdcContainsCorrectPair() public onAnvilFork {
+    AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.LINK);
+    NetworkConfig memory config = anvilHelperConfig.getActiveNetworkConfig();
+
+    (address asset0, address asset1) =
+      wethCfg.token < linkCfg.token ? (wethCfg.token, linkCfg.token) : (linkCfg.token, wethCfg.token);
+
+    (SwapRoute memory routeAsset0Usdc,,) = anvilHelperConfig.getDefaultSwapRoutes(asset0, asset1);
+
+    // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
+    bytes memory path = routeAsset0Usdc.v3Path;
+    assertGe(path.length, 43, "V3 path must be at least 43 bytes");
+
+    // Extract first and last 20-byte addresses from the packed path
+    address pathToken0;
+    address pathToken1;
+    assembly {
+      pathToken0 := shr(96, mload(add(path, 32)))
+      pathToken1 := shr(96, mload(add(path, 55)))
     }
+    assertTrue(
+      (pathToken0 == asset0 && pathToken1 == config.usdcAddress)
+        || (pathToken0 == config.usdcAddress && pathToken1 == asset0),
+      "Route asset0-USDC must contain asset0 and USDC"
+    );
+  }
 
-    modifier onMainnetFork() {
-        vm.createSelectFork(vm.rpcUrl("mainnet"), MAINNET_FORK_BLOCK);
-        mainnetHelperConfig = new HelperConfig();
-        _;
+  function testGetDefaultSwapRoutesAsset1UsdcContainsCorrectPair() public onAnvilFork {
+    AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.LINK);
+    NetworkConfig memory config = anvilHelperConfig.getActiveNetworkConfig();
+
+    (address asset0, address asset1) =
+      wethCfg.token < linkCfg.token ? (wethCfg.token, linkCfg.token) : (linkCfg.token, wethCfg.token);
+
+    (, SwapRoute memory routeAsset1Usdc,) = anvilHelperConfig.getDefaultSwapRoutes(asset0, asset1);
+
+    // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
+    bytes memory path = routeAsset1Usdc.v3Path;
+    assertGe(path.length, 43, "V3 path must be at least 43 bytes");
+
+    address pathToken0;
+    address pathToken1;
+    assembly {
+      pathToken0 := shr(96, mload(add(path, 32)))
+      pathToken1 := shr(96, mload(add(path, 55)))
     }
+    assertTrue(
+      (pathToken0 == asset1 && pathToken1 == config.usdcAddress)
+        || (pathToken0 == config.usdcAddress && pathToken1 == asset1),
+      "Route asset1-USDC must contain asset1 and USDC"
+    );
+  }
 
-    function setUp() public {}
+  function testGetDefaultSwapRoutesAsset0Asset1ContainsCorrectPair() public onAnvilFork {
+    AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.LINK);
 
-    function testGetActiveNetworkConfigOnAnvil() public onAnvilFork {
-        // On Anvil: verify all fields are populated with non-zero mock addresses
-        assertEq(block.chainid, 31337, "Should be on Anvil fork");
-        NetworkConfig memory config = anvilHelperConfig
-            .getActiveNetworkConfig();
+    (address asset0, address asset1) =
+      wethCfg.token < linkCfg.token ? (wethCfg.token, linkCfg.token) : (linkCfg.token, wethCfg.token);
 
-        assertNotEq(
-            config.usdcAddress,
-            address(0),
-            "USDC address must not be zero"
-        );
-        assertNotEq(
-            config.usdcPriceFeedAddress,
-            address(0),
-            "USDC price feed must not be zero"
-        );
-        assertNotEq(
-            config.uniswapUniversalRouter,
-            address(0),
-            "Router must not be zero"
-        );
-        assertEq(
-            config.deployerAccount,
-            ANVIL_DEPLOYER,
-            "Deployer must be Anvil default"
-        );
-        assertNotEq(
-            config.feeCollector,
-            address(0),
-            "Fee collector must not be zero"
-        );
-        assertNotEq(
-            config.rebalancer,
-            address(0),
-            "Rebalancer must not be zero"
-        );
+    (,, SwapRoute memory routeAsset0Asset1) = anvilHelperConfig.getDefaultSwapRoutes(asset0, asset1);
 
-        // Verify asset configs are populated for all supported assets
-        AssetConfig memory weth = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory wbtc = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WBTC
-        );
-        AssetConfig memory link = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-        // AssetConfig memory usdc = anvilHelperConfig.getActiveAssetConfig(
-        //     AssetAvailable.USDC
-        // );
+    // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
+    bytes memory path = routeAsset0Asset1.v3Path;
+    assertGe(path.length, 43, "V3 path must be at least 43 bytes");
 
-        assertNotEq(
-            weth.token,
-            WETH_MAINNET,
-            "WETH token must not be mainnet address"
-        );
-        assertNotEq(
-            weth.priceFeed,
-            WETH_USD_PRICEFEED_MAINNET,
-            "WETH feed must not be mainnet address"
-        );
-        assertNotEq(
-            wbtc.token,
-            WBTC_MAINNET,
-            "WBTC token must not be mainnet address"
-        );
-        assertNotEq(
-            wbtc.priceFeed,
-            WBTC_USD_PRICEFEED_MAINNET,
-            "WBTC feed must not be mainnet address"
-        );
-        assertNotEq(
-            link.token,
-            LINK_MAINNET,
-            "LINK token must not be mainnet address"
-        );
-        assertNotEq(
-            link.priceFeed,
-            LINK_USD_PRICEFEED_MAINNET,
-            "LINK feed must not be mainnet address"
-        );
-        assertNotEq(
-            config.usdcAddress,
-            USDC_MAINNET,
-            "USDC token must not be mainnet address"
-        );
-        assertNotEq(
-            config.usdcPriceFeedAddress,
-            USDC_USD_PRICEFEED_MAINNET,
-            "USDC feed must not be mainnet address"
-        );
+    address pathToken0;
+    address pathToken1;
+    assembly {
+      pathToken0 := shr(96, mload(add(path, 32)))
+      pathToken1 := shr(96, mload(add(path, 55)))
     }
+    assertEq(pathToken0, asset0, "first token in path must be asset0");
+    assertEq(pathToken1, asset1, "second token in path must be asset1");
+  }
 
-    function testGetActiveNetworkConfigOnMainnet() public onMainnetFork {
-        // Verify network config points to real mainnet contracts
-        NetworkConfig memory config = mainnetHelperConfig
-            .getActiveNetworkConfig();
+  function testGetAssetTokenMocksRevertIfNotAnvil() public onMainnetFork {
+    vm.expectRevert(HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector);
+    mainnetHelperConfig.getAssetTokenMocks();
+  }
 
-        assertEq(
-            config.usdcAddress,
-            USDC_MAINNET,
-            "USDC must be mainnet address"
-        );
-        assertEq(
-            config.usdcPriceFeedAddress,
-            USDC_USD_PRICEFEED_MAINNET,
-            "USDC feed must be mainnet"
-        );
-        assertEq(
-            config.uniswapUniversalRouter,
-            UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
-            "Router must be mainnet"
-        );
+  function testGetPriceFeedMocksRevertIfNotAnvil() public onMainnetFork {
+    vm.expectRevert(HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector);
+    mainnetHelperConfig.getPriceFeedMocks();
+  }
 
-        // Verify asset configs point to real mainnet contracts
-        AssetConfig memory weth = mainnetHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory wbtc = mainnetHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WBTC
-        );
-        AssetConfig memory link = mainnetHelperConfig.getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
+  // ──────────────────────────────────────────────
+  //  getConfigByChainId
+  // ──────────────────────────────────────────────
 
-        assertEq(weth.token, WETH_MAINNET, "WETH token must be mainnet");
-        assertEq(
-            weth.priceFeed,
-            WETH_USD_PRICEFEED_MAINNET,
-            "WETH feed must be mainnet"
-        );
-        assertEq(wbtc.token, WBTC_MAINNET, "WBTC token must be mainnet");
-        assertEq(
-            wbtc.priceFeed,
-            WBTC_USD_PRICEFEED_MAINNET,
-            "WBTC feed must be mainnet"
-        );
-        assertEq(link.token, LINK_MAINNET, "LINK token must be mainnet");
-        assertEq(
-            link.priceFeed,
-            LINK_USD_PRICEFEED_MAINNET,
-            "LINK feed must be mainnet"
-        );
-        assertEq(
-            config.usdcAddress,
-            USDC_MAINNET,
-            "USDC token must be mainnet"
-        );
-        assertEq(
-            config.usdcPriceFeedAddress,
-            USDC_USD_PRICEFEED_MAINNET,
-            "USDC feed must be mainnet"
-        );
+  function testGetConfigByChainIdReturnsAnvilConfig() public onAnvilFork {
+    NetworkConfig memory config = anvilHelperConfig.getConfigByChainId(ANVIL_CHAIN_ID);
+    assertEq(config.deployerAccount, ANVIL_DEPLOYER, "Deployer must be Anvil default");
+    assertNotEq(config.usdcAddress, address(0), "USDC address must not be zero");
+  }
+
+  function testGetConfigByChainIdReturnsMainnetConfig() public onMainnetFork {
+    NetworkConfig memory config = mainnetHelperConfig.getConfigByChainId(MAINNET_CHAIN_ID);
+    assertEq(config.usdcAddress, USDC_MAINNET, "USDC must be mainnet address");
+    assertEq(config.uniswapUniversalRouter, UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET, "Router must be mainnet");
+  }
+
+  function testGetConfigByChainIdRevertsOnUnsupportedChain() public onAnvilFork {
+    vm.expectRevert(HelperConfig.HelperConfig__InvalidChainId.selector);
+    anvilHelperConfig.getConfigByChainId(999);
+  }
+
+  // ──────────────────────────────────────────────
+  //  getAssetTokenMocks (success path)
+  // ──────────────────────────────────────────────
+
+  function testGetAssetTokenMocksReturnsValidMocks() public onAnvilFork {
+    (AssetTokenMock weth, MockUSDC usdc, AssetTokenMock wbtc, AssetTokenMock link, AssetTokenMock comp) =
+      anvilHelperConfig.getAssetTokenMocks();
+
+    assertNotEq(address(weth), address(0), "WETH mock must not be zero");
+    assertNotEq(address(usdc), address(0), "USDC mock must not be zero");
+    assertNotEq(address(wbtc), address(0), "WBTC mock must not be zero");
+    assertNotEq(address(link), address(0), "LINK mock must not be zero");
+    assertNotEq(address(comp), address(0), "COMP mock must not be zero");
+
+    // Verify symbols
+    assertEq(weth.symbol(), "WETH", "WETH symbol mismatch");
+    assertEq(usdc.symbol(), "USDC", "USDC symbol mismatch");
+    assertEq(wbtc.symbol(), "WBTC", "WBTC symbol mismatch");
+    assertEq(link.symbol(), "LINK", "LINK symbol mismatch");
+    assertEq(comp.symbol(), "COMP", "COMP symbol mismatch");
+
+    // Verify decimals
+    assertEq(weth.decimals(), 18, "WETH decimals mismatch");
+    assertEq(usdc.decimals(), 6, "USDC decimals mismatch");
+    assertEq(wbtc.decimals(), 8, "WBTC decimals mismatch");
+    assertEq(link.decimals(), 18, "LINK decimals mismatch");
+    assertEq(comp.decimals(), 18, "COMP decimals mismatch");
+  }
+
+  // ──────────────────────────────────────────────
+  //  getPriceFeedMocks (success path)
+  // ──────────────────────────────────────────────
+
+  function testGetPriceFeedMocksReturnsValidMocks() public onAnvilFork {
+    (
+      MockV3Aggregator wethFeed,
+      MockV3Aggregator usdcFeed,
+      MockV3Aggregator wbtcFeed,
+      MockV3Aggregator linkFeed,
+      MockV3Aggregator compFeed
+    ) = anvilHelperConfig.getPriceFeedMocks();
+
+    assertNotEq(address(wethFeed), address(0), "WETH feed must not be zero");
+    assertNotEq(address(usdcFeed), address(0), "USDC feed must not be zero");
+    assertNotEq(address(wbtcFeed), address(0), "WBTC feed must not be zero");
+    assertNotEq(address(linkFeed), address(0), "LINK feed must not be zero");
+    assertNotEq(address(compFeed), address(0), "COMP feed must not be zero");
+
+    // Verify price feeds return reasonable answers
+    assertTrue(wethFeed.latestAnswer() > 0, "WETH price must be positive");
+    assertTrue(usdcFeed.latestAnswer() > 0, "USDC price must be positive");
+    assertTrue(wbtcFeed.latestAnswer() > 0, "WBTC price must be positive");
+    assertTrue(linkFeed.latestAnswer() > 0, "LINK price must be positive");
+    assertTrue(compFeed.latestAnswer() > 0, "COMP price must be positive");
+  }
+
+  // ──────────────────────────────────────────────
+  //  getUniswapUniversalRouter
+  // ──────────────────────────────────────────────
+
+  function testGetUniswapUniversalRouterOnAnvil() public onAnvilFork {
+    UniversalRouterMock router = anvilHelperConfig.getUniswapUniversalRouter();
+    assertNotEq(address(router), address(0), "Router must not be zero address");
+    // Verify it matches the network config
+    NetworkConfig memory config = anvilHelperConfig.getActiveNetworkConfig();
+    assertEq(address(router), config.uniswapUniversalRouter, "Router must match network config");
+  }
+
+  // ──────────────────────────────────────────────
+  //  Mainnet COMP asset config
+  // ──────────────────────────────────────────────
+
+  function testGetActiveAssetConfigCompOnMainnet() public onMainnetFork {
+    AssetConfig memory comp = mainnetHelperConfig.getActiveAssetConfig(AssetAvailable.COMP);
+    assertEq(comp.token, COMP_MAINNET, "COMP token must be mainnet");
+    assertEq(comp.priceFeed, COMP_USD_PRICEFEED_MAINNET, "COMP feed must be mainnet");
+  }
+
+  // ──────────────────────────────────────────────
+  //  Anvil COMP asset config
+  // ──────────────────────────────────────────────
+
+  function testGetActiveAssetConfigCompOnAnvil() public onAnvilFork {
+    AssetConfig memory comp = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.COMP);
+    assertNotEq(comp.token, address(0), "COMP token must not be zero on Anvil");
+    assertNotEq(comp.priceFeed, address(0), "COMP feed must not be zero on Anvil");
+  }
+
+  // ──────────────────────────────────────────────
+  //  Price feed max delays
+  // ──────────────────────────────────────────────
+
+  function testAssetConfigsHaveAssetPriceFeedMaxDelayOnAnvil() public onAnvilFork {
+    _assertAssetMaxDelays(anvilHelperConfig);
+  }
+
+  function testAssetConfigsHaveAssetPriceFeedMaxDelayOnMainnet() public onMainnetFork {
+    _assertAssetMaxDelays(mainnetHelperConfig);
+  }
+
+  function testNetworkConfigHasUsdcPriceFeedMaxDelayOnAnvil() public onAnvilFork {
+    assertEq(
+      anvilHelperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay,
+      USDC_USD_PRICEFEED_MAX_DELAY,
+      "USDC feed maxDelay must be USDC_USD_PRICEFEED_MAX_DELAY"
+    );
+  }
+
+  function testNetworkConfigHasUsdcPriceFeedMaxDelayOnMainnet() public onMainnetFork {
+    assertEq(
+      mainnetHelperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay,
+      USDC_USD_PRICEFEED_MAX_DELAY,
+      "USDC feed maxDelay must be USDC_USD_PRICEFEED_MAX_DELAY"
+    );
+  }
+
+  function testPriceFeedMaxDelayConstantsMatchHeartbeatPlusMargin() public pure {
+    // L-03: 1h heartbeat + 15 min margin for assets, 24h heartbeat + 1h margin for USDC.
+    assertEq(ASSET_USD_PRICEFEED_MAX_DELAY, 1 hours + 15 minutes);
+    assertEq(USDC_USD_PRICEFEED_MAX_DELAY, 25 hours);
+  }
+
+  function testAssetConfigByChainIdGetterReturnsMaxDelay() public onAnvilFork {
+    AssetConfig memory weth = anvilHelperConfig.getActiveAssetConfig(AssetAvailable.WETH);
+    (address token, address priceFeed, uint32 priceFeedMaxDelay) =
+      anvilHelperConfig.assetConfigByChainId(AssetAvailable.WETH, ANVIL_CHAIN_ID);
+    assertEq(token, weth.token);
+    assertEq(priceFeed, weth.priceFeed);
+    assertEq(priceFeedMaxDelay, ASSET_USD_PRICEFEED_MAX_DELAY);
+  }
+
+  function _assertAssetMaxDelays(HelperConfig _helperConfig) internal view {
+    AssetAvailable[4] memory assets =
+      [AssetAvailable.WETH, AssetAvailable.WBTC, AssetAvailable.LINK, AssetAvailable.COMP];
+    for (uint256 i = 0; i < assets.length; i++) {
+      assertEq(
+        _helperConfig.getActiveAssetConfig(assets[i]).priceFeedMaxDelay,
+        ASSET_USD_PRICEFEED_MAX_DELAY,
+        "asset feed maxDelay must be ASSET_USD_PRICEFEED_MAX_DELAY"
+      );
     }
-
-    function testHelperConfigRevertIfUnsupportedChain() public {
-        // Create and select a fork of an unsupported chain (e.g., Polygon)
-        vm.createSelectFork(vm.rpcUrl("polygon"));
-
-        // Expect the constructor to revert with the correct error message
-        vm.expectRevert(HelperConfig.HelperConfig__InvalidChainId.selector);
-        HelperConfig unsupportedHelperConfig = new HelperConfig();
-    }
-
-    function testGetActiveAssetConfigWorksOnAnvil() public onAnvilFork {
-        AssetConfig memory wethConfig = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        assertNotEq(
-            wethConfig.token,
-            address(0),
-            "WETH token must not be zero"
-        );
-        assertNotEq(
-            wethConfig.priceFeed,
-            address(0),
-            "WETH price feed must not be zero"
-        );
-    }
-
-    function testGetActiveAssetConfigWorksOnMainnet() public onMainnetFork {
-        AssetConfig memory wethConfig = mainnetHelperConfig
-            .getActiveAssetConfig(AssetAvailable.WETH);
-        assertEq(
-            wethConfig.token,
-            WETH_MAINNET,
-            "WETH token must be mainnet address"
-        );
-        assertEq(
-            wethConfig.priceFeed,
-            WETH_USD_PRICEFEED_MAINNET,
-            "WETH price feed must be mainnet address"
-        );
-    }
-
-    function testGetFeeCollectorOnAnvil() public onAnvilFork {
-        address feeCollector = anvilHelperConfig.getFeeCollector();
-        assertEq(
-            feeCollector,
-            anvilHelperConfig.getActiveNetworkConfig().feeCollector,
-            "Fee collector must match active network config"
-        );
-        assertEq(
-            feeCollector,
-            makeAddr("feeCollector"),
-            "Fee collector must match makeAddr('feeCollector')"
-        );
-    }
-
-    function testGetRebalancerOnAnvil() public onAnvilFork {
-        address rebalancer = anvilHelperConfig.getRebalancer();
-        assertEq(
-            rebalancer,
-            anvilHelperConfig.getActiveNetworkConfig().rebalancer,
-            "Rebalancer must match active network config"
-        );
-        assertEq(
-            rebalancer,
-            makeAddr("rebalancer"),
-            "Rebalancer must match makeAddr('rebalancer')"
-        );
-    }
-
-    function testGetFeeCollectorOnMainnet() public onMainnetFork {
-        address feeCollector = mainnetHelperConfig.getFeeCollector();
-        assertEq(
-            feeCollector,
-            mainnetHelperConfig.getActiveNetworkConfig().feeCollector,
-            "Fee collector must match active network config"
-        );
-        address expectedDeployer = vm.envAddress("MAINNET_DEPLOYER");
-        assertEq(
-            feeCollector,
-            expectedDeployer,
-            "Fee collector must match MAINNET_DEPLOYER from .env"
-        );
-    }
-
-    function testGetRebalancerOnMainnet() public onMainnetFork {
-        address rebalancer = mainnetHelperConfig.getRebalancer();
-        assertEq(
-            rebalancer,
-            mainnetHelperConfig.getActiveNetworkConfig().rebalancer,
-            "Rebalancer must match active network config"
-        );
-        address expectedDeployer = vm.envAddress("MAINNET_DEPLOYER");
-        assertEq(
-            rebalancer,
-            expectedDeployer,
-            "Rebalancer must match MAINNET_DEPLOYER from .env"
-        );
-    }
-
-    // ──────────────────────────────────────────────
-    //  buildDefaultV4Route
-    // ──────────────────────────────────────────────
-
-    function testBuildDefaultV4RouteSortsCurrencies() public onAnvilFork {
-        address tokenA = makeAddr("tokenA"); // higher address
-        address tokenB = address(1); // lower address
-
-        SwapRoute memory route = anvilHelperConfig.buildDefaultV4Route(
-            tokenA,
-            tokenB
-        );
-
-        // currency0 must be the lower address
-        assertEq(
-            Currency.unwrap(route.poolKey.currency0),
-            tokenB,
-            "currency0 must be lower address"
-        );
-        assertEq(
-            Currency.unwrap(route.poolKey.currency1),
-            tokenA,
-            "currency1 must be higher address"
-        );
-    }
-
-    function testBuildDefaultV4RouteSetsCorrectPoolParams() public onAnvilFork {
-        address tokenA = makeAddr("tokenA");
-        address tokenB = makeAddr("tokenB");
-
-        SwapRoute memory route = anvilHelperConfig.buildDefaultV4Route(
-            tokenA,
-            tokenB
-        );
-
-        assertEq(
-            uint8(route.version),
-            uint8(PoolVersion.V4),
-            "Version must be V4"
-        );
-        assertEq(route.poolKey.fee, 3000, "Fee must be 3000");
-        assertEq(route.poolKey.tickSpacing, 60, "Tick spacing must be 60");
-        assertEq(
-            address(route.poolKey.hooks),
-            address(0),
-            "Hooks must be zero address"
-        );
-        assertEq(route.v3Path.length, 0, "v3Path must be empty for V4 route");
-    }
-
-    function testBuildDefaultV4RouteIsSymmetric() public onAnvilFork {
-        address tokenA = makeAddr("tokenA");
-        address tokenB = makeAddr("tokenB");
-
-        SwapRoute memory routeAB = anvilHelperConfig.buildDefaultV4Route(
-            tokenA,
-            tokenB
-        );
-        SwapRoute memory routeBA = anvilHelperConfig.buildDefaultV4Route(
-            tokenB,
-            tokenA
-        );
-
-        assertEq(
-            Currency.unwrap(routeAB.poolKey.currency0),
-            Currency.unwrap(routeBA.poolKey.currency0),
-            "currency0 must be equal regardless of argument order"
-        );
-        assertEq(
-            Currency.unwrap(routeAB.poolKey.currency1),
-            Currency.unwrap(routeBA.poolKey.currency1),
-            "currency1 must be equal regardless of argument order"
-        );
-    }
-
-    // ──────────────────────────────────────────────
-    //  getDefaultSwapRoutes
-    // ──────────────────────────────────────────────
-
-    function testGetDefaultSwapRoutesReturnsThreeRoutes() public onAnvilFork {
-        AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-
-        // Sort assets like the production code expects
-        (address asset0, address asset1) = wethCfg.token < linkCfg.token
-            ? (wethCfg.token, linkCfg.token)
-            : (linkCfg.token, wethCfg.token);
-
-        (
-            SwapRoute memory routeAsset0Usdc,
-            SwapRoute memory routeAsset1Usdc,
-            SwapRoute memory routeAsset0Asset1
-        ) = anvilHelperConfig.getDefaultSwapRoutes(asset0, asset1);
-
-        // USDC ↔ asset routes use V3 (deep liquidity), asset ↔ asset uses V4
-        assertEq(
-            uint8(routeAsset0Usdc.version),
-            uint8(PoolVersion.V3),
-            "Route0-USDC must be V3"
-        );
-        assertEq(
-            uint8(routeAsset1Usdc.version),
-            uint8(PoolVersion.V3),
-            "Route1-USDC must be V3"
-        );
-        assertEq(
-            uint8(routeAsset0Asset1.version),
-            uint8(PoolVersion.V3),
-            "Route0-1 must be V3"
-        );
-    }
-
-    function testGetDefaultSwapRoutesAsset0UsdcContainsCorrectPair()
-        public
-        onAnvilFork
-    {
-        AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-        NetworkConfig memory config = anvilHelperConfig
-            .getActiveNetworkConfig();
-
-        (address asset0, address asset1) = wethCfg.token < linkCfg.token
-            ? (wethCfg.token, linkCfg.token)
-            : (linkCfg.token, wethCfg.token);
-
-        (SwapRoute memory routeAsset0Usdc, , ) = anvilHelperConfig
-            .getDefaultSwapRoutes(asset0, asset1);
-
-        // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
-        bytes memory path = routeAsset0Usdc.v3Path;
-        assertGe(path.length, 43, "V3 path must be at least 43 bytes");
-
-        // Extract first and last 20-byte addresses from the packed path
-        address pathToken0;
-        address pathToken1;
-        assembly {
-            pathToken0 := shr(96, mload(add(path, 32)))
-            pathToken1 := shr(96, mload(add(path, 55)))
-        }
-        assertTrue(
-            (pathToken0 == asset0 && pathToken1 == config.usdcAddress) ||
-                (pathToken0 == config.usdcAddress && pathToken1 == asset0),
-            "Route asset0-USDC must contain asset0 and USDC"
-        );
-    }
-
-    function testGetDefaultSwapRoutesAsset1UsdcContainsCorrectPair()
-        public
-        onAnvilFork
-    {
-        AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-        NetworkConfig memory config = anvilHelperConfig
-            .getActiveNetworkConfig();
-
-        (address asset0, address asset1) = wethCfg.token < linkCfg.token
-            ? (wethCfg.token, linkCfg.token)
-            : (linkCfg.token, wethCfg.token);
-
-        (, SwapRoute memory routeAsset1Usdc, ) = anvilHelperConfig
-            .getDefaultSwapRoutes(asset0, asset1);
-
-        // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
-        bytes memory path = routeAsset1Usdc.v3Path;
-        assertGe(path.length, 43, "V3 path must be at least 43 bytes");
-
-        address pathToken0;
-        address pathToken1;
-        assembly {
-            pathToken0 := shr(96, mload(add(path, 32)))
-            pathToken1 := shr(96, mload(add(path, 55)))
-        }
-        assertTrue(
-            (pathToken0 == asset1 && pathToken1 == config.usdcAddress) ||
-                (pathToken0 == config.usdcAddress && pathToken1 == asset1),
-            "Route asset1-USDC must contain asset1 and USDC"
-        );
-    }
-
-    function testGetDefaultSwapRoutesAsset0Asset1ContainsCorrectPair()
-        public
-        onAnvilFork
-    {
-        AssetConfig memory wethCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        AssetConfig memory linkCfg = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.LINK
-        );
-
-        (address asset0, address asset1) = wethCfg.token < linkCfg.token
-            ? (wethCfg.token, linkCfg.token)
-            : (linkCfg.token, wethCfg.token);
-
-        (, , SwapRoute memory routeAsset0Asset1) = anvilHelperConfig
-            .getDefaultSwapRoutes(asset0, asset1);
-
-        // V3 route: path = abi.encodePacked(tokenA, fee, tokenB) → 43 bytes
-        bytes memory path = routeAsset0Asset1.v3Path;
-        assertGe(path.length, 43, "V3 path must be at least 43 bytes");
-
-        address pathToken0;
-        address pathToken1;
-        assembly {
-            pathToken0 := shr(96, mload(add(path, 32)))
-            pathToken1 := shr(96, mload(add(path, 55)))
-        }
-        assertEq(pathToken0, asset0, "first token in path must be asset0");
-        assertEq(pathToken1, asset1, "second token in path must be asset1");
-    }
-
-    function testGetAssetTokenMocksRevertIfNotAnvil() public onMainnetFork {
-        vm.expectRevert(
-            HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector
-        );
-        mainnetHelperConfig.getAssetTokenMocks();
-    }
-
-    function testGetPriceFeedMocksRevertIfNotAnvil() public onMainnetFork {
-        vm.expectRevert(
-            HelperConfig.HelperConfig__GetRealContractsOnMainnet.selector
-        );
-        mainnetHelperConfig.getPriceFeedMocks();
-    }
-
-    // ──────────────────────────────────────────────
-    //  getConfigByChainId
-    // ──────────────────────────────────────────────
-
-    function testGetConfigByChainIdReturnsAnvilConfig() public onAnvilFork {
-        NetworkConfig memory config = anvilHelperConfig.getConfigByChainId(
-            ANVIL_CHAIN_ID
-        );
-        assertEq(
-            config.deployerAccount,
-            ANVIL_DEPLOYER,
-            "Deployer must be Anvil default"
-        );
-        assertNotEq(
-            config.usdcAddress,
-            address(0),
-            "USDC address must not be zero"
-        );
-    }
-
-    function testGetConfigByChainIdReturnsMainnetConfig() public onMainnetFork {
-        NetworkConfig memory config = mainnetHelperConfig.getConfigByChainId(
-            MAINNET_CHAIN_ID
-        );
-        assertEq(
-            config.usdcAddress,
-            USDC_MAINNET,
-            "USDC must be mainnet address"
-        );
-        assertEq(
-            config.uniswapUniversalRouter,
-            UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET,
-            "Router must be mainnet"
-        );
-    }
-
-    function testGetConfigByChainIdRevertsOnUnsupportedChain()
-        public
-        onAnvilFork
-    {
-        vm.expectRevert(HelperConfig.HelperConfig__InvalidChainId.selector);
-        anvilHelperConfig.getConfigByChainId(999);
-    }
-
-    // ──────────────────────────────────────────────
-    //  getAssetTokenMocks (success path)
-    // ──────────────────────────────────────────────
-
-    function testGetAssetTokenMocksReturnsValidMocks() public onAnvilFork {
-        (
-            AssetTokenMock weth,
-            MockUSDC usdc,
-            AssetTokenMock wbtc,
-            AssetTokenMock link,
-            AssetTokenMock comp
-        ) = anvilHelperConfig.getAssetTokenMocks();
-
-        assertNotEq(address(weth), address(0), "WETH mock must not be zero");
-        assertNotEq(address(usdc), address(0), "USDC mock must not be zero");
-        assertNotEq(address(wbtc), address(0), "WBTC mock must not be zero");
-        assertNotEq(address(link), address(0), "LINK mock must not be zero");
-        assertNotEq(address(comp), address(0), "COMP mock must not be zero");
-
-        // Verify symbols
-        assertEq(weth.symbol(), "WETH", "WETH symbol mismatch");
-        assertEq(usdc.symbol(), "USDC", "USDC symbol mismatch");
-        assertEq(wbtc.symbol(), "WBTC", "WBTC symbol mismatch");
-        assertEq(link.symbol(), "LINK", "LINK symbol mismatch");
-        assertEq(comp.symbol(), "COMP", "COMP symbol mismatch");
-
-        // Verify decimals
-        assertEq(weth.decimals(), 18, "WETH decimals mismatch");
-        assertEq(usdc.decimals(), 6, "USDC decimals mismatch");
-        assertEq(wbtc.decimals(), 8, "WBTC decimals mismatch");
-        assertEq(link.decimals(), 18, "LINK decimals mismatch");
-        assertEq(comp.decimals(), 18, "COMP decimals mismatch");
-    }
-
-    // ──────────────────────────────────────────────
-    //  getPriceFeedMocks (success path)
-    // ──────────────────────────────────────────────
-
-    function testGetPriceFeedMocksReturnsValidMocks() public onAnvilFork {
-        (
-            MockV3Aggregator wethFeed,
-            MockV3Aggregator usdcFeed,
-            MockV3Aggregator wbtcFeed,
-            MockV3Aggregator linkFeed,
-            MockV3Aggregator compFeed
-        ) = anvilHelperConfig.getPriceFeedMocks();
-
-        assertNotEq(
-            address(wethFeed),
-            address(0),
-            "WETH feed must not be zero"
-        );
-        assertNotEq(
-            address(usdcFeed),
-            address(0),
-            "USDC feed must not be zero"
-        );
-        assertNotEq(
-            address(wbtcFeed),
-            address(0),
-            "WBTC feed must not be zero"
-        );
-        assertNotEq(
-            address(linkFeed),
-            address(0),
-            "LINK feed must not be zero"
-        );
-        assertNotEq(
-            address(compFeed),
-            address(0),
-            "COMP feed must not be zero"
-        );
-
-        // Verify price feeds return reasonable answers
-        assertTrue(wethFeed.latestAnswer() > 0, "WETH price must be positive");
-        assertTrue(usdcFeed.latestAnswer() > 0, "USDC price must be positive");
-        assertTrue(wbtcFeed.latestAnswer() > 0, "WBTC price must be positive");
-        assertTrue(linkFeed.latestAnswer() > 0, "LINK price must be positive");
-        assertTrue(compFeed.latestAnswer() > 0, "COMP price must be positive");
-    }
-
-    // ──────────────────────────────────────────────
-    //  getUniswapUniversalRouter
-    // ──────────────────────────────────────────────
-
-    function testGetUniswapUniversalRouterOnAnvil() public onAnvilFork {
-        UniversalRouterMock router = anvilHelperConfig
-            .getUniswapUniversalRouter();
-        assertNotEq(
-            address(router),
-            address(0),
-            "Router must not be zero address"
-        );
-        // Verify it matches the network config
-        NetworkConfig memory config = anvilHelperConfig
-            .getActiveNetworkConfig();
-        assertEq(
-            address(router),
-            config.uniswapUniversalRouter,
-            "Router must match network config"
-        );
-    }
-
-    // ──────────────────────────────────────────────
-    //  Mainnet COMP asset config
-    // ──────────────────────────────────────────────
-
-    function testGetActiveAssetConfigCompOnMainnet() public onMainnetFork {
-        AssetConfig memory comp = mainnetHelperConfig.getActiveAssetConfig(
-            AssetAvailable.COMP
-        );
-        assertEq(comp.token, COMP_MAINNET, "COMP token must be mainnet");
-        assertEq(
-            comp.priceFeed,
-            COMP_USD_PRICEFEED_MAINNET,
-            "COMP feed must be mainnet"
-        );
-    }
-
-    // ──────────────────────────────────────────────
-    //  Anvil COMP asset config
-    // ──────────────────────────────────────────────
-
-    function testGetActiveAssetConfigCompOnAnvil() public onAnvilFork {
-        AssetConfig memory comp = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.COMP
-        );
-        assertNotEq(
-            comp.token,
-            address(0),
-            "COMP token must not be zero on Anvil"
-        );
-        assertNotEq(
-            comp.priceFeed,
-            address(0),
-            "COMP feed must not be zero on Anvil"
-        );
-    }
-
-    // ──────────────────────────────────────────────
-    //  Price feed max delays
-    // ──────────────────────────────────────────────
-
-    function testAssetConfigsHaveAssetPriceFeedMaxDelayOnAnvil()
-        public
-        onAnvilFork
-    {
-        _assertAssetMaxDelays(anvilHelperConfig);
-    }
-
-    function testAssetConfigsHaveAssetPriceFeedMaxDelayOnMainnet()
-        public
-        onMainnetFork
-    {
-        _assertAssetMaxDelays(mainnetHelperConfig);
-    }
-
-    function testNetworkConfigHasUsdcPriceFeedMaxDelayOnAnvil()
-        public
-        onAnvilFork
-    {
-        assertEq(
-            anvilHelperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay,
-            USDC_USD_PRICEFEED_MAX_DELAY,
-            "USDC feed maxDelay must be USDC_USD_PRICEFEED_MAX_DELAY"
-        );
-    }
-
-    function testNetworkConfigHasUsdcPriceFeedMaxDelayOnMainnet()
-        public
-        onMainnetFork
-    {
-        assertEq(
-            mainnetHelperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay,
-            USDC_USD_PRICEFEED_MAX_DELAY,
-            "USDC feed maxDelay must be USDC_USD_PRICEFEED_MAX_DELAY"
-        );
-    }
-
-    function testPriceFeedMaxDelayConstantsMatchHeartbeatPlusMargin()
-        public
-        pure
-    {
-        // L-03: 1h heartbeat + 15 min margin for assets, 24h heartbeat + 1h margin for USDC.
-        assertEq(ASSET_USD_PRICEFEED_MAX_DELAY, 1 hours + 15 minutes);
-        assertEq(USDC_USD_PRICEFEED_MAX_DELAY, 25 hours);
-    }
-
-    function testAssetConfigByChainIdGetterReturnsMaxDelay()
-        public
-        onAnvilFork
-    {
-        AssetConfig memory weth = anvilHelperConfig.getActiveAssetConfig(
-            AssetAvailable.WETH
-        );
-        (
-            address token,
-            address priceFeed,
-            uint32 priceFeedMaxDelay
-        ) = anvilHelperConfig.assetConfigByChainId(
-                AssetAvailable.WETH,
-                ANVIL_CHAIN_ID
-            );
-        assertEq(token, weth.token);
-        assertEq(priceFeed, weth.priceFeed);
-        assertEq(priceFeedMaxDelay, ASSET_USD_PRICEFEED_MAX_DELAY);
-    }
-
-    function _assertAssetMaxDelays(HelperConfig _helperConfig) internal view {
-        AssetAvailable[4] memory assets = [
-            AssetAvailable.WETH,
-            AssetAvailable.WBTC,
-            AssetAvailable.LINK,
-            AssetAvailable.COMP
-        ];
-        for (uint256 i = 0; i < assets.length; i++) {
-            assertEq(
-                _helperConfig.getActiveAssetConfig(assets[i]).priceFeedMaxDelay,
-                ASSET_USD_PRICEFEED_MAX_DELAY,
-                "asset feed maxDelay must be ASSET_USD_PRICEFEED_MAX_DELAY"
-            );
-        }
-    }
+  }
 }

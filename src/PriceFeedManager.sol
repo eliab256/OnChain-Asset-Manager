@@ -1,41 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {
-    Initializable
-} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {
-    OwnableUpgradeable
-} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UpgraderAuth} from "./UpgraderAuth.sol";
-import {
-    ERC1967Utils
-} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {
-    IAccessControl
-} from "@openzeppelin/contracts/access/IAccessControl.sol";
-import {
-    AggregatorV3Interface
-} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {IPriceFeedManager} from "./Interface/IPriceFeedManager.sol";
 import {ContractCodeConstants} from "./ContractCodeConstants.sol";
 import {FeedConfig, PendingFeed} from "./types.sol";
 import {PriceFeedManagerEvents} from "./events/PriceFeedManagerEvents.sol";
 import {
-    PriceFeedManager__CallerNotAssetManager,
-    PriceFeedManager__InvalidAsset,
-    PriceFeedManager__InvalidAssetDecimals,
-    PriceFeedManager__InvalidPriceFeed,
-    PriceFeedManager__InvalidMaxDelay,
-    PriceFeedManager__PriceFeedAlreadySet,
-    PriceFeedManager__PriceFeedNotSet,
-    PriceFeedManager__SamePriceFeedConfig,
-    PriceFeedManager__PriceFeedUpdatePending,
-    PriceFeedManager__NoPendingPriceFeedUpdate,
-    PriceFeedManager__PriceFeedUpdateExpired,
-    PriceFeedManager__PriceFeedNotAvailable,
-    PriceFeedManager__PriceFeedRoundStale,
-    PriceFeedManager__PriceIsStale
+  PriceFeedManager__CallerNotAssetManager,
+  PriceFeedManager__InvalidAsset,
+  PriceFeedManager__InvalidAssetDecimals,
+  PriceFeedManager__InvalidPriceFeed,
+  PriceFeedManager__InvalidMaxDelay,
+  PriceFeedManager__PriceFeedAlreadySet,
+  PriceFeedManager__PriceFeedNotSet,
+  PriceFeedManager__SamePriceFeedConfig,
+  PriceFeedManager__PriceFeedUpdatePending,
+  PriceFeedManager__NoPendingPriceFeedUpdate,
+  PriceFeedManager__PriceFeedUpdateExpired,
+  PriceFeedManager__PriceFeedNotAvailable,
+  PriceFeedManager__PriceFeedRoundStale,
+  PriceFeedManager__PriceIsStale
 } from "./errors/PriceFeedManagerErrors.sol";
 
 /**
@@ -46,337 +36,275 @@ import {
  *      Feed operations are restricted to the ASSET_MANAGER_ROLE holders of the IndexManager.
  *      Storage follows ERC-7201 namespaced layout.
  */
-contract PriceFeedManager is
-    IPriceFeedManager,
-    Initializable,
-    OwnableUpgradeable,
-    UpgraderAuth,
-    ContractCodeConstants
-{
-    ////////////////////////////////////////////////////////////////////
-    ///////////////////////////// storage //////////////////////////////
-    ////////////////////////////////////////////////////////////////////
+contract PriceFeedManager is IPriceFeedManager, Initializable, OwnableUpgradeable, UpgraderAuth, ContractCodeConstants {
+  ////////////////////////////////////////////////////////////////////
+  ///////////////////////////// storage //////////////////////////////
+  ////////////////////////////////////////////////////////////////////
 
-    bytes32 public constant ASSET_MANAGER_ROLE =
-        keccak256("ASSET_MANAGER_ROLE");
+  bytes32 public constant ASSET_MANAGER_ROLE = keccak256("ASSET_MANAGER_ROLE");
 
-    /// @custom:storage-location erc7201:onchainassetmanager.storage.PriceFeedManager
-    struct PriceFeedManagerStorage {
-        // Mapping from asset to its active price feed configuration
-        mapping(address => FeedConfig) assetToFeedConfig;
-        // Mapping from asset to its pending (timelocked) price feed replacement
-        mapping(address => PendingFeed) assetToPendingFeed;
+  /// @custom:storage-location erc7201:onchainassetmanager.storage.PriceFeedManager
+  struct PriceFeedManagerStorage {
+    // Mapping from asset to its active price feed configuration
+    mapping(address => FeedConfig) assetToFeedConfig;
+    // Mapping from asset to its pending (timelocked) price feed replacement
+    mapping(address => PendingFeed) assetToPendingFeed;
+  }
+
+  // keccak256(abi.encode(uint256(keccak256("onchainassetmanager.storage.PriceFeedManager")) - 1)) & ~bytes32(uint256(0xff))
+  bytes32 private constant PRICE_FEED_MANAGER_STORAGE_LOCATION =
+    0xce69fe7798ad1848e1ae89d57160a977b401d63b647be25f32ddbfedfac2a000;
+
+  ////////////////////////////////////////////////////////////////////
+  //////////////////////////// modifiers /////////////////////////////
+  ////////////////////////////////////////////////////////////////////
+
+  modifier onlyAssetManager() {
+    _onlyAssetManager();
+    _;
+  }
+
+  ////////////////////////////////////////////////////////////////////
+  ///////////////////// constructor / initializer ////////////////////
+  ////////////////////////////////////////////////////////////////////
+
+  /// @custom:oz-upgrades-unsafe-allow constructor
+  constructor() {
+    _disableInitializers();
+  }
+
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function initialize(address _indexManager, address _upgrader) external initializer {
+    __Ownable_init(_indexManager);
+    __UpgraderAuth_init(_upgrader);
+  }
+
+  ////////////////////////////////////////////////////////////////////
+  ////////////////////////// feed management /////////////////////////
+  ////////////////////////////////////////////////////////////////////
+
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function registerPriceFeed(address _asset, address _feed, uint32 _maxDelay) external onlyAssetManager {
+    PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
+
+    // 1. Check the asset is a valid ERC20 and has no feed yet.
+    if (_asset == address(0)) revert PriceFeedManager__InvalidAsset();
+    _validateAsset(_asset);
+    if ($.assetToFeedConfig[_asset].feed != address(0)) {
+      revert PriceFeedManager__PriceFeedAlreadySet(_asset);
     }
 
-    // keccak256(abi.encode(uint256(keccak256("onchainassetmanager.storage.PriceFeedManager")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant PRICE_FEED_MANAGER_STORAGE_LOCATION =
-        0xce69fe7798ad1848e1ae89d57160a977b401d63b647be25f32ddbfedfac2a000;
+    // 2. Validate the feed and its maxDelay.
+    _validatePriceFeed(_feed, _maxDelay);
 
-    ////////////////////////////////////////////////////////////////////
-    //////////////////////////// modifiers /////////////////////////////
-    ////////////////////////////////////////////////////////////////////
+    // 3. Store the configuration.
+    $.assetToFeedConfig[_asset] = FeedConfig({feed: _feed, maxDelay: _maxDelay});
 
-    modifier onlyAssetManager() {
-        _onlyAssetManager();
-        _;
+    emit PriceFeedManagerEvents.PriceFeedRegistered(_asset, _feed, _maxDelay);
+  }
+
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function proposePriceFeedUpdate(address _asset, address _feed, uint32 _maxDelay)
+    external
+    onlyAssetManager
+    returns (uint256)
+  {
+    PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
+    FeedConfig memory current = $.assetToFeedConfig[_asset];
+
+    // 1. Check the asset already has a feed.
+    if (current.feed == address(0)) {
+      revert PriceFeedManager__PriceFeedNotSet(_asset);
     }
 
-    ////////////////////////////////////////////////////////////////////
-    ///////////////////// constructor / initializer ////////////////////
-    ////////////////////////////////////////////////////////////////////
-
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
+    // 2. Check there is no proposal still within its delay.
+    PendingFeed memory pending = $.assetToPendingFeed[_asset];
+    if (pending.executableAt != 0 && block.timestamp < pending.executableAt) {
+      revert PriceFeedManager__PriceFeedUpdatePending();
     }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function initialize(
-        address _indexManager,
-        address _upgrader
-    ) external initializer {
-        __Ownable_init(_indexManager);
-        __UpgraderAuth_init(_upgrader);
+    // 3. Check the configuration changes and is valid.
+    if (current.feed == _feed && current.maxDelay == _maxDelay) {
+      revert PriceFeedManager__SamePriceFeedConfig();
+    }
+    _validatePriceFeed(_feed, _maxDelay);
+
+    // 4. Close an executable or expired proposal that is about to be overwritten.
+    if (pending.executableAt != 0) {
+      emit PriceFeedManagerEvents.PriceFeedUpdateCancelled(_asset, pending.feed, pending.maxDelay);
     }
 
-    ////////////////////////////////////////////////////////////////////
-    ////////////////////////// feed management /////////////////////////
-    ////////////////////////////////////////////////////////////////////
+    // 5. Store the pending update.
+    uint256 executableAt = block.timestamp + PRICE_FEED_UPDATE_DELAY;
+    $.assetToPendingFeed[_asset] = PendingFeed({feed: _feed, maxDelay: _maxDelay, executableAt: uint64(executableAt)});
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function registerPriceFeed(
-        address _asset,
-        address _feed,
-        uint32 _maxDelay
-    ) external onlyAssetManager {
-        PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
+    emit PriceFeedManagerEvents.PriceFeedUpdateProposed(_asset, _feed, _maxDelay, executableAt);
 
-        // 1. Check the asset is a valid ERC20 and has no feed yet.
-        if (_asset == address(0)) revert PriceFeedManager__InvalidAsset();
-        _validateAsset(_asset);
-        if ($.assetToFeedConfig[_asset].feed != address(0))
-            revert PriceFeedManager__PriceFeedAlreadySet(_asset);
+    return executableAt;
+  }
 
-        // 2. Validate the feed and its maxDelay.
-        _validatePriceFeed(_feed, _maxDelay);
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function executePriceFeedUpdate(address _asset) external onlyAssetManager {
+    PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
+    PendingFeed memory pending = $.assetToPendingFeed[_asset];
 
-        // 3. Store the configuration.
-        $.assetToFeedConfig[_asset] = FeedConfig({
-            feed: _feed,
-            maxDelay: _maxDelay
-        });
-
-        emit PriceFeedManagerEvents.PriceFeedRegistered(
-            _asset,
-            _feed,
-            _maxDelay
-        );
+    // 1. Check there is a pending update past its delay and not expired.
+    if (pending.executableAt == 0 || block.timestamp < pending.executableAt) {
+      revert PriceFeedManager__NoPendingPriceFeedUpdate();
+    }
+    if (block.timestamp > pending.executableAt + PRICE_FEED_UPDATE_EXECUTION_WINDOW) {
+      revert PriceFeedManager__PriceFeedUpdateExpired();
     }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function proposePriceFeedUpdate(
-        address _asset,
-        address _feed,
-        uint32 _maxDelay
-    ) external onlyAssetManager returns (uint256) {
-        PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
-        FeedConfig memory current = $.assetToFeedConfig[_asset];
+    // 2. Re-validate the proposed feed: it may have been deprecated during the delay.
+    _validatePriceFeed(pending.feed, pending.maxDelay);
 
-        // 1. Check the asset already has a feed.
-        if (current.feed == address(0))
-            revert PriceFeedManager__PriceFeedNotSet(_asset);
+    // 3. Apply the new configuration and clear the pending update.
+    address oldFeed = $.assetToFeedConfig[_asset].feed;
+    $.assetToFeedConfig[_asset] = FeedConfig({feed: pending.feed, maxDelay: pending.maxDelay});
+    delete $.assetToPendingFeed[_asset];
 
-        // 2. Check there is no proposal still within its delay.
-        PendingFeed memory pending = $.assetToPendingFeed[_asset];
-        if (pending.executableAt != 0 && block.timestamp < pending.executableAt)
-            revert PriceFeedManager__PriceFeedUpdatePending();
+    emit PriceFeedManagerEvents.PriceFeedUpdated(_asset, oldFeed, pending.feed, pending.maxDelay);
+  }
 
-        // 3. Check the configuration changes and is valid.
-        if (current.feed == _feed && current.maxDelay == _maxDelay)
-            revert PriceFeedManager__SamePriceFeedConfig();
-        _validatePriceFeed(_feed, _maxDelay);
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function cancelPriceFeedUpdate(address _asset) external onlyAssetManager {
+    PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
+    PendingFeed memory pending = $.assetToPendingFeed[_asset];
 
-        // 4. Close an executable or expired proposal that is about to be overwritten.
-        if (pending.executableAt != 0)
-            emit PriceFeedManagerEvents.PriceFeedUpdateCancelled(
-                _asset,
-                pending.feed,
-                pending.maxDelay
-            );
-
-        // 5. Store the pending update.
-        uint256 executableAt = block.timestamp + PRICE_FEED_UPDATE_DELAY;
-        $.assetToPendingFeed[_asset] = PendingFeed({
-            feed: _feed,
-            maxDelay: _maxDelay,
-            executableAt: uint64(executableAt)
-        });
-
-        emit PriceFeedManagerEvents.PriceFeedUpdateProposed(
-            _asset,
-            _feed,
-            _maxDelay,
-            executableAt
-        );
-
-        return executableAt;
+    // 1. Check there is a pending update.
+    if (pending.executableAt == 0) {
+      revert PriceFeedManager__NoPendingPriceFeedUpdate();
     }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function executePriceFeedUpdate(address _asset) external onlyAssetManager {
-        PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
-        PendingFeed memory pending = $.assetToPendingFeed[_asset];
+    // 2. Clear the pending update.
+    delete $.assetToPendingFeed[_asset];
 
-        // 1. Check there is a pending update past its delay and not expired.
-        if (
-            pending.executableAt == 0 || block.timestamp < pending.executableAt
-        ) revert PriceFeedManager__NoPendingPriceFeedUpdate();
-        if (
-            block.timestamp >
-            pending.executableAt + PRICE_FEED_UPDATE_EXECUTION_WINDOW
-        ) revert PriceFeedManager__PriceFeedUpdateExpired();
+    emit PriceFeedManagerEvents.PriceFeedUpdateCancelled(_asset, pending.feed, pending.maxDelay);
+  }
 
-        // 2. Re-validate the proposed feed: it may have been deprecated during the delay.
-        _validatePriceFeed(pending.feed, pending.maxDelay);
+  ////////////////////////////////////////////////////////////////////
+  ////////////////////////////// pricing /////////////////////////////
+  ////////////////////////////////////////////////////////////////////
 
-        // 3. Apply the new configuration and clear the pending update.
-        address oldFeed = $.assetToFeedConfig[_asset].feed;
-        $.assetToFeedConfig[_asset] = FeedConfig({
-            feed: pending.feed,
-            maxDelay: pending.maxDelay
-        });
-        delete $.assetToPendingFeed[_asset];
-
-        emit PriceFeedManagerEvents.PriceFeedUpdated(
-            _asset,
-            oldFeed,
-            pending.feed,
-            pending.maxDelay
-        );
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function getPrice(address _asset) external view returns (uint256) {
+    FeedConfig memory config = _getPriceFeedManagerStorage().assetToFeedConfig[_asset];
+    if (config.feed == address(0)) {
+      revert PriceFeedManager__PriceFeedNotSet(_asset);
     }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function cancelPriceFeedUpdate(address _asset) external onlyAssetManager {
-        PriceFeedManagerStorage storage $ = _getPriceFeedManagerStorage();
-        PendingFeed memory pending = $.assetToPendingFeed[_asset];
+    AggregatorV3Interface feed = AggregatorV3Interface(config.feed);
+    (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = feed.latestRoundData();
 
-        // 1. Check there is a pending update.
-        if (pending.executableAt == 0)
-            revert PriceFeedManager__NoPendingPriceFeedUpdate();
-
-        // 2. Clear the pending update.
-        delete $.assetToPendingFeed[_asset];
-
-        emit PriceFeedManagerEvents.PriceFeedUpdateCancelled(
-            _asset,
-            pending.feed,
-            pending.maxDelay
-        );
+    if (answer <= 0) revert PriceFeedManager__PriceFeedNotAvailable();
+    if (answeredInRound < roundId) {
+      revert PriceFeedManager__PriceFeedRoundStale();
+    }
+    if (block.timestamp - updatedAt > config.maxDelay) {
+      revert PriceFeedManager__PriceIsStale();
     }
 
-    ////////////////////////////////////////////////////////////////////
-    ////////////////////////////// pricing /////////////////////////////
-    ////////////////////////////////////////////////////////////////////
+    // decimals() <= DECIMALS_STANDARD is enforced at registration, so this never underflows.
+    return uint256(answer) * 10 ** (DECIMALS_STANDARD - feed.decimals());
+  }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function getPrice(address _asset) external view returns (uint256) {
-        FeedConfig memory config = _getPriceFeedManagerStorage()
-            .assetToFeedConfig[_asset];
-        if (config.feed == address(0))
-            revert PriceFeedManager__PriceFeedNotSet(_asset);
+  ////////////////////////////////////////////////////////////////////
+  ////////////////////////////// getters /////////////////////////////
+  ////////////////////////////////////////////////////////////////////
 
-        AggregatorV3Interface feed = AggregatorV3Interface(config.feed);
-        (
-            uint80 roundId,
-            int256 answer,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = feed.latestRoundData();
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function getPriceFeedConfig(address _asset) external view returns (FeedConfig memory) {
+    return _getPriceFeedManagerStorage().assetToFeedConfig[_asset];
+  }
 
-        if (answer <= 0) revert PriceFeedManager__PriceFeedNotAvailable();
-        if (answeredInRound < roundId)
-            revert PriceFeedManager__PriceFeedRoundStale();
-        if (block.timestamp - updatedAt > config.maxDelay)
-            revert PriceFeedManager__PriceIsStale();
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function getPendingPriceFeedUpdate(address _asset) external view returns (PendingFeed memory) {
+    return _getPriceFeedManagerStorage().assetToPendingFeed[_asset];
+  }
 
-        // decimals() <= DECIMALS_STANDARD is enforced at registration, so this never underflows.
-        return uint256(answer) * 10 ** (DECIMALS_STANDARD - feed.decimals());
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function hasPriceFeed(address _asset) external view returns (bool) {
+    return _getPriceFeedManagerStorage().assetToFeedConfig[_asset].feed != address(0);
+  }
+
+  /// @dev Inherit from IPriceFeedManager. See interface for details.
+  function getImplementation() external view returns (address) {
+    return ERC1967Utils.getImplementation();
+  }
+
+  ////////////////////////////////////////////////////////////////////
+  ///////////////////////////// internals ////////////////////////////
+  ////////////////////////////////////////////////////////////////////
+
+  /**
+   * @notice Restricts a call to the ASSET_MANAGER_ROLE holders of the owner (IndexManager).
+   * @dev Reverts with PriceFeedManager__CallerNotAssetManager otherwise.
+   */
+  function _onlyAssetManager() internal view {
+    if (!IAccessControl(owner()).hasRole(ASSET_MANAGER_ROLE, msg.sender)) {
+      revert PriceFeedManager__CallerNotAssetManager();
+    }
+  }
+
+  /**
+   * @notice Validates a Chainlink price feed and its maxDelay before it is stored.
+   * @dev Reverts with PriceFeedManager__InvalidPriceFeed if the feed is address(0), has no code,
+   *      latestRoundData() reverts or returns answer <= 0, or decimals() reverts or is above DECIMALS_STANDARD.
+   *      Reverts with PriceFeedManager__InvalidMaxDelay if maxDelay is 0 or above MAX_FEED_DELAY_LIMIT.
+   * @param _feed The Chainlink price feed address to validate.
+   * @param _maxDelay The maximum age, in seconds, of the latest answer.
+   */
+  function _validatePriceFeed(address _feed, uint32 _maxDelay) internal view {
+    if (_feed == address(0) || _feed.code.length == 0) {
+      revert PriceFeedManager__InvalidPriceFeed(_feed);
+    }
+    if (_maxDelay == 0 || _maxDelay > MAX_FEED_DELAY_LIMIT) {
+      revert PriceFeedManager__InvalidMaxDelay();
     }
 
-    ////////////////////////////////////////////////////////////////////
-    ////////////////////////////// getters /////////////////////////////
-    ////////////////////////////////////////////////////////////////////
-
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function getPriceFeedConfig(
-        address _asset
-    ) external view returns (FeedConfig memory) {
-        return _getPriceFeedManagerStorage().assetToFeedConfig[_asset];
+    try AggregatorV3Interface(_feed).latestRoundData() returns (uint80, int256 answer, uint256, uint256, uint80) {
+      if (answer <= 0) revert PriceFeedManager__InvalidPriceFeed(_feed);
+    } catch {
+      revert PriceFeedManager__InvalidPriceFeed(_feed);
     }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function getPendingPriceFeedUpdate(
-        address _asset
-    ) external view returns (PendingFeed memory) {
-        return _getPriceFeedManagerStorage().assetToPendingFeed[_asset];
+    try AggregatorV3Interface(_feed).decimals() returns (uint8 decimals) {
+      if (decimals > DECIMALS_STANDARD) {
+        revert PriceFeedManager__InvalidPriceFeed(_feed);
+      }
+    } catch {
+      revert PriceFeedManager__InvalidPriceFeed(_feed);
+    }
+  }
+
+  /**
+   * @notice Validates that an asset exposes the ERC20 metadata used by the indexes.
+   * @dev Reverts with PriceFeedManager__InvalidAsset if symbol() reverts or returns no data (the index name and
+   *      symbol are built from it). Reverts with PriceFeedManager__InvalidAssetDecimals if decimals() reverts,
+   *      returns less than 32 bytes or a value above DECIMALS_STANDARD, since the index decimal conversions
+   *      would revert or truncate to 0.
+   * @param _asset The asset to validate, already checked to be non-zero.
+   */
+  function _validateAsset(address _asset) internal view {
+    (bool success, bytes memory result) = _asset.staticcall(abi.encodeWithSignature("symbol()"));
+    if (!success || result.length == 0) {
+      revert PriceFeedManager__InvalidAsset();
     }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function hasPriceFeed(address _asset) external view returns (bool) {
-        return
-            _getPriceFeedManagerStorage().assetToFeedConfig[_asset].feed !=
-            address(0);
+    (success, result) = _asset.staticcall(abi.encodeWithSignature("decimals()"));
+    if (!success || result.length < 32 || abi.decode(result, (uint256)) > DECIMALS_STANDARD) {
+      revert PriceFeedManager__InvalidAssetDecimals(_asset);
     }
+  }
 
-    /// @dev Inherit from IPriceFeedManager. See interface for details.
-    function getImplementation() external view returns (address) {
-        return ERC1967Utils.getImplementation();
+  /**
+   * @notice Returns the ERC-7201 namespaced storage struct.
+   * @return $ The PriceFeedManagerStorage pointer.
+   */
+  function _getPriceFeedManagerStorage() internal pure returns (PriceFeedManagerStorage storage $) {
+    assembly {
+      $.slot := PRICE_FEED_MANAGER_STORAGE_LOCATION
     }
-
-    ////////////////////////////////////////////////////////////////////
-    ///////////////////////////// internals ////////////////////////////
-    ////////////////////////////////////////////////////////////////////
-
-    /**
-     * @notice Restricts a call to the ASSET_MANAGER_ROLE holders of the owner (IndexManager).
-     * @dev Reverts with PriceFeedManager__CallerNotAssetManager otherwise.
-     */
-    function _onlyAssetManager() internal view {
-        if (!IAccessControl(owner()).hasRole(ASSET_MANAGER_ROLE, msg.sender))
-            revert PriceFeedManager__CallerNotAssetManager();
-    }
-
-    /**
-     * @notice Validates a Chainlink price feed and its maxDelay before it is stored.
-     * @dev Reverts with PriceFeedManager__InvalidPriceFeed if the feed is address(0), has no code,
-     *      latestRoundData() reverts or returns answer <= 0, or decimals() reverts or is above DECIMALS_STANDARD.
-     *      Reverts with PriceFeedManager__InvalidMaxDelay if maxDelay is 0 or above MAX_FEED_DELAY_LIMIT.
-     * @param _feed The Chainlink price feed address to validate.
-     * @param _maxDelay The maximum age, in seconds, of the latest answer.
-     */
-    function _validatePriceFeed(address _feed, uint32 _maxDelay) internal view {
-        if (_feed == address(0) || _feed.code.length == 0)
-            revert PriceFeedManager__InvalidPriceFeed(_feed);
-        if (_maxDelay == 0 || _maxDelay > MAX_FEED_DELAY_LIMIT)
-            revert PriceFeedManager__InvalidMaxDelay();
-
-        try AggregatorV3Interface(_feed).latestRoundData() returns (
-            uint80,
-            int256 answer,
-            uint256,
-            uint256,
-            uint80
-        ) {
-            if (answer <= 0) revert PriceFeedManager__InvalidPriceFeed(_feed);
-        } catch {
-            revert PriceFeedManager__InvalidPriceFeed(_feed);
-        }
-
-        try AggregatorV3Interface(_feed).decimals() returns (uint8 decimals) {
-            if (decimals > DECIMALS_STANDARD)
-                revert PriceFeedManager__InvalidPriceFeed(_feed);
-        } catch {
-            revert PriceFeedManager__InvalidPriceFeed(_feed);
-        }
-    }
-
-    /**
-     * @notice Validates that an asset exposes the ERC20 metadata used by the indexes.
-     * @dev Reverts with PriceFeedManager__InvalidAsset if symbol() reverts or returns no data (the index name and
-     *      symbol are built from it). Reverts with PriceFeedManager__InvalidAssetDecimals if decimals() reverts,
-     *      returns less than 32 bytes or a value above DECIMALS_STANDARD, since the index decimal conversions
-     *      would revert or truncate to 0.
-     * @param _asset The asset to validate, already checked to be non-zero.
-     */
-    function _validateAsset(address _asset) internal view {
-        (bool success, bytes memory result) = _asset.staticcall(
-            abi.encodeWithSignature("symbol()")
-        );
-        if (!success || result.length == 0)
-            revert PriceFeedManager__InvalidAsset();
-
-        (success, result) = _asset.staticcall(
-            abi.encodeWithSignature("decimals()")
-        );
-        if (
-            !success ||
-            result.length < 32 ||
-            abi.decode(result, (uint256)) > DECIMALS_STANDARD
-        ) revert PriceFeedManager__InvalidAssetDecimals(_asset);
-    }
-
-    /**
-     * @notice Returns the ERC-7201 namespaced storage struct.
-     * @return $ The PriceFeedManagerStorage pointer.
-     */
-    function _getPriceFeedManagerStorage()
-        internal
-        pure
-        returns (PriceFeedManagerStorage storage $)
-    {
-        assembly {
-            $.slot := PRICE_FEED_MANAGER_STORAGE_LOCATION
-        }
-    }
+  }
 }

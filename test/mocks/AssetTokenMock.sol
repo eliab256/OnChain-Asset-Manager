@@ -21,41 +21,37 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  *                                        to test edge-cases without redeploying.
  */
 contract AssetTokenMock is ERC20 {
-    uint8 private s_decimals;
+  uint8 private s_decimals;
 
-    constructor(
-        string memory name,
-        string memory symbol,
-        uint8 decimals_
-    ) ERC20(name, symbol) {
-        s_decimals = decimals_;
-    }
+  constructor(string memory name, string memory symbol, uint8 decimals_) ERC20(name, symbol) {
+    s_decimals = decimals_;
+  }
 
-    // ─── Overrides ────────────────────────────────────────────────────────────
+  // ─── Overrides ────────────────────────────────────────────────────────────
 
-    function decimals() public view override returns (uint8) {
-        return s_decimals;
-    }
+  function decimals() public view override returns (uint8) {
+    return s_decimals;
+  }
 
-    // ─── Mint helpers ─────────────────────────────────────────────────────────
+  // ─── Mint helpers ─────────────────────────────────────────────────────────
 
-    /// @notice Mint raw smallest-unit amount (same as a real ERC20 transfer/mint).
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
+  /// @notice Mint raw smallest-unit amount (same as a real ERC20 transfer/mint).
+  function mint(address to, uint256 amount) external {
+    _mint(to, amount);
+  }
 
-    /// @notice Mint a "human-readable" amount: 1 → 1 * 10**decimals.
-    /// @dev    Useful to avoid hardcoding `1e6` vs `1e18` in tests.
-    function mintHumanAmount(address to, uint256 humanAmount) external {
-        _mint(to, humanAmount * 10 ** s_decimals);
-    }
+  /// @notice Mint a "human-readable" amount: 1 → 1 * 10**decimals.
+  /// @dev    Useful to avoid hardcoding `1e6` vs `1e18` in tests.
+  function mintHumanAmount(address to, uint256 humanAmount) external {
+    _mint(to, humanAmount * 10 ** s_decimals);
+  }
 
-    // ─── Test utilities ───────────────────────────────────────────────────────
+  // ─── Test utilities ───────────────────────────────────────────────────────
 
-    /// @notice Change decimals after deployment to test edge-cases.
-    /// @dev    WARNING: changing decimals of a token that already has balances
-    ///         reinterprets existing raw amounts — use only in controlled tests.
-    function setDecimals(uint8 newDecimals) external {
-        s_decimals = newDecimals;
-    }
+  /// @notice Change decimals after deployment to test edge-cases.
+  /// @dev    WARNING: changing decimals of a token that already has balances
+  ///         reinterprets existing raw amounts — use only in controlled tests.
+  function setDecimals(uint8 newDecimals) external {
+    s_decimals = newDecimals;
+  }
 }

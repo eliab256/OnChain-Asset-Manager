@@ -6,10 +6,7 @@ import {Vm} from "forge-std/Vm.sol";
 import {IIndex} from "../../../src/Interface/IIndex.sol";
 import {SwapRoute, AssetAvailable, IndexAction} from "../../../src/types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {
-    DeployAndInitNewIndex,
-    RunParams
-} from "../../../script/DeployAndInitNewIndex.s.sol";
+import {DeployAndInitNewIndex, RunParams} from "../../../script/DeployAndInitNewIndex.s.sol";
 
 import "../../../src/errors/IndexManagerErrors.sol";
 import "../../../src/errors/IndexErrors.sol";
@@ -22,607 +19,437 @@ import "../../../src/events/IndexEvents.sol";
  *      transaction; never emitted when the call to the Index fails or reverts.
  */
 contract IndexManagerActionTriggeredTest is BaseTest {
-    // =========================================================================
-    //  Contracts and addresses
-    // =========================================================================
+  // =========================================================================
+  //  Contracts and addresses
+  // =========================================================================
 
-    /// Second initialized index (WETH/LINK), used as the failing index in batch tests
-    IIndex internal s_secondIndex;
+  /// Second initialized index (WETH/LINK), used as the failing index in batch tests
+  IIndex internal s_secondIndex;
 
-    // =========================================================================
-    //  Constants
-    // =========================================================================
+  // =========================================================================
+  //  Constants
+  // =========================================================================
 
-    /// USDC deposited to accrue fees on the initialized index (6 decimals)
-    uint256 constant FEE_GENERATING_DEPOSIT = 1_000e6;
+  /// USDC deposited to accrue fees on the initialized index (6 decimals)
+  uint256 constant FEE_GENERATING_DEPOSIT = 1_000e6;
 
-    /// LINK deposited to initialize the second index (18 decimals)
-    uint256 constant SECOND_INDEX_LINK_DEPOSIT = 1_000e18;
+  /// LINK deposited to initialize the second index (18 decimals)
+  uint256 constant SECOND_INDEX_LINK_DEPOSIT = 1_000e18;
 
-    // =========================================================================
-    //  setUp
-    // =========================================================================
+  // =========================================================================
+  //  setUp
+  // =========================================================================
 
-    function setUp() public override {
-        super.setUp();
+  function setUp() public override {
+    super.setUp();
 
-        DeployAndInitNewIndex deployScript = new DeployAndInitNewIndex();
-        s_secondIndex = deployScript.run(
-            helperConfig,
-            address(indexManager),
-            address(multiSigWallet),
-            RunParams({
-                assetA: AssetAvailable.WETH,
-                assetB: AssetAvailable.LINK,
-                weightA: weight60,
-                weightB: weight40,
-                feePercentage: validFeePercentage,
-                initialAssetADeposit: 0,
-                initialAssetBDeposit: SECOND_INDEX_LINK_DEPOSIT
-            })
-        );
+    DeployAndInitNewIndex deployScript = new DeployAndInitNewIndex();
+    s_secondIndex = deployScript.run(
+      helperConfig,
+      address(indexManager),
+      address(multiSigWallet),
+      RunParams({
+        assetA: AssetAvailable.WETH,
+        assetB: AssetAvailable.LINK,
+        weightA: weight60,
+        weightB: weight40,
+        feePercentage: validFeePercentage,
+        initialAssetADeposit: 0,
+        initialAssetBDeposit: SECOND_INDEX_LINK_DEPOSIT
+      })
+    );
 
-        bytes32 feeCollectorRole = indexManager.FEE_COLLECTOR_ROLE();
-        vm.prank(deployer);
-        indexManager.grantRole(feeCollectorRole, feeCollector);
+    bytes32 feeCollectorRole = indexManager.FEE_COLLECTOR_ROLE();
+    vm.prank(deployer);
+    indexManager.grantRole(feeCollectorRole, feeCollector);
+  }
+
+  // =========================================================================
+  //  Helpers
+  // =========================================================================
+
+  /// @dev Returns how many logs from `_emitter` match `_sig` and the position of the first one.
+  function _findIndexEvent(Vm.Log[] memory _logs, address _emitter, bytes32 _sig)
+    internal
+    pure
+    returns (uint256 count, uint256 position)
+  {
+    for (uint256 i = 0; i < _logs.length; i++) {
+      if (_logs[i].emitter != _emitter || _logs[i].topics[0] != _sig) {
+        continue;
+      }
+      if (count == 0) position = i;
+      count++;
     }
+  }
 
-    // =========================================================================
-    //  Helpers
-    // =========================================================================
+  /// @dev Asserts the Index emitted `_indexSig` once, before the manager IndexActionTriggered at `_actionPosition`.
+  function _assertIndexEventBeforeAction(
+    Vm.Log[] memory _logs,
+    address _index,
+    bytes32 _indexSig,
+    uint256 _actionPosition
+  ) internal pure {
+    (uint256 count, uint256 position) = _findIndexEvent(_logs, _index, _indexSig);
+    assertEq(count, 1, "the Index state event must be emitted once");
+    assertLt(position, _actionPosition, "IndexActionTriggered must follow the Index state event");
+  }
 
-    /// @dev Returns how many logs from `_emitter` match `_sig` and the position of the first one.
-    function _findIndexEvent(
-        Vm.Log[] memory _logs,
-        address _emitter,
-        bytes32 _sig
-    ) internal pure returns (uint256 count, uint256 position) {
-        for (uint256 i = 0; i < _logs.length; i++) {
-            if (_logs[i].emitter != _emitter || _logs[i].topics[0] != _sig)
-                continue;
-            if (count == 0) position = i;
-            count++;
-        }
-    }
+  /// @dev Makes the initialized index (WETH/WBTC) need a rebalance while the second
+  ///      index (WETH/LINK) stays balanced, by doubling the WBTC price.
+  function _unbalanceInitializedIndexOnly() internal {
+    _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+    _refreshExchangeRates();
+  }
 
-    /// @dev Asserts the Index emitted `_indexSig` once, before the manager IndexActionTriggered at `_actionPosition`.
-    function _assertIndexEventBeforeAction(
-        Vm.Log[] memory _logs,
-        address _index,
-        bytes32 _indexSig,
-        uint256 _actionPosition
-    ) internal pure {
-        (uint256 count, uint256 position) = _findIndexEvent(
-            _logs,
-            _index,
-            _indexSig
-        );
-        assertEq(count, 1, "the Index state event must be emitted once");
-        assertLt(
-            position,
-            _actionPosition,
-            "IndexActionTriggered must follow the Index state event"
-        );
-    }
+  /// @dev Proposes `_weight0` on `_index` as deployer and warps to the executable window.
+  function _proposeAndWarpToExecutable(address _index, uint128 _weight0) internal {
+    vm.prank(deployer);
+    indexManager.proposeNewWeights(_index, _weight0);
+    vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+    _refreshPriceFeeds();
+  }
 
-    /// @dev Makes the initialized index (WETH/WBTC) need a rebalance while the second
-    ///      index (WETH/LINK) stays balanced, by doubling the WBTC price.
-    function _unbalanceInitializedIndexOnly() internal {
-        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
-        _refreshExchangeRates();
-    }
+  function _twoIndexes() internal view returns (address[] memory indexes) {
+    indexes = new address[](2);
+    indexes[0] = address(initializedIndex);
+    indexes[1] = address(s_secondIndex);
+  }
 
-    /// @dev Proposes `_weight0` on `_index` as deployer and warps to the executable window.
-    function _proposeAndWarpToExecutable(
-        address _index,
-        uint128 _weight0
-    ) internal {
-        vm.prank(deployer);
-        indexManager.proposeNewWeights(_index, _weight0);
-        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
-        _refreshPriceFeeds();
-    }
+  /// @dev Batch outcome: one IndexActionTriggered for the initialized index, one
+  ///      IndexActionFailed(_failedReason) and no IndexActionTriggered for the second index.
+  function _assertBatchOneSuccessOneFailure(
+    Vm.Log[] memory _logs,
+    address _caller,
+    IndexAction _action,
+    bytes memory _failedReason,
+    bytes32 _indexSuccessSig
+  ) internal view {
+    uint256 actionPosition = _assertSingleActionTriggeredFor(_logs, address(initializedIndex), _caller, _action);
+    _assertIndexEventBeforeAction(_logs, address(initializedIndex), _indexSuccessSig, actionPosition);
+    assertEq(
+      _countManagerEvents(_logs, IndexActionFailed.selector, address(initializedIndex)),
+      0,
+      "the succeeding index must not get IndexActionFailed"
+    );
 
-    function _twoIndexes() internal view returns (address[] memory indexes) {
-        indexes = new address[](2);
-        indexes[0] = address(initializedIndex);
-        indexes[1] = address(s_secondIndex);
-    }
+    assertEq(
+      _countManagerEvents(_logs, IndexActionTriggered.selector, address(s_secondIndex)),
+      0,
+      "the failing index must not get IndexActionTriggered"
+    );
+    _assertSingleActionFailedFor(_logs, address(s_secondIndex), _caller, _action, _failedReason);
 
-    /// @dev Batch outcome: one IndexActionTriggered for the initialized index, one
-    ///      IndexActionFailed(_failedReason) and no IndexActionTriggered for the second index.
-    function _assertBatchOneSuccessOneFailure(
-        Vm.Log[] memory _logs,
-        address _caller,
-        IndexAction _action,
-        bytes memory _failedReason,
-        bytes32 _indexSuccessSig
-    ) internal view {
-        uint256 actionPosition = _assertSingleActionTriggeredFor(
-            _logs,
-            address(initializedIndex),
-            _caller,
-            _action
-        );
-        _assertIndexEventBeforeAction(
-            _logs,
-            address(initializedIndex),
-            _indexSuccessSig,
-            actionPosition
-        );
-        assertEq(
-            _countManagerEvents(
-                _logs,
-                IndexActionFailed.selector,
-                address(initializedIndex)
-            ),
-            0,
-            "the succeeding index must not get IndexActionFailed"
-        );
+    assertEq(
+      _countManagerEvents(_logs, IndexActionTriggered.selector), 1, "exactly one IndexActionTriggered in the batch"
+    );
+    assertEq(_countManagerEvents(_logs, IndexActionFailed.selector), 1, "exactly one IndexActionFailed in the batch");
+  }
 
-        assertEq(
-            _countManagerEvents(
-                _logs,
-                IndexActionTriggered.selector,
-                address(s_secondIndex)
-            ),
-            0,
-            "the failing index must not get IndexActionTriggered"
-        );
-        _assertSingleActionFailedFor(
-            _logs,
-            address(s_secondIndex),
-            _caller,
-            _action,
-            _failedReason
-        );
+  // =========================================================================
+  //  initializeIndex — INITIALIZE
+  // =========================================================================
 
-        assertEq(
-            _countManagerEvents(_logs, IndexActionTriggered.selector),
-            1,
-            "exactly one IndexActionTriggered in the batch"
-        );
-        assertEq(
-            _countManagerEvents(_logs, IndexActionFailed.selector),
-            1,
-            "exactly one IndexActionFailed in the batch"
-        );
-    }
+  function testInitializeIndexEmitsActionTriggeredAfterIndexInitialized() public {
+    (uint8 decimals0,,) = nonInitializedIndex.getAssetsAndUsdcDecimals();
+    uint256 initAmount = 10 ** decimals0;
+    vm.startPrank(deployer);
+    IERC20(nonInitializedToken0).approve(address(nonInitializedIndex), type(uint256).max);
+    IERC20(nonInitializedToken1).approve(address(nonInitializedIndex), type(uint256).max);
+    vm.stopPrank();
+    (SwapRoute memory r0, SwapRoute memory r1, SwapRoute memory r01) =
+      helperConfig.getDefaultSwapRoutes(nonInitializedToken0, nonInitializedToken1);
 
-    // =========================================================================
-    //  initializeIndex — INITIALIZE
-    // =========================================================================
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.initializeIndex(deployer, address(nonInitializedIndex), initAmount, r0, r1, r01);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testInitializeIndexEmitsActionTriggeredAfterIndexInitialized()
-        public
-    {
-        (uint8 decimals0, , ) = nonInitializedIndex.getAssetsAndUsdcDecimals();
-        uint256 initAmount = 10 ** decimals0;
-        vm.startPrank(deployer);
-        IERC20(nonInitializedToken0).approve(
-            address(nonInitializedIndex),
-            type(uint256).max
-        );
-        IERC20(nonInitializedToken1).approve(
-            address(nonInitializedIndex),
-            type(uint256).max
-        );
-        vm.stopPrank();
-        (
-            SwapRoute memory r0,
-            SwapRoute memory r1,
-            SwapRoute memory r01
-        ) = helperConfig.getDefaultSwapRoutes(
-                nonInitializedToken0,
-                nonInitializedToken1
-            );
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(nonInitializedIndex), deployer, IndexAction.INITIALIZE);
+    _assertIndexEventBeforeAction(logs, address(nonInitializedIndex), IndexInitialized.selector, actionPosition);
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.initializeIndex(
-            deployer,
-            address(nonInitializedIndex),
-            initAmount,
-            r0,
-            r1,
-            r01
-        );
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testInitializeIndexRevertEmitsNoActionTriggered() public {
+    (SwapRoute memory r0, SwapRoute memory r1, SwapRoute memory r01) =
+      helperConfig.getDefaultSwapRoutes(initializedToken0, initializedToken1);
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(nonInitializedIndex),
-            deployer,
-            IndexAction.INITIALIZE
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(nonInitializedIndex),
-            IndexInitialized.selector,
-            actionPosition
-        );
-    }
+    vm.recordLogs();
+    vm.prank(deployer);
+    vm.expectRevert(IndexManager__IndexAlreadyInitialized.selector);
+    indexManager.initializeIndex(deployer, address(initializedIndex), 1, r0, r1, r01);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testInitializeIndexRevertEmitsNoActionTriggered() public {
-        (
-            SwapRoute memory r0,
-            SwapRoute memory r1,
-            SwapRoute memory r01
-        ) = helperConfig.getDefaultSwapRoutes(
-                initializedToken0,
-                initializedToken1
-            );
+    assertEq(
+      _countManagerEvents(logs, IndexActionTriggered.selector),
+      0,
+      "a reverted initializeIndex must not emit IndexActionTriggered"
+    );
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        vm.expectRevert(IndexManager__IndexAlreadyInitialized.selector);
-        indexManager.initializeIndex(
-            deployer,
-            address(initializedIndex),
-            1,
-            r0,
-            r1,
-            r01
-        );
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  // =========================================================================
+  //  rebalance — REBALANCE
+  // =========================================================================
 
-        assertEq(
-            _countManagerEvents(logs, IndexActionTriggered.selector),
-            0,
-            "a reverted initializeIndex must not emit IndexActionTriggered"
-        );
-    }
+  function testRebalanceSingleIndexEmitsActionTriggeredAfterIndexRebalanced() public {
+    _unbalanceInitializedIndexOnly();
 
-    // =========================================================================
-    //  rebalance — REBALANCE
-    // =========================================================================
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.rebalanceSingleIndex(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testRebalanceSingleIndexEmitsActionTriggeredAfterIndexRebalanced()
-        public
-    {
-        _unbalanceInitializedIndexOnly();
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.REBALANCE);
+    _assertIndexEventBeforeAction(logs, address(initializedIndex), IndexRebalanced.selector, actionPosition);
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.rebalanceSingleIndex(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testRebalanceSingleIndexFailureEmitsNoActionTriggered() public {
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.rebalanceSingleIndex(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            deployer,
-            IndexAction.REBALANCE
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            IndexRebalanced.selector,
-            actionPosition
-        );
-    }
+    assertEq(
+      _countManagerEvents(logs, IndexActionTriggered.selector),
+      0,
+      "a failed rebalance must not emit IndexActionTriggered"
+    );
+    _assertSingleActionFailedFor(
+      logs,
+      address(initializedIndex),
+      deployer,
+      IndexAction.REBALANCE,
+      abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
+    );
+  }
 
-    function testRebalanceSingleIndexFailureEmitsNoActionTriggered() public {
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.rebalanceSingleIndex(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testRebalanceMultipleIndexesEmitsActionTriggeredOnlyForSucceedingIndex() public {
+    _unbalanceInitializedIndexOnly();
 
-        assertEq(
-            _countManagerEvents(logs, IndexActionTriggered.selector),
-            0,
-            "a failed rebalance must not emit IndexActionTriggered"
-        );
-        _assertSingleActionFailedFor(
-            logs,
-            address(initializedIndex),
-            deployer,
-            IndexAction.REBALANCE,
-            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
-        );
-    }
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.rebalanceMultipleIndexes(_twoIndexes());
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testRebalanceMultipleIndexesEmitsActionTriggeredOnlyForSucceedingIndex()
-        public
-    {
-        _unbalanceInitializedIndexOnly();
+    _assertBatchOneSuccessOneFailure(
+      logs,
+      deployer,
+      IndexAction.REBALANCE,
+      abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
+      IndexRebalanced.selector
+    );
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.rebalanceMultipleIndexes(_twoIndexes());
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  // =========================================================================
+  //  proposeNewWeights — PROPOSE_WEIGHTS
+  // =========================================================================
 
-        _assertBatchOneSuccessOneFailure(
-            logs,
-            deployer,
-            IndexAction.REBALANCE,
-            abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
-            IndexRebalanced.selector
-        );
-    }
+  function testProposeNewWeightsViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller() public {
+    vm.recordLogs();
+    vm.prank(address(multiSigWallet));
+    indexManager.proposeNewWeights(address(initializedIndex), weight30);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    // =========================================================================
-    //  proposeNewWeights — PROPOSE_WEIGHTS
-    // =========================================================================
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), address(multiSigWallet), IndexAction.PROPOSE_WEIGHTS);
+    _assertIndexEventBeforeAction(logs, address(initializedIndex), WeightsUpdateProposed.selector, actionPosition);
+  }
 
-    function testProposeNewWeightsViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller()
-        public
-    {
-        vm.recordLogs();
-        vm.prank(address(multiSigWallet));
-        indexManager.proposeNewWeights(address(initializedIndex), weight30);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testProposeNewWeightsRevertEmitsNoActionTriggered() public {
+    (uint128 currentWeight0,) = initializedIndex.getAssetsWeights();
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            address(multiSigWallet),
-            IndexAction.PROPOSE_WEIGHTS
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            WeightsUpdateProposed.selector,
-            actionPosition
-        );
-    }
+    vm.recordLogs();
+    vm.prank(deployer);
+    vm.expectRevert(Index__InvalidWeight.selector);
+    indexManager.proposeNewWeights(address(initializedIndex), currentWeight0);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testProposeNewWeightsRevertEmitsNoActionTriggered() public {
-        (uint128 currentWeight0, ) = initializedIndex.getAssetsWeights();
+    assertEq(
+      _countManagerEvents(logs, IndexActionTriggered.selector),
+      0,
+      "a reverted proposeNewWeights must not emit IndexActionTriggered"
+    );
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        vm.expectRevert(Index__InvalidWeight.selector);
-        indexManager.proposeNewWeights(
-            address(initializedIndex),
-            currentWeight0
-        );
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  // =========================================================================
+  //  executeWeightUpdate — EXECUTE_WEIGHTS
+  // =========================================================================
 
-        assertEq(
-            _countManagerEvents(logs, IndexActionTriggered.selector),
-            0,
-            "a reverted proposeNewWeights must not emit IndexActionTriggered"
-        );
-    }
+  function testExecuteSingleWeightUpdateEmitsActionTriggeredAfterWeightsUpdated() public {
+    _proposeAndWarpToExecutable(address(initializedIndex), weight70);
+    _refreshExchangeRates();
 
-    // =========================================================================
-    //  executeWeightUpdate — EXECUTE_WEIGHTS
-    // =========================================================================
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.executeSingleWeightUpdate(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testExecuteSingleWeightUpdateEmitsActionTriggeredAfterWeightsUpdated()
-        public
-    {
-        _proposeAndWarpToExecutable(address(initializedIndex), weight70);
-        _refreshExchangeRates();
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+    _assertIndexEventBeforeAction(logs, address(initializedIndex), WeightsUpdated.selector, actionPosition);
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.executeSingleWeightUpdate(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testExecuteSingleWeightUpdateEmitsActionTriggeredWhenInnerRebalanceSkipped() public {
+    // Propose the current effective weight as target so the post-update rebalance is not needed.
+    _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+    (uint128 effectiveWeight0,) = initializedIndex.getAssetsEffectiveWeights();
+    _proposeAndWarpToExecutable(address(initializedIndex), effectiveWeight0);
+    _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            deployer,
-            IndexAction.EXECUTE_WEIGHTS
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            WeightsUpdated.selector,
-            actionPosition
-        );
-    }
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.executeSingleWeightUpdate(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testExecuteSingleWeightUpdateEmitsActionTriggeredWhenInnerRebalanceSkipped()
-        public
-    {
-        // Propose the current effective weight as target so the post-update rebalance is not needed.
-        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
-        (uint128 effectiveWeight0, ) = initializedIndex
-            .getAssetsEffectiveWeights();
-        _proposeAndWarpToExecutable(address(initializedIndex), effectiveWeight0);
-        _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+    _assertIndexEventBeforeAction(
+      logs, address(initializedIndex), WeightsUpdateRebalanceSkipped.selector, actionPosition
+    );
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.executeSingleWeightUpdate(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testExecuteSingleWeightUpdateEmitsActionTriggeredWhenInnerRebalanceFails() public {
+    _proposeAndWarpToExecutable(address(initializedIndex), weight30);
+    // Drain the router so the post-update rebalance swap reverts.
+    deal(address(mockWeth), address(mockUniRouter), 0);
+    deal(address(mockWbtc), address(mockUniRouter), 0);
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            deployer,
-            IndexAction.EXECUTE_WEIGHTS
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            WeightsUpdateRebalanceSkipped.selector,
-            actionPosition
-        );
-    }
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.executeSingleWeightUpdate(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testExecuteSingleWeightUpdateEmitsActionTriggeredWhenInnerRebalanceFails()
-        public
-    {
-        _proposeAndWarpToExecutable(address(initializedIndex), weight30);
-        // Drain the router so the post-update rebalance swap reverts.
-        deal(address(mockWeth), address(mockUniRouter), 0);
-        deal(address(mockWbtc), address(mockUniRouter), 0);
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+    _assertIndexEventBeforeAction(
+      logs, address(initializedIndex), WeightsUpdateRebalanceFailed.selector, actionPosition
+    );
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.executeSingleWeightUpdate(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testExecuteSingleWeightUpdateFailureEmitsNoActionTriggered() public {
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.executeSingleWeightUpdate(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            deployer,
-            IndexAction.EXECUTE_WEIGHTS
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            WeightsUpdateRebalanceFailed.selector,
-            actionPosition
-        );
-    }
+    assertEq(
+      _countManagerEvents(logs, IndexActionTriggered.selector),
+      0,
+      "a failed weight update must not emit IndexActionTriggered"
+    );
+    _assertSingleActionFailedFor(
+      logs,
+      address(initializedIndex),
+      deployer,
+      IndexAction.EXECUTE_WEIGHTS,
+      abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
+    );
+  }
 
-    function testExecuteSingleWeightUpdateFailureEmitsNoActionTriggered()
-        public
-    {
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.executeSingleWeightUpdate(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testExecuteWeightUpdateForMultipleIndexesEmitsActionTriggeredOnlyForSucceedingIndex() public {
+    _proposeAndWarpToExecutable(address(initializedIndex), weight70);
+    _refreshExchangeRates();
 
-        assertEq(
-            _countManagerEvents(logs, IndexActionTriggered.selector),
-            0,
-            "a failed weight update must not emit IndexActionTriggered"
-        );
-        _assertSingleActionFailedFor(
-            logs,
-            address(initializedIndex),
-            deployer,
-            IndexAction.EXECUTE_WEIGHTS,
-            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
-        );
-    }
+    vm.recordLogs();
+    vm.prank(deployer);
+    indexManager.executeWeightUpdateForMultipleIndexes(_twoIndexes());
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testExecuteWeightUpdateForMultipleIndexesEmitsActionTriggeredOnlyForSucceedingIndex()
-        public
-    {
-        _proposeAndWarpToExecutable(address(initializedIndex), weight70);
-        _refreshExchangeRates();
+    _assertBatchOneSuccessOneFailure(
+      logs,
+      deployer,
+      IndexAction.EXECUTE_WEIGHTS,
+      abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
+      WeightsUpdated.selector
+    );
+  }
 
-        vm.recordLogs();
-        vm.prank(deployer);
-        indexManager.executeWeightUpdateForMultipleIndexes(_twoIndexes());
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  // =========================================================================
+  //  cancelWeightUpdate — CANCEL_WEIGHTS
+  // =========================================================================
 
-        _assertBatchOneSuccessOneFailure(
-            logs,
-            deployer,
-            IndexAction.EXECUTE_WEIGHTS,
-            abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
-            WeightsUpdated.selector
-        );
-    }
+  function testCancelWeightUpdateViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller() public {
+    vm.prank(address(multiSigWallet));
+    indexManager.proposeNewWeights(address(initializedIndex), weight30);
 
-    // =========================================================================
-    //  cancelWeightUpdate — CANCEL_WEIGHTS
-    // =========================================================================
+    vm.recordLogs();
+    vm.prank(address(multiSigWallet));
+    indexManager.cancelWeightUpdate(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testCancelWeightUpdateViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller()
-        public
-    {
-        vm.prank(address(multiSigWallet));
-        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), address(multiSigWallet), IndexAction.CANCEL_WEIGHTS);
+    _assertIndexEventBeforeAction(logs, address(initializedIndex), WeightsUpdateCancelled.selector, actionPosition);
+  }
 
-        vm.recordLogs();
-        vm.prank(address(multiSigWallet));
-        indexManager.cancelWeightUpdate(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testCancelWeightUpdateRevertEmitsNoActionTriggered() public {
+    vm.recordLogs();
+    vm.prank(deployer);
+    vm.expectRevert(Index__NotPendingWeightUpdate.selector);
+    indexManager.cancelWeightUpdate(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            address(multiSigWallet),
-            IndexAction.CANCEL_WEIGHTS
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            WeightsUpdateCancelled.selector,
-            actionPosition
-        );
-    }
+    assertEq(
+      _countManagerEvents(logs, IndexActionTriggered.selector),
+      0,
+      "a reverted cancelWeightUpdate must not emit IndexActionTriggered"
+    );
+  }
 
-    function testCancelWeightUpdateRevertEmitsNoActionTriggered() public {
-        vm.recordLogs();
-        vm.prank(deployer);
-        vm.expectRevert(Index__NotPendingWeightUpdate.selector);
-        indexManager.cancelWeightUpdate(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  // =========================================================================
+  //  collectFees — COLLECT_FEES
+  // =========================================================================
 
-        assertEq(
-            _countManagerEvents(logs, IndexActionTriggered.selector),
-            0,
-            "a reverted cancelWeightUpdate must not emit IndexActionTriggered"
-        );
-    }
+  function testCollectFeesFromSingleIndexEmitsActionTriggeredWithFeeCollectorAsCaller() public {
+    _mintSharesViaRouter(user1, FEE_GENERATING_DEPOSIT);
 
-    // =========================================================================
-    //  collectFees — COLLECT_FEES
-    // =========================================================================
+    vm.recordLogs();
+    vm.prank(feeCollector);
+    indexManager.collectFeesFromSingleIndex(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testCollectFeesFromSingleIndexEmitsActionTriggeredWithFeeCollectorAsCaller()
-        public
-    {
-        _mintSharesViaRouter(user1, FEE_GENERATING_DEPOSIT);
+    uint256 actionPosition =
+      _assertOnlyActionTriggered(logs, address(initializedIndex), feeCollector, IndexAction.COLLECT_FEES);
+    _assertIndexEventBeforeAction(logs, address(initializedIndex), FeesCollected.selector, actionPosition);
+  }
 
-        vm.recordLogs();
-        vm.prank(feeCollector);
-        indexManager.collectFeesFromSingleIndex(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testCollectFeesFromSingleIndexFailureEmitsNoActionTriggered() public {
+    vm.recordLogs();
+    vm.prank(feeCollector);
+    indexManager.collectFeesFromSingleIndex(address(initializedIndex));
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        uint256 actionPosition = _assertOnlyActionTriggered(
-            logs,
-            address(initializedIndex),
-            feeCollector,
-            IndexAction.COLLECT_FEES
-        );
-        _assertIndexEventBeforeAction(
-            logs,
-            address(initializedIndex),
-            FeesCollected.selector,
-            actionPosition
-        );
-    }
+    assertEq(
+      _countManagerEvents(logs, IndexActionTriggered.selector),
+      0,
+      "a failed fee collection must not emit IndexActionTriggered"
+    );
+    _assertSingleActionFailedFor(
+      logs,
+      address(initializedIndex),
+      feeCollector,
+      IndexAction.COLLECT_FEES,
+      abi.encodeWithSelector(Index__NoFeesToCollect.selector)
+    );
+  }
 
-    function testCollectFeesFromSingleIndexFailureEmitsNoActionTriggered()
-        public
-    {
-        vm.recordLogs();
-        vm.prank(feeCollector);
-        indexManager.collectFeesFromSingleIndex(address(initializedIndex));
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+  function testCollectFeesFromMultipleIndexesEmitsActionTriggeredOnlyForSucceedingIndex() public {
+    _mintSharesViaRouter(user1, FEE_GENERATING_DEPOSIT);
+    (, uint128 secondIndexFees) = s_secondIndex.getFeesInfo();
+    assertEq(secondIndexFees, 0, "the second index must have no fees");
 
-        assertEq(
-            _countManagerEvents(logs, IndexActionTriggered.selector),
-            0,
-            "a failed fee collection must not emit IndexActionTriggered"
-        );
-        _assertSingleActionFailedFor(
-            logs,
-            address(initializedIndex),
-            feeCollector,
-            IndexAction.COLLECT_FEES,
-            abi.encodeWithSelector(Index__NoFeesToCollect.selector)
-        );
-    }
+    vm.recordLogs();
+    vm.prank(feeCollector);
+    indexManager.collectFeesFromMultipleIndexes(_twoIndexes());
+    Vm.Log[] memory logs = vm.getRecordedLogs();
 
-    function testCollectFeesFromMultipleIndexesEmitsActionTriggeredOnlyForSucceedingIndex()
-        public
-    {
-        _mintSharesViaRouter(user1, FEE_GENERATING_DEPOSIT);
-        (, uint128 secondIndexFees) = s_secondIndex.getFeesInfo();
-        assertEq(secondIndexFees, 0, "the second index must have no fees");
-
-        vm.recordLogs();
-        vm.prank(feeCollector);
-        indexManager.collectFeesFromMultipleIndexes(_twoIndexes());
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        _assertBatchOneSuccessOneFailure(
-            logs,
-            feeCollector,
-            IndexAction.COLLECT_FEES,
-            abi.encodeWithSelector(Index__NoFeesToCollect.selector),
-            FeesCollected.selector
-        );
-    }
+    _assertBatchOneSuccessOneFailure(
+      logs,
+      feeCollector,
+      IndexAction.COLLECT_FEES,
+      abi.encodeWithSelector(Index__NoFeesToCollect.selector),
+      FeesCollected.selector
+    );
+  }
 }

@@ -2,291 +2,213 @@
 pragma solidity ^0.8.13;
 
 import {IntegrationBase} from "./IntegrationBase.t.sol";
-import {
-    AggregatorV3Interface
-} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {
-    PriceFeedManager__PriceIsStale
-} from "../../../src/errors/PriceFeedManagerErrors.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {PriceFeedManager__PriceIsStale} from "../../../src/errors/PriceFeedManagerErrors.sol";
 import {AssetAvailable, FeedConfig} from "../../../src/types.sol";
 import {ContractCodeConstants} from "../../../src/ContractCodeConstants.sol";
 
 contract IntegrationPriceFeeds is IntegrationBase, ContractCodeConstants {
-    function setUp() public override {
-        super.setUp();
-    }
+  function setUp() public override {
+    super.setUp();
+  }
 
-    // =========================================================================
-    //  WBTC price feed
-    // =========================================================================
+  // =========================================================================
+  //  WBTC price feed
+  // =========================================================================
 
-    function test_priceFeedManager_getPrice_wbtc_returnsPositivePrice() public view {
-        uint256 price = priceFeedManager.getPrice(address(wbtc));
-        assertGt(price, 0, "WBTC price must be positive");
-    }
+  function test_priceFeedManager_getPrice_wbtc_returnsPositivePrice() public view {
+    uint256 price = priceFeedManager.getPrice(address(wbtc));
+    assertGt(price, 0, "WBTC price must be positive");
+  }
 
-    /**
-     * @dev  Price is returned in 18-decimal standard by PriceFeedManager.getPrice.
-     *       Range: $10 000 – $200 000 per BTC.
-     */
-    function test_priceFeedManager_getPrice_wbtc_isInExpectedRange() public view {
-        uint256 price = priceFeedManager.getPrice(address(wbtc));
-        assertGt(price, 10_000e18, "WBTC price below $10 000 floor");
-        assertLt(price, 200_000e18, "WBTC price above $200 000 ceiling");
-    }
+  /**
+   * @dev  Price is returned in 18-decimal standard by PriceFeedManager.getPrice.
+   *       Range: $10 000 – $200 000 per BTC.
+   */
+  function test_priceFeedManager_getPrice_wbtc_isInExpectedRange() public view {
+    uint256 price = priceFeedManager.getPrice(address(wbtc));
+    assertGt(price, 10_000e18, "WBTC price below $10 000 floor");
+    assertLt(price, 200_000e18, "WBTC price above $200 000 ceiling");
+  }
 
-    function test_priceFeedManager_getPrice_weth_returnsPositivePrice() public view {
-        uint256 price = priceFeedManager.getPrice(address(weth));
-        assertGt(price, 0, "WETH price must be positive");
-    }
+  function test_priceFeedManager_getPrice_weth_returnsPositivePrice() public view {
+    uint256 price = priceFeedManager.getPrice(address(weth));
+    assertGt(price, 0, "WETH price must be positive");
+  }
 
-    /**
-     * @dev  Range: $500 – $50 000 per ETH.
-     */
-    function test_priceFeedManager_getPrice_weth_isInExpectedRange() public view {
-        uint256 price = priceFeedManager.getPrice(address(weth));
-        assertGt(price, 500e18, "WETH price below $500 floor");
-        assertLt(price, 50_000e18, "WETH price above $50 000 ceiling");
-    }
+  /**
+   * @dev  Range: $500 – $50 000 per ETH.
+   */
+  function test_priceFeedManager_getPrice_weth_isInExpectedRange() public view {
+    uint256 price = priceFeedManager.getPrice(address(weth));
+    assertGt(price, 500e18, "WETH price below $500 floor");
+    assertLt(price, 50_000e18, "WETH price above $50 000 ceiling");
+  }
 
-    // =========================================================================
-    //  USDC price feed
-    // =========================================================================
+  // =========================================================================
+  //  USDC price feed
+  // =========================================================================
 
-    /**
-     * @dev  USDC should always be within 5 % of its $1 peg.
-     */
-    function test_priceFeedManager_getPrice_usdc_isCloseToDollarPeg() public view {
-        uint256 price = priceFeedManager.getPrice(address(usdc));
-        assertGt(price, 0.95e18, "USDC below $0.95 peg band");
-        assertLt(price, 1.05e18, "USDC above $1.05 peg band");
-    }
+  /**
+   * @dev  USDC should always be within 5 % of its $1 peg.
+   */
+  function test_priceFeedManager_getPrice_usdc_isCloseToDollarPeg() public view {
+    uint256 price = priceFeedManager.getPrice(address(usdc));
+    assertGt(price, 0.95e18, "USDC below $0.95 peg band");
+    assertLt(price, 1.05e18, "USDC above $1.05 peg band");
+  }
 
-    // =========================================================================
-    //  Price relationship sanity: WBTC >> WETH
-    // =========================================================================
+  // =========================================================================
+  //  Price relationship sanity: WBTC >> WETH
+  // =========================================================================
 
-    function test_wbtcPrice_isGreaterThan_wethPrice() public view {
-        uint256 wbtcPrice = priceFeedManager.getPrice(address(wbtc));
-        uint256 wethPrice = priceFeedManager.getPrice(address(weth));
-        assertGt(wbtcPrice, wethPrice, "WBTC must be priced above WETH");
-    }
+  function test_wbtcPrice_isGreaterThan_wethPrice() public view {
+    uint256 wbtcPrice = priceFeedManager.getPrice(address(wbtc));
+    uint256 wethPrice = priceFeedManager.getPrice(address(weth));
+    assertGt(wbtcPrice, wethPrice, "WBTC must be priced above WETH");
+  }
 
-    // =========================================================================
-    //  USD value calculations
-    // =========================================================================
+  // =========================================================================
+  //  USD value calculations
+  // =========================================================================
 
-    function test_getAssetsUsdValue_returnsPositiveComponentsAndCorrectTotal()
-        public
-        view
-    {
-        (uint256 asset0Usd, uint256 asset1Usd, uint256 totalUsd) = wbtcWethIndex
-            .getAssetsUsdValue();
-        assertGt(asset0Usd, 0, "asset0 USD value must be positive");
-        assertGt(asset1Usd, 0, "asset1 USD value must be positive");
-        assertEq(
-            totalUsd,
-            asset0Usd + asset1Usd,
-            "Total USD must equal sum of both assets"
-        );
-    }
+  function test_getAssetsUsdValue_returnsPositiveComponentsAndCorrectTotal() public view {
+    (uint256 asset0Usd, uint256 asset1Usd, uint256 totalUsd) = wbtcWethIndex.getAssetsUsdValue();
+    assertGt(asset0Usd, 0, "asset0 USD value must be positive");
+    assertGt(asset1Usd, 0, "asset1 USD value must be positive");
+    assertEq(totalUsd, asset0Usd + asset1Usd, "Total USD must equal sum of both assets");
+  }
 
-    /**
-     * @dev  The index was seeded with 10 WBTC.  Even at the lowest plausible
-     *       BTC price of $10 000 the total should exceed $100 000.
-     */
-    function test_getAssetsUsdValue_totalReflectsInitialSeed() public view {
-        (, , uint256 totalUsd) = wbtcWethIndex.getAssetsUsdValue();
-        assertGt(totalUsd, 100_000e18, "Total USD too low for a 10-WBTC seed");
-    }
+  /**
+   * @dev  The index was seeded with 10 WBTC.  Even at the lowest plausible
+   *       BTC price of $10 000 the total should exceed $100 000.
+   */
+  function test_getAssetsUsdValue_totalReflectsInitialSeed() public view {
+    (,, uint256 totalUsd) = wbtcWethIndex.getAssetsUsdValue();
+    assertGt(totalUsd, 100_000e18, "Total USD too low for a 10-WBTC seed");
+  }
 
-    /**
-     * @dev  asset0 is WBTC (60 % target); its USD share must dominate asset1.
-     */
-    function test_getAssetsUsdValue_asset0DominatesGivenWeights() public view {
-        (uint256 asset0Usd, uint256 asset1Usd, ) = wbtcWethIndex
-            .getAssetsUsdValue();
-        // With 60/40 target and fresh initialisation, asset0 should hold more value.
-        assertGt(
-            asset0Usd,
-            asset1Usd,
-            "asset0 (60 % weight) should hold more USD than asset1"
-        );
-    }
+  /**
+   * @dev  asset0 is WBTC (60 % target); its USD share must dominate asset1.
+   */
+  function test_getAssetsUsdValue_asset0DominatesGivenWeights() public view {
+    (uint256 asset0Usd, uint256 asset1Usd,) = wbtcWethIndex.getAssetsUsdValue();
+    // With 60/40 target and fresh initialisation, asset0 should hold more value.
+    assertGt(asset0Usd, asset1Usd, "asset0 (60 % weight) should hold more USD than asset1");
+  }
 
-    // =========================================================================
-    //  Effective weights
-    // =========================================================================
+  // =========================================================================
+  //  Effective weights
+  // =========================================================================
 
+  function test_effectiveWeights_closeToTargetWeightsAfterInit() public view {
+    (uint128 ew0, uint128 ew1) = wbtcWethIndex.getAssetsEffectiveWeights();
+    (uint128 tw0, uint128 tw1) = wbtcWethIndex.getAssetsWeights();
 
-    function test_effectiveWeights_closeToTargetWeightsAfterInit() public view {
-        (uint128 ew0, uint128 ew1) = wbtcWethIndex.getAssetsEffectiveWeights();
-        (uint128 tw0, uint128 tw1) = wbtcWethIndex.getAssetsWeights();
+    assertApproxEqAbs(uint256(ew0), uint256(tw0), REBALANCE_THRESHOLD, "effectiveWeight0 exceeds threshold vs target");
+    assertApproxEqAbs(uint256(ew1), uint256(tw1), REBALANCE_THRESHOLD, "effectiveWeight1 exceeds threshold vs target");
+  }
 
-        assertApproxEqAbs(
-            uint256(ew0),
-            uint256(tw0),
-            REBALANCE_THRESHOLD,
-            "effectiveWeight0 exceeds threshold vs target"
-        );
-        assertApproxEqAbs(
-            uint256(ew1),
-            uint256(tw1),
-            REBALANCE_THRESHOLD,
-            "effectiveWeight1 exceeds threshold vs target"
-        );
-    }
+  function test_effectiveWeights_sumToMaxPercentage() public view {
+    (uint128 ew0, uint128 ew1) = wbtcWethIndex.getAssetsEffectiveWeights();
+    assertEq(uint256(ew0) + uint256(ew1), MAX_PERCENTAGE, "Effective weights must sum to MAX_PERCENTAGE");
+  }
 
-    function test_effectiveWeights_sumToMaxPercentage() public view {
-        (uint128 ew0, uint128 ew1) = wbtcWethIndex.getAssetsEffectiveWeights();
-        assertEq(
-            uint256(ew0) + uint256(ew1),
-            MAX_PERCENTAGE,
-            "Effective weights must sum to MAX_PERCENTAGE"
-        );
-    }
+  function test_targetWeights_sumToMaxWeight() public view {
+    (uint128 tw0, uint128 tw1) = wbtcWethIndex.getAssetsWeights();
+    assertEq(uint256(tw0) + uint256(tw1), MAX_PERCENTAGE, "Target weights must sum to MAX_WEIGHT");
+  }
 
-    function test_targetWeights_sumToMaxWeight() public view {
-        (uint128 tw0, uint128 tw1) = wbtcWethIndex.getAssetsWeights();
-        assertEq(
-            uint256(tw0) + uint256(tw1),
-            MAX_PERCENTAGE,
-            "Target weights must sum to MAX_WEIGHT"
-        );
-    }
+  // =========================================================================
+  //  Staleness guard — per-feed maxDelay stored in the PriceFeedManager
+  // =========================================================================
 
-    // =========================================================================
-    //  Staleness guard — per-feed maxDelay stored in the PriceFeedManager
-    // =========================================================================
+  function test_priceFeedManager_feedsRegisteredWithHelperConfigMaxDelays() public view {
+    FeedConfig memory wbtcConfig = priceFeedManager.getPriceFeedConfig(address(wbtc));
+    FeedConfig memory wethConfig = priceFeedManager.getPriceFeedConfig(address(weth));
+    FeedConfig memory usdcConfig = priceFeedManager.getPriceFeedConfig(address(usdc));
 
-    function test_priceFeedManager_feedsRegisteredWithHelperConfigMaxDelays()
-        public
-        view
-    {
-        FeedConfig memory wbtcConfig = priceFeedManager.getPriceFeedConfig(
-            address(wbtc)
-        );
-        FeedConfig memory wethConfig = priceFeedManager.getPriceFeedConfig(
-            address(weth)
-        );
-        FeedConfig memory usdcConfig = priceFeedManager.getPriceFeedConfig(
-            address(usdc)
-        );
+    assertEq(wbtcConfig.feed, address(wbtcPriceFeed));
+    assertEq(wbtcConfig.maxDelay, helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).priceFeedMaxDelay);
+    assertEq(wethConfig.feed, address(wethPriceFeed));
+    assertEq(wethConfig.maxDelay, helperConfig.getActiveAssetConfig(AssetAvailable.WETH).priceFeedMaxDelay);
+    assertEq(usdcConfig.feed, address(usdcPriceFeed));
+    assertEq(usdcConfig.maxDelay, helperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay);
+  }
 
-        assertEq(wbtcConfig.feed, address(wbtcPriceFeed));
-        assertEq(
-            wbtcConfig.maxDelay,
-            helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).priceFeedMaxDelay
-        );
-        assertEq(wethConfig.feed, address(wethPriceFeed));
-        assertEq(
-            wethConfig.maxDelay,
-            helperConfig.getActiveAssetConfig(AssetAvailable.WETH).priceFeedMaxDelay
-        );
-        assertEq(usdcConfig.feed, address(usdcPriceFeed));
-        assertEq(
-            usdcConfig.maxDelay,
-            helperConfig.getActiveNetworkConfig().usdcPriceFeedMaxDelay
-        );
-    }
+  function test_priceFeedManager_getPrice_matchesChainlinkAnswer() public view {
+    assertEq(priceFeedManager.getPrice(address(wbtc)), _chainlinkAnswerStd(address(wbtc)));
+    assertEq(priceFeedManager.getPrice(address(usdc)), _chainlinkAnswerStd(address(usdc)));
+  }
 
-    function test_priceFeedManager_getPrice_matchesChainlinkAnswer() public view {
-        assertEq(
-            priceFeedManager.getPrice(address(wbtc)),
-            _chainlinkAnswerStd(address(wbtc))
-        );
-        assertEq(
-            priceFeedManager.getPrice(address(usdc)),
-            _chainlinkAnswerStd(address(usdc))
-        );
-    }
+  function test_priceFeedManager_isIndexManagerProxy() public view {
+    assertEq(address(priceFeedManager), indexManager.getPriceFeedManagerAddress());
+  }
 
-    function test_priceFeedManager_isIndexManagerProxy() public view {
-        assertEq(
-            address(priceFeedManager),
-            indexManager.getPriceFeedManagerAddress()
-        );
-    }
+  function test_priceFeedManager_getPrice_wbtc_revertsWhenPriceIsStale() public {
+    _warpPastMaxDelay(address(wbtc));
 
-    function test_priceFeedManager_getPrice_wbtc_revertsWhenPriceIsStale() public {
-        _warpPastMaxDelay(address(wbtc));
+    vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
+    priceFeedManager.getPrice(address(wbtc));
+  }
 
-        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        priceFeedManager.getPrice(address(wbtc));
-    }
+  function test_priceFeedManager_getPrice_weth_revertsWhenPriceIsStale() public {
+    _warpPastMaxDelay(address(weth));
 
-    function test_priceFeedManager_getPrice_weth_revertsWhenPriceIsStale() public {
-        _warpPastMaxDelay(address(weth));
+    vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
+    priceFeedManager.getPrice(address(weth));
+  }
 
-        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        priceFeedManager.getPrice(address(weth));
-    }
+  function test_priceFeedManager_getPrice_usdc_revertsWhenPriceIsStale() public {
+    _warpPastMaxDelay(address(usdc));
 
-    function test_priceFeedManager_getPrice_usdc_revertsWhenPriceIsStale() public {
-        _warpPastMaxDelay(address(usdc));
+    vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
+    priceFeedManager.getPrice(address(usdc));
+  }
 
-        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        priceFeedManager.getPrice(address(usdc));
-    }
+  function test_getAssetsUsdValue_revertsWhenWbtcPriceIsStale() public {
+    _warpPastMaxDelay(address(wbtc));
 
-    function test_getAssetsUsdValue_revertsWhenWbtcPriceIsStale() public {
-        _warpPastMaxDelay(address(wbtc));
+    vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
+    wbtcWethIndex.getAssetsUsdValue();
+  }
 
-        vm.expectRevert(PriceFeedManager__PriceIsStale.selector);
-        wbtcWethIndex.getAssetsUsdValue();
-    }
+  /// @dev Returns the latest Chainlink answer of `_asset`'s registered feed, scaled to 18 decimals.
+  function _chainlinkAnswerStd(address _asset) internal view returns (uint256) {
+    AggregatorV3Interface feed = AggregatorV3Interface(priceFeedManager.getPriceFeedConfig(_asset).feed);
+    (, int256 answer,,,) = feed.latestRoundData();
+    return uint256(answer) * 10 ** (18 - feed.decimals());
+  }
 
-    /// @dev Returns the latest Chainlink answer of `_asset`'s registered feed, scaled to 18 decimals.
-    function _chainlinkAnswerStd(address _asset) internal view returns (uint256) {
-        AggregatorV3Interface feed = AggregatorV3Interface(
-            priceFeedManager.getPriceFeedConfig(_asset).feed
-        );
-        (, int256 answer, , , ) = feed.latestRoundData();
-        return uint256(answer) * 10 ** (18 - feed.decimals());
-    }
+  /// @dev Warps to one second after the latest answer of `_asset` exceeds its maxDelay.
+  function _warpPastMaxDelay(address _asset) internal {
+    FeedConfig memory config = priceFeedManager.getPriceFeedConfig(_asset);
+    (,,, uint256 updatedAt,) = AggregatorV3Interface(config.feed).latestRoundData();
+    vm.warp(updatedAt + config.maxDelay + 1);
+  }
 
-    /// @dev Warps to one second after the latest answer of `_asset` exceeds its maxDelay.
-    function _warpPastMaxDelay(address _asset) internal {
-        FeedConfig memory config = priceFeedManager.getPriceFeedConfig(_asset);
-        (, , , uint256 updatedAt, ) = AggregatorV3Interface(config.feed)
-            .latestRoundData();
-        vm.warp(updatedAt + config.maxDelay + 1);
-    }
+  // =========================================================================
+  //  Reserves are consistent with prices
+  // =========================================================================
 
-    // =========================================================================
-    //  Reserves are consistent with prices
-    // =========================================================================
+  /**
+   * @dev  Compute the expected USD value of the stored reserves manually and
+   *       compare with getAssetsUsdValue() to verify price-to-value consistency.
+   */
+  function test_reservesUsdValue_consistentWithPriceFeedPrices() public view {
+    (uint256 reserve0Std, uint256 reserve1Std) = wbtcWethIndex.getAssetsReservesStdDecimals();
 
-    /**
-     * @dev  Compute the expected USD value of the stored reserves manually and
-     *       compare with getAssetsUsdValue() to verify price-to-value consistency.
-     */
-    function test_reservesUsdValue_consistentWithPriceFeedPrices() public view {
-        (uint256 reserve0Std, uint256 reserve1Std) = wbtcWethIndex
-            .getAssetsReservesStdDecimals();
+    uint256 wbtcPrice = priceFeedManager.getPrice(address(wbtc));
+    uint256 wethPrice = priceFeedManager.getPrice(address(weth));
 
-        uint256 wbtcPrice = priceFeedManager.getPrice(address(wbtc));
-        uint256 wethPrice = priceFeedManager.getPrice(address(weth));
+    // USD value = (reserve_in_18_dec * price_in_18_dec) / 1e18
+    uint256 expected0Usd = (reserve0Std * wbtcPrice) / 1e18;
+    uint256 expected1Usd = (reserve1Std * wethPrice) / 1e18;
 
-        // USD value = (reserve_in_18_dec * price_in_18_dec) / 1e18
-        uint256 expected0Usd = (reserve0Std * wbtcPrice) / 1e18;
-        uint256 expected1Usd = (reserve1Std * wethPrice) / 1e18;
+    (uint256 actual0Usd, uint256 actual1Usd,) = wbtcWethIndex.getAssetsUsdValue();
 
-        (uint256 actual0Usd, uint256 actual1Usd, ) = wbtcWethIndex
-            .getAssetsUsdValue();
-
-        // Allow tiny rounding delta (1 USD = 1e18 units)
-        assertApproxEqAbs(
-            actual0Usd,
-            expected0Usd,
-            1e18,
-            "asset0 USD value diverges from manual calculation"
-        );
-        assertApproxEqAbs(
-            actual1Usd,
-            expected1Usd,
-            1e18,
-            "asset1 USD value diverges from manual calculation"
-        );
-    }
+    // Allow tiny rounding delta (1 USD = 1e18 units)
+    assertApproxEqAbs(actual0Usd, expected0Usd, 1e18, "asset0 USD value diverges from manual calculation");
+    assertApproxEqAbs(actual1Usd, expected1Usd, 1e18, "asset1 USD value diverges from manual calculation");
+  }
 }

@@ -4,10 +4,7 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {MAINNET_FORK_BLOCK} from "../ForkConstants.sol";
 import {DeployPeriphery} from "../../../script/DeployPeriphery.s.sol";
-import {
-    DeployAndInitNewIndex,
-    RunParams
-} from "../../../script/DeployAndInitNewIndex.s.sol";
+import {DeployAndInitNewIndex, RunParams} from "../../../script/DeployAndInitNewIndex.s.sol";
 import {HelperConfig, NetworkConfig} from "../../../script/HelperConfig.s.sol";
 import {AssetAvailable} from "../../../src/types.sol";
 import {MultiSigWallet} from "../../../src/MultiSigWallet.sol";
@@ -17,133 +14,97 @@ import {Index} from "../../../src/Index.sol";
 import {SwapManager} from "../../../src/SwapManager.sol";
 import {PriceFeedManager} from "../../../src/PriceFeedManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {
-    TimelockController
-} from "@openzeppelin/contracts/governance/TimelockController.sol";
-import {
-    AggregatorV3Interface
-} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 // @audit-issue fare likedin post su integration tests
 contract IntegrationBase is Test {
-    DeployPeriphery deployScript;
-    DeployAndInitNewIndex indexDeployer;
-    HelperConfig helperConfig;
+  DeployPeriphery deployScript;
+  DeployAndInitNewIndex indexDeployer;
+  HelperConfig helperConfig;
 
-    MultiSigWallet multiSigWallet;
-    IndexManager indexManager;
-    SwapManager swapManager;
-    PriceFeedManager priceFeedManager;
-    Router router;
-    TimelockController timelock;
+  MultiSigWallet multiSigWallet;
+  IndexManager indexManager;
+  SwapManager swapManager;
+  PriceFeedManager priceFeedManager;
+  Router router;
+  TimelockController timelock;
 
-    /**
-     * @notice Ierc20 interface for weth is ok because we only interact with it for transfers and
-     * balance checks, not for any specific WETH functions.
-     */
-    IERC20 usdc;
-    IERC20 weth;
-    IERC20 link;
-    IERC20 wbtc;
-    IERC20 comp;
+  /**
+   * @notice Ierc20 interface for weth is ok because we only interact with it for transfers and
+   * balance checks, not for any specific WETH functions.
+   */
+  IERC20 usdc;
+  IERC20 weth;
+  IERC20 link;
+  IERC20 wbtc;
+  IERC20 comp;
 
-    AggregatorV3Interface usdcPriceFeed;
-    AggregatorV3Interface wethPriceFeed;
-    AggregatorV3Interface linkPriceFeed;
-    AggregatorV3Interface wbtcPriceFeed;
-    AggregatorV3Interface compPriceFeed;
+  AggregatorV3Interface usdcPriceFeed;
+  AggregatorV3Interface wethPriceFeed;
+  AggregatorV3Interface linkPriceFeed;
+  AggregatorV3Interface wbtcPriceFeed;
+  AggregatorV3Interface compPriceFeed;
 
-    Index wbtcWethIndex;
-    Index wbtcLinkIndex;
+  Index wbtcWethIndex;
+  Index wbtcLinkIndex;
 
-    address user1 = makeAddr("user1");
-    address user2 = makeAddr("user2");
-    address deployer;
+  address user1 = makeAddr("user1");
+  address user2 = makeAddr("user2");
+  address deployer;
 
-    function setUp() public virtual {
-        vm.createSelectFork("mainnet", MAINNET_FORK_BLOCK);
+  function setUp() public virtual {
+    vm.createSelectFork("mainnet", MAINNET_FORK_BLOCK);
 
-        deployScript = new DeployPeriphery();
-        helperConfig = new HelperConfig();
+    deployScript = new DeployPeriphery();
+    helperConfig = new HelperConfig();
 
-        // Deploy the periphery contracts and get the deployed addresses
-        (
-            indexManager,
-            router,
-            helperConfig,
-            swapManager,
-            multiSigWallet,
-            timelock,
-            deployer
-        ) = deployScript.run();
+    // Deploy the periphery contracts and get the deployed addresses
+    (indexManager, router, helperConfig, swapManager, multiSigWallet, timelock, deployer) = deployScript.run();
 
-        priceFeedManager = deployScript.priceFeedManager();
+    priceFeedManager = deployScript.priceFeedManager();
 
-        // After deployment, admin roles belong to the MultiSigWallet.
-        // Grant them back to the deployer for convenience in integration tests.
-        vm.startPrank(address(multiSigWallet));
-        indexManager.grantRole(indexManager.DEFAULT_ADMIN_ROLE(), deployer);
-        indexManager.grantRole(indexManager.ASSET_MANAGER_ROLE(), deployer);
-        vm.stopPrank();
+    // After deployment, admin roles belong to the MultiSigWallet.
+    // Grant them back to the deployer for convenience in integration tests.
+    vm.startPrank(address(multiSigWallet));
+    indexManager.grantRole(indexManager.DEFAULT_ADMIN_ROLE(), deployer);
+    indexManager.grantRole(indexManager.ASSET_MANAGER_ROLE(), deployer);
+    vm.stopPrank();
 
-        // Setting up token and price feed interfaces
-        NetworkConfig memory networkConfig = helperConfig
-            .getActiveNetworkConfig();
+    // Setting up token and price feed interfaces
+    NetworkConfig memory networkConfig = helperConfig.getActiveNetworkConfig();
 
-        usdc = IERC20(networkConfig.usdcAddress);
-        weth = IERC20(
-            helperConfig.getActiveAssetConfig(AssetAvailable.WETH).token
-        );
-        link = IERC20(
-            helperConfig.getActiveAssetConfig(AssetAvailable.LINK).token
-        );
-        wbtc = IERC20(
-            helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).token
-        );
-        comp = IERC20(
-            helperConfig.getActiveAssetConfig(AssetAvailable.COMP).token
-        );
+    usdc = IERC20(networkConfig.usdcAddress);
+    weth = IERC20(helperConfig.getActiveAssetConfig(AssetAvailable.WETH).token);
+    link = IERC20(helperConfig.getActiveAssetConfig(AssetAvailable.LINK).token);
+    wbtc = IERC20(helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).token);
+    comp = IERC20(helperConfig.getActiveAssetConfig(AssetAvailable.COMP).token);
 
-        usdcPriceFeed = AggregatorV3Interface(
-            networkConfig.usdcPriceFeedAddress
-        );
-        wethPriceFeed = AggregatorV3Interface(
-            helperConfig.getActiveAssetConfig(AssetAvailable.WETH).priceFeed
-        );
-        linkPriceFeed = AggregatorV3Interface(
-            helperConfig.getActiveAssetConfig(AssetAvailable.LINK).priceFeed
-        );
-        wbtcPriceFeed = AggregatorV3Interface(
-            helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).priceFeed
-        );
-        compPriceFeed = AggregatorV3Interface(
-            helperConfig.getActiveAssetConfig(AssetAvailable.COMP).priceFeed
-        );
+    usdcPriceFeed = AggregatorV3Interface(networkConfig.usdcPriceFeedAddress);
+    wethPriceFeed = AggregatorV3Interface(helperConfig.getActiveAssetConfig(AssetAvailable.WETH).priceFeed);
+    linkPriceFeed = AggregatorV3Interface(helperConfig.getActiveAssetConfig(AssetAvailable.LINK).priceFeed);
+    wbtcPriceFeed = AggregatorV3Interface(helperConfig.getActiveAssetConfig(AssetAvailable.WBTC).priceFeed);
+    compPriceFeed = AggregatorV3Interface(helperConfig.getActiveAssetConfig(AssetAvailable.COMP).priceFeed);
 
-        deal(address(wbtc), deployer, 100e8); // 100 WBTC (8 decimals)
-        deal(address(weth), deployer, 500e18); // 500 WETH (18 decimals)
-        deal(address(link), deployer, 100e18); // 100 LINK
-        deal(address(comp), deployer, 100e18); // 100 COMP
-        deal(address(usdc), deployer, 100e6); // 100 USDC (6 decimals)
+    deal(address(wbtc), deployer, 100e8); // 100 WBTC (8 decimals)
+    deal(address(weth), deployer, 500e18); // 500 WETH (18 decimals)
+    deal(address(link), deployer, 100e18); // 100 LINK
+    deal(address(comp), deployer, 100e18); // 100 COMP
+    deal(address(usdc), deployer, 100e6); // 100 USDC (6 decimals)
 
-        // Deploy Wbtc/Weth index
-        indexDeployer = new DeployAndInitNewIndex();
+    // Deploy Wbtc/Weth index
+    indexDeployer = new DeployAndInitNewIndex();
 
-        RunParams memory wbtcWethParams = RunParams({
-            assetA: AssetAvailable.WBTC,
-            assetB: AssetAvailable.WETH,
-            weightA: 600000, // 60% weight for WBTC
-            weightB: 400000, // 40% weight for WETH
-            feePercentage: 20000, // 2% fee
-            initialAssetADeposit: 10e8, // 10 WBTC (8 decimals)
-            initialAssetBDeposit: 0
-        });
+    RunParams memory wbtcWethParams = RunParams({
+      assetA: AssetAvailable.WBTC,
+      assetB: AssetAvailable.WETH,
+      weightA: 600000, // 60% weight for WBTC
+      weightB: 400000, // 40% weight for WETH
+      feePercentage: 20000, // 2% fee
+      initialAssetADeposit: 10e8, // 10 WBTC (8 decimals)
+      initialAssetBDeposit: 0
+    });
 
-        wbtcWethIndex = indexDeployer.run(
-            helperConfig,
-            address(indexManager),
-            address(multiSigWallet),
-            wbtcWethParams
-        );
-    }
+    wbtcWethIndex = indexDeployer.run(helperConfig, address(indexManager), address(multiSigWallet), wbtcWethParams);
+  }
 }

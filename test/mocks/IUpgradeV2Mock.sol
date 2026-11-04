@@ -6,13 +6,13 @@ pragma solidity ^0.8.0;
  *      can drive the three proxies through one interface after an upgrade.
  */
 interface IUpgradeV2Mock {
-    function initializeV2(uint256 _marker) external;
+  function initializeV2(uint256 _marker) external;
 
-    function version() external pure returns (uint256);
+  function version() external pure returns (uint256);
 
-    function getV2Marker() external view returns (uint256);
+  function getV2Marker() external view returns (uint256);
 
-    function getImplementation() external view returns (address);
+  function getImplementation() external view returns (address);
 
-    function getUpgrader() external view returns (address);
+  function getUpgrader() external view returns (address);
 }
