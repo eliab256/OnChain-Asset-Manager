@@ -9,16 +9,13 @@
     "abi": "npm run generate --workspace @oam/abi",
     "abi:watch": "npm run watch --workspace @oam/abi",
     "check-abi": "packages/abi/check-abi.sh",
-    "lint": "eslint .",
+    "lint": "oxlint",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "eslint": "^10.13.0",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.7",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1",
+    "oxlint": "^1.91.0",
+    "oxlint-tsgolint": "^7.0.2005",
+    "typescript": "^7.0.2",
     "viem": "^2.52.2"
   }
 }

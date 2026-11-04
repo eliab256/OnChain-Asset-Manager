@@ -443,7 +443,7 @@ make integrationtest  # integration tests only, fork required
 ├── invariant.md                     # Invariants per contract (Italian)
 ├── docker-compose.yml               # Local Postgres for the indexer
 ├── tsconfig.base.json               # Compiler options shared by packages/* and apps/*
-└── eslint.config.mjs                # ESLint for every TypeScript workspace
+└── .oxlintrc.json                   # oxlint (type-aware) for every TypeScript workspace
 ```
 
 ### Make targets
@@ -469,7 +469,7 @@ make snapshot               # fresh Anvil + deploy + fund, state saved to .anvil
 make anvil-load             # start Anvil from the snapshot
 make dev                    # Postgres + chain + contracts + funded accounts (DEV_PROFILE=fork for the fork)
 make db / make db-down      # start / stop the local Postgres
-make lint / make typecheck  # ESLint and tsc on every TypeScript workspace
+make lint / make typecheck  # oxlint and tsc (TypeScript 7) on every TypeScript workspace
 ```
 
 ---
