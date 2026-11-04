@@ -8,289 +8,302 @@ import "./errors/MultiSigWalletErrors.sol";
 import {Transaction} from "./types.sol";
 
 contract MultiSigWallet is IMultiSigWallet, EIP712 {
-  using ECDSA for bytes32;
+    using ECDSA for bytes32;
 
-  // binds the signature to the stored tx content; the domain already binds verifyingContract
-  bytes32 constant CONFIRM_TYPEHASH =
-    keccak256("Confirm(uint256 txId,address target,uint256 value,bytes32 dataHash,uint256 nonce)");
+    // binds the signature to the stored tx content; the domain already binds verifyingContract
+    bytes32 constant CONFIRM_TYPEHASH =
+        keccak256("Confirm(uint256 txId,address target,uint256 value,bytes32 dataHash,uint256 nonce)");
 
-  // =========================================================================
-  //  State
-  // =========================================================================
-  address[] private s_owners;
-  mapping(address => bool) private s_isOwner;
+    // =========================================================================
+    //  State
+    // =========================================================================
+    address[] private s_owners;
+    mapping(address => bool) private s_isOwner;
 
-  /// @dev txId => owner => nonce for off-chain confirmation signatures, bumped on use and on revoke
-  mapping(uint256 txId => mapping(address owner => uint256 nonce)) private s_txIdToOwnerToConfirmNonce;
-  uint256 private immutable i_requiredConfirmations;
+    /// @dev txId => owner => nonce for off-chain confirmation signatures, bumped on use and on revoke
+    mapping(uint256 txId => mapping(address owner => uint256 nonce)) private s_txIdToOwnerToConfirmNonce;
+    uint256 private immutable i_requiredConfirmations;
 
-  Transaction[] private s_transactions;
+    Transaction[] private s_transactions;
 
-  /// @dev txId => owner => confirmed
-  mapping(uint256 => mapping(address => bool)) private s_isConfirmed;
+    /// @dev txId => owner => confirmed
+    mapping(uint256 => mapping(address => bool)) private s_isConfirmed;
 
-  // =========================================================================
-  //  Modifiers
-  // =========================================================================
-  modifier onlyOwner() {
-    _checkOwner();
-    _;
-  }
-
-  modifier txExists(uint256 _txId) {
-    _checkTxExists(_txId);
-    _;
-  }
-
-  modifier notExecuted(uint256 _txId) {
-    _checkNotExecuted(_txId);
-    _;
-  }
-
-  modifier notConfirmed(uint256 _txId) {
-    _checkNotConfirmed(_txId);
-    _;
-  }
-
-  // =========================================================================
-  //  Constructor
-  // =========================================================================
-  /**
-   * @param _owners  Array of signer addresses.
-   * @param _required  Number of confirmations required to execute a tx.
-   */
-  constructor(address[] memory _owners, uint256 _required) EIP712("MultiSigWallet", "2") {
-    if (_owners.length == 0 || _required == 0 || _required > _owners.length) {
-      revert MultiSig__InvalidRequirement();
+    // =========================================================================
+    //  Modifiers
+    // =========================================================================
+    modifier onlyOwner() {
+        _checkOwner();
+        _;
     }
 
-    for (uint256 i = 0; i < _owners.length; i++) {
-      address owner = _owners[i];
-      if (owner == address(0)) revert MultiSig__ZeroAddress();
-      if (s_isOwner[owner]) revert MultiSig__OwnerNotUnique();
-
-      s_isOwner[owner] = true;
-      s_owners.push(owner);
+    modifier txExists(uint256 _txId) {
+        _checkTxExists(_txId);
+        _;
     }
 
-    i_requiredConfirmations = _required;
-
-    emit MultiSigInitialized(_owners, _required);
-  }
-
-  // =========================================================================
-  //  External functions
-  // =========================================================================
-
-  /**
-   * @notice Submit a new transaction proposal.
-   * @param _target  The contract to call.
-   * @param _value   ETH value to send (typically 0).
-   * @param _data    The calldata (e.g., abi.encodeWithSelector(...)).
-   * @return txId    The id of the submitted transaction.
-   */
-  function submitTransaction(address _target, uint256 _value, bytes calldata _data)
-    external
-    onlyOwner
-    returns (uint256 txId)
-  {
-    txId = s_transactions.length;
-
-    s_transactions.push(Transaction({target: _target, value: _value, data: _data, executed: false, confirmations: 0}));
-
-    emit TransactionSubmitted(txId, msg.sender, _target, _value, _data);
-  }
-
-  /**
-   * @notice Confirm a pending transaction.
-   * @param _txId  The transaction id to confirm.
-   */
-  function confirmTransaction(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) notConfirmed(_txId) {
-    Transaction storage txn = s_transactions[_txId];
-    txn.confirmations += 1;
-    s_isConfirmed[_txId][msg.sender] = true;
-
-    emit TransactionConfirmed(_txId, msg.sender);
-  }
-
-  /**
-   * @notice Execute a transaction once enough confirmations are reached.
-   * @param _txId  The transaction id to execute.
-   */
-  function executeTransaction(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) {
-    Transaction storage txn = s_transactions[_txId];
-
-    if (txn.confirmations < i_requiredConfirmations) {
-      revert MultiSig__ConfirmationsNotMet();
+    modifier notExecuted(uint256 _txId) {
+        _checkNotExecuted(_txId);
+        _;
     }
 
-    txn.executed = true;
-
-    (bool success,) = txn.target.call{value: txn.value}(txn.data);
-    if (!success) revert MultiSig__TxFailed();
-
-    emit TransactionExecuted(_txId, msg.sender);
-  }
-
-  /**
-   * @notice Revoke a previously given confirmation.
-   * @param _txId  The transaction id to revoke confirmation for.
-   */
-  function revokeConfirmation(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) {
-    if (!s_isConfirmed[_txId][msg.sender]) {
-      revert MultiSig__TxNotConfirmed();
+    modifier notConfirmed(uint256 _txId) {
+        _checkNotConfirmed(_txId);
+        _;
     }
 
-    Transaction storage txn = s_transactions[_txId];
-    txn.confirmations -= 1;
-    s_isConfirmed[_txId][msg.sender] = false;
-    // invalidate any confirmation signature collected before the revoke
-    s_txIdToOwnerToConfirmNonce[_txId][msg.sender]++;
+    // =========================================================================
+    //  Constructor
+    // =========================================================================
+    /**
+     * @param _owners  Array of signer addresses.
+     * @param _required  Number of confirmations required to execute a tx.
+     */
+    constructor(address[] memory _owners, uint256 _required) EIP712("MultiSigWallet", "2") {
+        if (_owners.length == 0 || _required == 0 || _required > _owners.length) {
+            revert MultiSig__InvalidRequirement();
+        }
 
-    emit ConfirmationRevoked(_txId, msg.sender);
-  }
+        for (uint256 i = 0; i < _owners.length; i++) {
+            address owner = _owners[i];
+            if (owner == address(0)) revert MultiSig__ZeroAddress();
+            if (s_isOwner[owner]) revert MultiSig__OwnerNotUnique();
 
-  /// @dev Inherit from IMultiSigWallet. See interface for details.
-  function confirmTransactionWithSig(uint256 _txId, address _signer, bytes calldata _signature)
-    external
-    txExists(_txId)
-    notExecuted(_txId)
-  {
-    // 1. Verify that the signer is an owner
-    if (!s_isOwner[_signer]) revert MultiSig__NotOwner();
+            s_isOwner[owner] = true;
+            s_owners.push(owner);
+        }
 
-    // 2. Verify that they haven't already confirmed
-    if (s_isConfirmed[_txId][_signer]) {
-      revert MultiSig__TxAlreadyConfirmed();
+        i_requiredConfirmations = _required;
+
+        emit MultiSigInitialized(_owners, _required);
     }
 
-    // 3. Reconstruct the EIP-712 digest
-    bytes32 digest = _getConfirmDigest(_txId, _signer);
+    // =========================================================================
+    //  External functions
+    // =========================================================================
 
-    // 4. Recover the signer and compare
-    address recovered = digest.recover(_signature);
-    if (recovered != _signer) revert MultiSig__InvalidSignature();
+    /**
+     * @notice Submit a new transaction proposal.
+     * @param _target  The contract to call.
+     * @param _value   ETH value to send (typically 0).
+     * @param _data    The calldata (e.g., abi.encodeWithSelector(...)).
+     * @return txId    The id of the submitted transaction.
+     */
+    function submitTransaction(address _target, uint256 _value, bytes calldata _data)
+        external
+        onlyOwner
+        returns (uint256 txId)
+    {
+        txId = s_transactions.length;
 
-    // 5. Invalidate the nonce (replay protection)
-    s_txIdToOwnerToConfirmNonce[_txId][_signer]++;
+        s_transactions.push(
+            Transaction({target: _target, value: _value, data: _data, executed: false, confirmations: 0})
+        );
 
-    // 6. Record the confirmation
-    Transaction storage txn = s_transactions[_txId];
-    txn.confirmations += 1;
-    s_isConfirmed[_txId][_signer] = true;
-
-    emit TransactionConfirmed(_txId, _signer);
-  }
-
-  /// @dev Inherit from IMultiSigWallet. See interface for details.
-  function getConfirmDigest(uint256 _txId, address _signer) external view txExists(_txId) returns (bytes32) {
-    return _getConfirmDigest(_txId, _signer);
-  }
-
-  // =========================================================================
-  //  Internal functions
-  // =========================================================================
-
-  /**
-   * @notice Builds the EIP-712 digest an owner signs to confirm a transaction.
-   * @dev Hashes Confirm(txId, target, value, keccak256(data), nonce) with target, value and data
-   *      read from the stored transaction, so the signature is bound to the transaction content.
-   *      The nonce is the current per-(txId, owner) confirm nonce. Caller must ensure _txId exists.
-   * @param _txId The transaction ID to confirm.
-   * @param _signer The owner whose nonce is used.
-   * @return The EIP-712 typed data digest.
-   */
-  function _getConfirmDigest(uint256 _txId, address _signer) internal view returns (bytes32) {
-    Transaction storage txn = s_transactions[_txId];
-    bytes32 structHash = keccak256(
-      abi.encode(
-        CONFIRM_TYPEHASH, _txId, txn.target, txn.value, keccak256(txn.data), s_txIdToOwnerToConfirmNonce[_txId][_signer]
-      )
-    );
-    return _hashTypedDataV4(structHash);
-  }
-
-  // =========================================================================
-  //  Internal validation functions
-  // =========================================================================
-  function _checkOwner() internal view {
-    if (!s_isOwner[msg.sender]) revert MultiSig__NotOwner();
-  }
-
-  function _checkTxExists(uint256 _txId) internal view {
-    if (_txId >= s_transactions.length) revert MultiSig__TxDoesNotExist();
-  }
-
-  function _checkNotExecuted(uint256 _txId) internal view {
-    if (s_transactions[_txId].executed) {
-      revert MultiSig__TxAlreadyExecuted();
+        emit TransactionSubmitted(txId, msg.sender, _target, _value, _data);
     }
-  }
 
-  function _checkNotConfirmed(uint256 _txId) internal view {
-    if (s_isConfirmed[_txId][msg.sender]) {
-      revert MultiSig__TxAlreadyConfirmed();
+    /**
+     * @notice Confirm a pending transaction.
+     * @param _txId  The transaction id to confirm.
+     */
+    function confirmTransaction(uint256 _txId)
+        external
+        onlyOwner
+        txExists(_txId)
+        notExecuted(_txId)
+        notConfirmed(_txId)
+    {
+        Transaction storage txn = s_transactions[_txId];
+        txn.confirmations += 1;
+        s_isConfirmed[_txId][msg.sender] = true;
+
+        emit TransactionConfirmed(_txId, msg.sender);
     }
-  }
 
-  // =========================================================================
-  //  View / Getters
-  // =========================================================================
+    /**
+     * @notice Execute a transaction once enough confirmations are reached.
+     * @param _txId  The transaction id to execute.
+     */
+    function executeTransaction(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) {
+        Transaction storage txn = s_transactions[_txId];
 
-  function getTransactionCount() external view returns (uint256) {
-    return s_transactions.length;
-  }
+        if (txn.confirmations < i_requiredConfirmations) {
+            revert MultiSig__ConfirmationsNotMet();
+        }
 
-  function getTransaction(uint256 _txId)
-    external
-    view
-    returns (address target, uint256 value, bytes memory data, bool executed, uint256 confirmations)
-  {
-    Transaction storage txn = s_transactions[_txId];
-    return (txn.target, txn.value, txn.data, txn.executed, txn.confirmations);
-  }
+        txn.executed = true;
 
-  function getOwners() external view returns (address[] memory) {
-    return s_owners;
-  }
+        (bool success,) = txn.target.call{value: txn.value}(txn.data);
+        if (!success) revert MultiSig__TxFailed();
 
-  function isOwner(address _addr) external view returns (bool) {
-    return s_isOwner[_addr];
-  }
+        emit TransactionExecuted(_txId, msg.sender);
+    }
 
-  function getRequiredConfirmations() external view returns (uint256) {
-    return i_requiredConfirmations;
-  }
+    /**
+     * @notice Revoke a previously given confirmation.
+     * @param _txId  The transaction id to revoke confirmation for.
+     */
+    function revokeConfirmation(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) {
+        if (!s_isConfirmed[_txId][msg.sender]) {
+            revert MultiSig__TxNotConfirmed();
+        }
 
-  // =========================================================================
-  //  Public Getters for State Variables
-  // =========================================================================
+        Transaction storage txn = s_transactions[_txId];
+        txn.confirmations -= 1;
+        s_isConfirmed[_txId][msg.sender] = false;
+        // invalidate any confirmation signature collected before the revoke
+        s_txIdToOwnerToConfirmNonce[_txId][msg.sender]++;
 
-  /**
-   * @notice Get the address of an owner by index.
-   * @param _index The index in the owners array.
-   * @return The owner address at the given index.
-   */
-  function getOwnerAt(uint256 _index) external view returns (address) {
-    return s_owners[_index];
-  }
+        emit ConfirmationRevoked(_txId, msg.sender);
+    }
 
-  /// @dev Inherit from IMultiSigWallet. See interface for details.
-  function getConfirmNonce(uint256 _txId, address _owner) external view returns (uint256) {
-    return s_txIdToOwnerToConfirmNonce[_txId][_owner];
-  }
+    /// @dev Inherit from IMultiSigWallet. See interface for details.
+    function confirmTransactionWithSig(uint256 _txId, address _signer, bytes calldata _signature)
+        external
+        txExists(_txId)
+        notExecuted(_txId)
+    {
+        // 1. Verify that the signer is an owner
+        if (!s_isOwner[_signer]) revert MultiSig__NotOwner();
 
-  /**
-   * @notice Check if a transaction has been confirmed by a specific owner.
-   * @param _txId The transaction ID.
-   * @param _owner The owner address.
-   * @return True if the owner has confirmed the transaction, false otherwise.
-   */
-  function isTransactionConfirmed(uint256 _txId, address _owner) external view returns (bool) {
-    return s_isConfirmed[_txId][_owner];
-  }
+        // 2. Verify that they haven't already confirmed
+        if (s_isConfirmed[_txId][_signer]) {
+            revert MultiSig__TxAlreadyConfirmed();
+        }
 
-  receive() external payable {
-    if (msg.value > 0) emit Deposit(msg.sender, msg.value);
-  }
+        // 3. Reconstruct the EIP-712 digest
+        bytes32 digest = _getConfirmDigest(_txId, _signer);
+
+        // 4. Recover the signer and compare
+        address recovered = digest.recover(_signature);
+        if (recovered != _signer) revert MultiSig__InvalidSignature();
+
+        // 5. Invalidate the nonce (replay protection)
+        s_txIdToOwnerToConfirmNonce[_txId][_signer]++;
+
+        // 6. Record the confirmation
+        Transaction storage txn = s_transactions[_txId];
+        txn.confirmations += 1;
+        s_isConfirmed[_txId][_signer] = true;
+
+        emit TransactionConfirmed(_txId, _signer);
+    }
+
+    /// @dev Inherit from IMultiSigWallet. See interface for details.
+    function getConfirmDigest(uint256 _txId, address _signer) external view txExists(_txId) returns (bytes32) {
+        return _getConfirmDigest(_txId, _signer);
+    }
+
+    // =========================================================================
+    //  Internal functions
+    // =========================================================================
+
+    /**
+     * @notice Builds the EIP-712 digest an owner signs to confirm a transaction.
+     * @dev Hashes Confirm(txId, target, value, keccak256(data), nonce) with target, value and data
+     *      read from the stored transaction, so the signature is bound to the transaction content.
+     *      The nonce is the current per-(txId, owner) confirm nonce. Caller must ensure _txId exists.
+     * @param _txId The transaction ID to confirm.
+     * @param _signer The owner whose nonce is used.
+     * @return The EIP-712 typed data digest.
+     */
+    function _getConfirmDigest(uint256 _txId, address _signer) internal view returns (bytes32) {
+        Transaction storage txn = s_transactions[_txId];
+        bytes32 structHash = keccak256(
+            abi.encode(
+                CONFIRM_TYPEHASH,
+                _txId,
+                txn.target,
+                txn.value,
+                keccak256(txn.data),
+                s_txIdToOwnerToConfirmNonce[_txId][_signer]
+            )
+        );
+        return _hashTypedDataV4(structHash);
+    }
+
+    // =========================================================================
+    //  Internal validation functions
+    // =========================================================================
+    function _checkOwner() internal view {
+        if (!s_isOwner[msg.sender]) revert MultiSig__NotOwner();
+    }
+
+    function _checkTxExists(uint256 _txId) internal view {
+        if (_txId >= s_transactions.length) revert MultiSig__TxDoesNotExist();
+    }
+
+    function _checkNotExecuted(uint256 _txId) internal view {
+        if (s_transactions[_txId].executed) {
+            revert MultiSig__TxAlreadyExecuted();
+        }
+    }
+
+    function _checkNotConfirmed(uint256 _txId) internal view {
+        if (s_isConfirmed[_txId][msg.sender]) {
+            revert MultiSig__TxAlreadyConfirmed();
+        }
+    }
+
+    // =========================================================================
+    //  View / Getters
+    // =========================================================================
+
+    function getTransactionCount() external view returns (uint256) {
+        return s_transactions.length;
+    }
+
+    function getTransaction(uint256 _txId)
+        external
+        view
+        returns (address target, uint256 value, bytes memory data, bool executed, uint256 confirmations)
+    {
+        Transaction storage txn = s_transactions[_txId];
+        return (txn.target, txn.value, txn.data, txn.executed, txn.confirmations);
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return s_owners;
+    }
+
+    function isOwner(address _addr) external view returns (bool) {
+        return s_isOwner[_addr];
+    }
+
+    function getRequiredConfirmations() external view returns (uint256) {
+        return i_requiredConfirmations;
+    }
+
+    // =========================================================================
+    //  Public Getters for State Variables
+    // =========================================================================
+
+    /**
+     * @notice Get the address of an owner by index.
+     * @param _index The index in the owners array.
+     * @return The owner address at the given index.
+     */
+    function getOwnerAt(uint256 _index) external view returns (address) {
+        return s_owners[_index];
+    }
+
+    /// @dev Inherit from IMultiSigWallet. See interface for details.
+    function getConfirmNonce(uint256 _txId, address _owner) external view returns (uint256) {
+        return s_txIdToOwnerToConfirmNonce[_txId][_owner];
+    }
+
+    /**
+     * @notice Check if a transaction has been confirmed by a specific owner.
+     * @param _txId The transaction ID.
+     * @param _owner The owner address.
+     * @return True if the owner has confirmed the transaction, false otherwise.
+     */
+    function isTransactionConfirmed(uint256 _txId, address _owner) external view returns (bool) {
+        return s_isConfirmed[_txId][_owner];
+    }
+
+    receive() external payable {
+        if (msg.value > 0) emit Deposit(msg.sender, msg.value);
+    }
 }

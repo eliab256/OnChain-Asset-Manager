@@ -11,430 +11,436 @@ import "../../../src/errors/IndexErrors.sol";
 import "../../../src/errors/RouterErrors.sol";
 
 contract IntegrationUniRouter is IntegrationBase, ContractCodeConstants {
-  uint256 constant USDC_AMOUNT = 1_000e6;
-
-  uint256 constant TOLERANCE = 5 * PERCENTAGE_FEE_PRECISION; //5%
-  uint256 constant INVALID_TOLERANCE_ABOVE = 11 * PERCENTAGE_FEE_PRECISION; //11%
-  uint128 constant WBTC_TARGET_WEIGHT_AFTER_SHIFT = 500000; // 50%
-  // Storage slot of Index.s_weight0 | s_weight1 (see `forge inspect Index storageLayout`).
-  // ERC20 uses slots 0-4, EIP712 name/version fallbacks 5-6, Nonces 7; Index storage starts at 8.
-  uint256 constant INDEX_WEIGHTS_SLOT = 8;
-  uint256 constant INVALID_TOLERANCE_ZERO = 0;
-
-  function setUp() public override {
-    super.setUp();
-  }
-
-  // =========================================================================
-  //  mintShares — USDC → underlying assets via Uniswap
-  // =========================================================================
-
-  function test_mintShares_userReceivesShares() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    uint256 sharesBefore = wbtcWethIndex.balanceOf(user1);
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-
-    assertGt(wbtcWethIndex.balanceOf(user1), sharesBefore, "User must receive shares after buying");
-  }
-
-  function test_mintShares_fullUsdcAmountIsSpent() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-
-    assertEq(usdc.balanceOf(user1), 0, "Entire USDC input must be consumed");
-  }
-
-  function test_mintShares_indexReservesIncrease() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-
-    (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
-
-    // At least one reserve must increase (mint allocates to the underweight side)
-    assertTrue(r0After > r0Before || r1After > r1Before, "At least one underlying reserve must increase after mint");
-  }
-
-  function test_mintShares_totalSupplyIncreases() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    uint256 supplyBefore = wbtcWethIndex.totalSupply();
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-
-    assertGt(wbtcWethIndex.totalSupply(), supplyBefore, "Total share supply must increase after mint");
-  }
-
-  function test_mintShares_indexUsdValueIncreases() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    (,, uint256 totalUsdBefore) = wbtcWethIndex.getAssetsUsdValue();
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-
-    (,, uint256 totalUsdAfter) = wbtcWethIndex.getAssetsUsdValue();
-
-    assertGt(totalUsdAfter, totalUsdBefore, "Index total USD value must increase after mint");
-  }
-
-  // ─── Router input validation ───────────────────────────────────────────────
-
-  function test_mintShares_revertsWhenUsdcBalanceInsufficient() public {
-    // user1 has no USDC
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-
-    vm.expectRevert(
-      abi.encodeWithSelector(
-        Router__InsufficientUsdcBalance.selector,
-        0, // userBalance
-        USDC_AMOUNT // requiredAmount
-      )
-    );
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-  }
-
-  function test_mintShares_revertsOnZeroAmount() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-
-    vm.expectRevert(Router__InvalidAmounts.selector);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), 0, TOLERANCE);
-    vm.stopPrank();
-  }
-
-  function test_mintShares_revertsOnZeroTolerance() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-
-    vm.expectRevert(Router__InvalidTolerance.selector);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, 0);
-    vm.stopPrank();
-  }
-
-  function test_mintShares_revertsOnToleranceAboveMax() public {
-    deal(address(usdc), user1, USDC_AMOUNT);
-
-    vm.startPrank(user1);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-
-    vm.expectRevert(Router__InvalidTolerance.selector);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, INVALID_TOLERANCE_ABOVE);
-    vm.stopPrank();
-  }
-
-  // =========================================================================
-  //  redeem — underlying assets → USDC via Uniswap
-  // =========================================================================
-
-  function _mintSharesForUser(address _user) internal returns (uint256 shares) {
-    deal(address(usdc), _user, USDC_AMOUNT);
-    vm.startPrank(_user);
-    usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
-    router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
-    vm.stopPrank();
-    shares = wbtcWethIndex.balanceOf(_user);
-  }
-
-  function test_redeem_userReceivesUsdc() public {
-    uint256 shares = _mintSharesForUser(user1);
-
-    uint256 usdcBefore = usdc.balanceOf(user1);
-
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
-
-    assertGt(usdc.balanceOf(user1), usdcBefore, "User must receive USDC after redeeming shares");
-  }
-
-  function test_redeem_allSharesAreBurned() public {
-    uint256 shares = _mintSharesForUser(user1);
-
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
-
-    assertEq(wbtcWethIndex.balanceOf(user1), 0, "All shares must be burned on full redeem");
-  }
-
-  function test_redeem_indexReservesDecrease() public {
-    _mintSharesForUser(user1);
-    uint256 shares = wbtcWethIndex.balanceOf(user1);
-
-    (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
-
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
-
-    (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
-
-    assertTrue(r0After < r0Before || r1After < r1Before, "At least one underlying reserve must decrease after redeem");
-  }
-
-  function test_redeem_totalSupplyDecreases() public {
-    uint256 shares = _mintSharesForUser(user1);
-
-    uint256 supplyBefore = wbtcWethIndex.totalSupply();
-
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
-
-    assertLt(wbtcWethIndex.totalSupply(), supplyBefore, "Total supply must decrease after redeem");
-  }
-
-  /**
-   * @dev  Fees are charged on both mint (2 %) and redeem (2 %), plus swap
-   *       slippage on both legs.  The round-trip must return strictly less
-   *       USDC than deposited.
-   */
-  function test_redeem_roundTrip_returnsLessUsdcThanDeposited() public {
-    uint256 shares = _mintSharesForUser(user1);
-
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
-
-    assertLt(usdc.balanceOf(user1), USDC_AMOUNT, "Round-trip USDC must be less than deposited (fees + slippage)");
-  }
-
-  // ─── Router input validation ───────────────────────────────────────────────
-
-  function test_redeem_revertsWhenSharesBalanceInsufficient() public {
-    // user1 has no shares
-    vm.startPrank(user1);
-    vm.expectRevert(abi.encodeWithSelector(Router__InsufficientSharesBalance.selector, 0, 1e18));
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), 1e18, TOLERANCE);
-    vm.stopPrank();
-  }
-
-  // =========================================================================
-  //  rebalance — asset ↔ asset swap via Uniswap
-  // =========================================================================
-
-  /**
-   * @dev  Moves the WBTC target weight from 60 % to 50 % so the effective weight
-   *       (~60 %) exceeds the REBALANCE_THRESHOLD of 3 %, while oracle and pool
-   *       prices stay aligned. The rebalance then sells WBTC for WETH through
-   *       the real Universal Router.
-   */
-  function test_rebalance_swapsSellsOverweightAsset() public {
-    _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
-
-    (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
-
-    vm.prank(deployer);
-    indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
-
-    (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
-
-    // WBTC (asset0) is overweighted → index sells WBTC → reserve0 decreases
-    assertLt(r0After, r0Before, "WBTC reserve must decrease: overweight asset is sold");
-    // WETH (asset1) is underweighted → index buys WETH → reserve1 increases
-    assertGt(r1After, r1Before, "WETH reserve must increase: underweight asset is bought");
-  }
-
-  function test_rebalance_reducesWeightDeviation() public {
-    _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
-
-    (uint128 ew0Before,) = wbtcWethIndex.getAssetsEffectiveWeights();
-    (uint128 tw0,) = wbtcWethIndex.getAssetsWeights();
-
-    uint256 deviationBefore = ew0Before > tw0 ? uint256(ew0Before - tw0) : uint256(tw0 - ew0Before);
-
-    vm.prank(deployer);
-    indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
-
-    (uint128 ew0After,) = wbtcWethIndex.getAssetsEffectiveWeights();
-    uint256 deviationAfter = ew0After > tw0 ? uint256(ew0After - tw0) : uint256(tw0 - ew0After);
-
-    assertLt(deviationAfter, deviationBefore, "Weight deviation must shrink after rebalance");
-  }
-
-  /**
-   * @dev  After rebalancing, the total USD value of the index should not drop
-   *       by more than REBALANCE_SWAP_SLIPPAGE (1 %) of the swapped notional.
-   */
-  function test_rebalance_preservesIndexTotalValue() public {
-    _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
-
-    (,, uint256 totalUsdBefore) = wbtcWethIndex.getAssetsUsdValue();
-
-    vm.prank(deployer);
-    indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
-
-    (,, uint256 totalUsdAfter) = wbtcWethIndex.getAssetsUsdValue();
-
-    // The swapped notional is ~10 % of the TVL, so a 1 % notional slippage
-    // bounds the TVL loss at ~0.1 %.
-    assertTrue(totalUsdAfter != totalUsdBefore, "Rebalance must have been executed");
-    uint256 minAcceptable = (totalUsdBefore * 999) / 1000;
-    assertGe(totalUsdAfter, minAcceptable, "Index total USD value dropped beyond acceptable slippage");
-  }
-
-  /**
-   * @dev  The oracle prices WBTC 20 % above the pool (e.g. pool price pushed by a
-   *       sandwich, or oracle out of sync). The swap would lose ~17 % of the notional,
-   *       so the router minOut must reject it and the reserves stay unchanged.
-   */
-  function test_rebalance_rejectedWhenPoolDivergesFromOracle() public {
-    _mockDoubleWbtcPrice();
-
-    (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
-
-    vm.prank(deployer);
-    indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
-
-    (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
-    assertEq(r0After, r0Before, "WBTC reserve must be unchanged");
-    assertEq(r1After, r1Before, "WETH reserve must be unchanged");
-  }
-
-  // ─── Rebalance gating ─────────────────────────────────────────────────────
-
-  /**
-   * @dev  Without any price movement the effective weights stay within the
-   *       REBALANCE_THRESHOLD, so the call must revert with Index__RebalanceNotNeeded.
-   */
-  function test_rebalance_revertsWhenNotNeeded() public {
-    // The rebalance call propagates the revert through IndexManager.
-    // _tryIndexAction catches it with a low-level call and emits IndexActionFailed.
-    // We verify by checking that no revert at the IndexManager level occurs but
-    // the on-chain state is unchanged (reserves identical before and after).
-    (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
-
-    vm.prank(deployer);
-    indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
-
-    (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
-
-    // Reserves must be untouched since no rebalance was executed
-    assertEq(r0After, r0Before, "asset0 reserve changed despite no rebalance needed");
-    assertEq(r1After, r1Before, "asset1 reserve changed despite no rebalance needed");
-  }
-
-  function test_rebalance_notNeeded_emitsIndexActionFailed() public {
-    vm.recordLogs();
-    vm.prank(deployer);
-    indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
-    Vm.Log[] memory logs = vm.getRecordedLogs();
-
-    bool eventFound;
-    for (uint256 i = 0; i < logs.length; i++) {
-      if (logs[i].emitter != address(indexManager) || logs[i].topics[0] != IndexActionFailed.selector) continue;
-      eventFound = true;
-      assertEq(
-        address(uint160(uint256(logs[i].topics[1]))), address(wbtcWethIndex), "IndexActionFailed must log the index"
-      );
-      assertEq(address(uint160(uint256(logs[i].topics[2]))), deployer, "IndexActionFailed must log the caller");
-      assertEq(
-        uint256(logs[i].topics[3]), uint256(IndexAction.REBALANCE), "IndexActionFailed must log the REBALANCE action"
-      );
-      assertEq(
-        abi.decode(logs[i].data, (bytes)),
-        abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
-        "IndexActionFailed must log the raw Index__RebalanceNotNeeded revert data"
-      );
+    uint256 constant USDC_AMOUNT = 1_000e6;
+
+    uint256 constant TOLERANCE = 5 * PERCENTAGE_FEE_PRECISION; //5%
+    uint256 constant INVALID_TOLERANCE_ABOVE = 11 * PERCENTAGE_FEE_PRECISION; //11%
+    uint128 constant WBTC_TARGET_WEIGHT_AFTER_SHIFT = 500000; // 50%
+    // Storage slot of Index.s_weight0 | s_weight1 (see `forge inspect Index storageLayout`).
+    // ERC20 uses slots 0-4, EIP712 name/version fallbacks 5-6, Nonces 7; Index storage starts at 8.
+    uint256 constant INDEX_WEIGHTS_SLOT = 8;
+    uint256 constant INVALID_TOLERANCE_ZERO = 0;
+
+    function setUp() public override {
+        super.setUp();
     }
-    assertTrue(eventFound, "IndexActionFailed was not emitted");
-  }
 
-  // =========================================================================
-  //  Multi-user isolation
-  // =========================================================================
+    // =========================================================================
+    //  mintShares — USDC → underlying assets via Uniswap
+    // =========================================================================
 
-  function test_twoUsers_mintIndependently_receiveDifferentShares() public {
-    // user2 deposits after user1 → same USDC but different NAV; shares will differ
-    uint256 shares1 = _mintSharesForUser(user1);
-    uint256 shares2 = _mintSharesForUser(user2);
+    function test_mintShares_userReceivesShares() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
 
-    assertGt(shares1, 0, "user1 must hold shares");
-    assertGt(shares2, 0, "user2 must hold shares");
-    // After user1's deposit the NAV is higher, so user2 receives fewer shares per USDC
-    assertGt(shares1, shares2, "Earlier depositor receives more shares per USDC");
-  }
+        uint256 sharesBefore = wbtcWethIndex.balanceOf(user1);
 
-  function test_user1Redeem_doesNotAffectUser2Shares() public {
-    uint256 shares1 = _mintSharesForUser(user1);
-    uint256 shares2 = _mintSharesForUser(user2);
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
 
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares1, TOLERANCE);
+        assertGt(wbtcWethIndex.balanceOf(user1), sharesBefore, "User must receive shares after buying");
+    }
 
-    assertEq(wbtcWethIndex.balanceOf(user1), 0, "user1 shares must be fully burned");
-    assertEq(wbtcWethIndex.balanceOf(user2), shares2, "user2 shares must be untouched");
-  }
+    function test_mintShares_fullUsdcAmountIsSpent() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
 
-  function test_user1Redeem_receivesUsdc_user2SharesUnchanged() public {
-    _mintSharesForUser(user1);
-    uint256 shares2 = _mintSharesForUser(user2);
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
 
-    uint256 user1UsdcBefore = usdc.balanceOf(user1);
-    uint256 shares1 = wbtcWethIndex.balanceOf(user1);
+        assertEq(usdc.balanceOf(user1), 0, "Entire USDC input must be consumed");
+    }
 
-    vm.prank(user1);
-    router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares1, TOLERANCE);
+    function test_mintShares_indexReservesIncrease() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
 
-    assertGt(usdc.balanceOf(user1), user1UsdcBefore, "user1 must receive USDC on redeem");
-    assertEq(wbtcWethIndex.balanceOf(user2), shares2, "user2 balance must be unaffected");
-  }
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
 
-  // =========================================================================
-  //  Internal helpers
-  // =========================================================================
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
 
-  /**
-   * @dev  Overwrites the target weights in storage (s_weight0 / s_weight1, packed in
-   *       slot INDEX_WEIGHTS_SLOT) without going through the 2-day weight update
-   *       delay, which would make the forked price feeds stale.
-   */
-  function _setTargetWeights(uint128 _weight0) internal {
-    uint128 weight1 = uint128(MAX_PERCENTAGE) - _weight0;
-    vm.store(
-      address(wbtcWethIndex), bytes32(INDEX_WEIGHTS_SLOT), bytes32((uint256(weight1) << 128) | uint256(_weight0))
-    );
-    (uint128 w0, uint128 w1) = wbtcWethIndex.getAssetsWeights();
-    assertEq(w0, _weight0, "Weights storage slot changed");
-    assertEq(w1, weight1, "Weights storage slot changed");
-  }
+        (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
 
-  /**
-   * @dev  Increases the WBTC/USD answer by 20 % via vm.mockCall, so the oracle
-   *       diverges from the real pool price.
-   *
-   *       All other fields (roundId, startedAt, updatedAt, answeredInRound)
-   *       are kept identical to the live values so staleness checks pass.
-   */
-  function _mockDoubleWbtcPrice() internal {
-    (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
-      wbtcPriceFeed.latestRoundData();
+        // At least one reserve must increase (mint allocates to the underweight side)
+        assertTrue(r0After > r0Before || r1After > r1Before, "At least one underlying reserve must increase after mint");
+    }
 
-    vm.mockCall(
-      address(wbtcPriceFeed),
-      abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
-      abi.encode(roundId, (answer * 120) / 100, startedAt, updatedAt, answeredInRound)
-    );
-  }
+    function test_mintShares_totalSupplyIncreases() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
+
+        uint256 supplyBefore = wbtcWethIndex.totalSupply();
+
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
+
+        assertGt(wbtcWethIndex.totalSupply(), supplyBefore, "Total share supply must increase after mint");
+    }
+
+    function test_mintShares_indexUsdValueIncreases() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
+
+        (,, uint256 totalUsdBefore) = wbtcWethIndex.getAssetsUsdValue();
+
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
+
+        (,, uint256 totalUsdAfter) = wbtcWethIndex.getAssetsUsdValue();
+
+        assertGt(totalUsdAfter, totalUsdBefore, "Index total USD value must increase after mint");
+    }
+
+    // ─── Router input validation ───────────────────────────────────────────────
+
+    function test_mintShares_revertsWhenUsdcBalanceInsufficient() public {
+        // user1 has no USDC
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Router__InsufficientUsdcBalance.selector,
+                0, // userBalance
+                USDC_AMOUNT // requiredAmount
+            )
+        );
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
+    }
+
+    function test_mintShares_revertsOnZeroAmount() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
+
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+
+        vm.expectRevert(Router__InvalidAmounts.selector);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), 0, TOLERANCE);
+        vm.stopPrank();
+    }
+
+    function test_mintShares_revertsOnZeroTolerance() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
+
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+
+        vm.expectRevert(Router__InvalidTolerance.selector);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, 0);
+        vm.stopPrank();
+    }
+
+    function test_mintShares_revertsOnToleranceAboveMax() public {
+        deal(address(usdc), user1, USDC_AMOUNT);
+
+        vm.startPrank(user1);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+
+        vm.expectRevert(Router__InvalidTolerance.selector);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, INVALID_TOLERANCE_ABOVE);
+        vm.stopPrank();
+    }
+
+    // =========================================================================
+    //  redeem — underlying assets → USDC via Uniswap
+    // =========================================================================
+
+    function _mintSharesForUser(address _user) internal returns (uint256 shares) {
+        deal(address(usdc), _user, USDC_AMOUNT);
+        vm.startPrank(_user);
+        usdc.approve(address(wbtcWethIndex), USDC_AMOUNT);
+        router.buyExactUsdcAmountOfShares(address(wbtcWethIndex), USDC_AMOUNT, TOLERANCE);
+        vm.stopPrank();
+        shares = wbtcWethIndex.balanceOf(_user);
+    }
+
+    function test_redeem_userReceivesUsdc() public {
+        uint256 shares = _mintSharesForUser(user1);
+
+        uint256 usdcBefore = usdc.balanceOf(user1);
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+
+        assertGt(usdc.balanceOf(user1), usdcBefore, "User must receive USDC after redeeming shares");
+    }
+
+    function test_redeem_allSharesAreBurned() public {
+        uint256 shares = _mintSharesForUser(user1);
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+
+        assertEq(wbtcWethIndex.balanceOf(user1), 0, "All shares must be burned on full redeem");
+    }
+
+    function test_redeem_indexReservesDecrease() public {
+        _mintSharesForUser(user1);
+        uint256 shares = wbtcWethIndex.balanceOf(user1);
+
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+
+        (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
+
+        assertTrue(
+            r0After < r0Before || r1After < r1Before, "At least one underlying reserve must decrease after redeem"
+        );
+    }
+
+    function test_redeem_totalSupplyDecreases() public {
+        uint256 shares = _mintSharesForUser(user1);
+
+        uint256 supplyBefore = wbtcWethIndex.totalSupply();
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+
+        assertLt(wbtcWethIndex.totalSupply(), supplyBefore, "Total supply must decrease after redeem");
+    }
+
+    /**
+     * @dev  Fees are charged on both mint (2 %) and redeem (2 %), plus swap
+     *       slippage on both legs.  The round-trip must return strictly less
+     *       USDC than deposited.
+     */
+    function test_redeem_roundTrip_returnsLessUsdcThanDeposited() public {
+        uint256 shares = _mintSharesForUser(user1);
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares, TOLERANCE);
+
+        assertLt(usdc.balanceOf(user1), USDC_AMOUNT, "Round-trip USDC must be less than deposited (fees + slippage)");
+    }
+
+    // ─── Router input validation ───────────────────────────────────────────────
+
+    function test_redeem_revertsWhenSharesBalanceInsufficient() public {
+        // user1 has no shares
+        vm.startPrank(user1);
+        vm.expectRevert(abi.encodeWithSelector(Router__InsufficientSharesBalance.selector, 0, 1e18));
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), 1e18, TOLERANCE);
+        vm.stopPrank();
+    }
+
+    // =========================================================================
+    //  rebalance — asset ↔ asset swap via Uniswap
+    // =========================================================================
+
+    /**
+     * @dev  Moves the WBTC target weight from 60 % to 50 % so the effective weight
+     *       (~60 %) exceeds the REBALANCE_THRESHOLD of 3 %, while oracle and pool
+     *       prices stay aligned. The rebalance then sells WBTC for WETH through
+     *       the real Universal Router.
+     */
+    function test_rebalance_swapsSellsOverweightAsset() public {
+        _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
+
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+
+        (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
+
+        // WBTC (asset0) is overweighted → index sells WBTC → reserve0 decreases
+        assertLt(r0After, r0Before, "WBTC reserve must decrease: overweight asset is sold");
+        // WETH (asset1) is underweighted → index buys WETH → reserve1 increases
+        assertGt(r1After, r1Before, "WETH reserve must increase: underweight asset is bought");
+    }
+
+    function test_rebalance_reducesWeightDeviation() public {
+        _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
+
+        (uint128 ew0Before,) = wbtcWethIndex.getAssetsEffectiveWeights();
+        (uint128 tw0,) = wbtcWethIndex.getAssetsWeights();
+
+        uint256 deviationBefore = ew0Before > tw0 ? uint256(ew0Before - tw0) : uint256(tw0 - ew0Before);
+
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+
+        (uint128 ew0After,) = wbtcWethIndex.getAssetsEffectiveWeights();
+        uint256 deviationAfter = ew0After > tw0 ? uint256(ew0After - tw0) : uint256(tw0 - ew0After);
+
+        assertLt(deviationAfter, deviationBefore, "Weight deviation must shrink after rebalance");
+    }
+
+    /**
+     * @dev  After rebalancing, the total USD value of the index should not drop
+     *       by more than REBALANCE_SWAP_SLIPPAGE (1 %) of the swapped notional.
+     */
+    function test_rebalance_preservesIndexTotalValue() public {
+        _setTargetWeights(WBTC_TARGET_WEIGHT_AFTER_SHIFT);
+
+        (,, uint256 totalUsdBefore) = wbtcWethIndex.getAssetsUsdValue();
+
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+
+        (,, uint256 totalUsdAfter) = wbtcWethIndex.getAssetsUsdValue();
+
+        // The swapped notional is ~10 % of the TVL, so a 1 % notional slippage
+        // bounds the TVL loss at ~0.1 %.
+        assertTrue(totalUsdAfter != totalUsdBefore, "Rebalance must have been executed");
+        uint256 minAcceptable = (totalUsdBefore * 999) / 1000;
+        assertGe(totalUsdAfter, minAcceptable, "Index total USD value dropped beyond acceptable slippage");
+    }
+
+    /**
+     * @dev  The oracle prices WBTC 20 % above the pool (e.g. pool price pushed by a
+     *       sandwich, or oracle out of sync). The swap would lose ~17 % of the notional,
+     *       so the router minOut must reject it and the reserves stay unchanged.
+     */
+    function test_rebalance_rejectedWhenPoolDivergesFromOracle() public {
+        _mockDoubleWbtcPrice();
+
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+
+        (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
+        assertEq(r0After, r0Before, "WBTC reserve must be unchanged");
+        assertEq(r1After, r1Before, "WETH reserve must be unchanged");
+    }
+
+    // ─── Rebalance gating ─────────────────────────────────────────────────────
+
+    /**
+     * @dev  Without any price movement the effective weights stay within the
+     *       REBALANCE_THRESHOLD, so the call must revert with Index__RebalanceNotNeeded.
+     */
+    function test_rebalance_revertsWhenNotNeeded() public {
+        // The rebalance call propagates the revert through IndexManager.
+        // _tryIndexAction catches it with a low-level call and emits IndexActionFailed.
+        // We verify by checking that no revert at the IndexManager level occurs but
+        // the on-chain state is unchanged (reserves identical before and after).
+        (uint128 r0Before, uint128 r1Before) = wbtcWethIndex.getAssetsReserves();
+
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+
+        (uint128 r0After, uint128 r1After) = wbtcWethIndex.getAssetsReserves();
+
+        // Reserves must be untouched since no rebalance was executed
+        assertEq(r0After, r0Before, "asset0 reserve changed despite no rebalance needed");
+        assertEq(r1After, r1Before, "asset1 reserve changed despite no rebalance needed");
+    }
+
+    function test_rebalance_notNeeded_emitsIndexActionFailed() public {
+        vm.recordLogs();
+        vm.prank(deployer);
+        indexManager.rebalanceSingleIndex(address(wbtcWethIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bool eventFound;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(indexManager) || logs[i].topics[0] != IndexActionFailed.selector) continue;
+            eventFound = true;
+            assertEq(
+                address(uint160(uint256(logs[i].topics[1]))),
+                address(wbtcWethIndex),
+                "IndexActionFailed must log the index"
+            );
+            assertEq(address(uint160(uint256(logs[i].topics[2]))), deployer, "IndexActionFailed must log the caller");
+            assertEq(
+                uint256(logs[i].topics[3]),
+                uint256(IndexAction.REBALANCE),
+                "IndexActionFailed must log the REBALANCE action"
+            );
+            assertEq(
+                abi.decode(logs[i].data, (bytes)),
+                abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
+                "IndexActionFailed must log the raw Index__RebalanceNotNeeded revert data"
+            );
+        }
+        assertTrue(eventFound, "IndexActionFailed was not emitted");
+    }
+
+    // =========================================================================
+    //  Multi-user isolation
+    // =========================================================================
+
+    function test_twoUsers_mintIndependently_receiveDifferentShares() public {
+        // user2 deposits after user1 → same USDC but different NAV; shares will differ
+        uint256 shares1 = _mintSharesForUser(user1);
+        uint256 shares2 = _mintSharesForUser(user2);
+
+        assertGt(shares1, 0, "user1 must hold shares");
+        assertGt(shares2, 0, "user2 must hold shares");
+        // After user1's deposit the NAV is higher, so user2 receives fewer shares per USDC
+        assertGt(shares1, shares2, "Earlier depositor receives more shares per USDC");
+    }
+
+    function test_user1Redeem_doesNotAffectUser2Shares() public {
+        uint256 shares1 = _mintSharesForUser(user1);
+        uint256 shares2 = _mintSharesForUser(user2);
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares1, TOLERANCE);
+
+        assertEq(wbtcWethIndex.balanceOf(user1), 0, "user1 shares must be fully burned");
+        assertEq(wbtcWethIndex.balanceOf(user2), shares2, "user2 shares must be untouched");
+    }
+
+    function test_user1Redeem_receivesUsdc_user2SharesUnchanged() public {
+        _mintSharesForUser(user1);
+        uint256 shares2 = _mintSharesForUser(user2);
+
+        uint256 user1UsdcBefore = usdc.balanceOf(user1);
+        uint256 shares1 = wbtcWethIndex.balanceOf(user1);
+
+        vm.prank(user1);
+        router.sellExactAmountOfSharesForUsdc(address(wbtcWethIndex), shares1, TOLERANCE);
+
+        assertGt(usdc.balanceOf(user1), user1UsdcBefore, "user1 must receive USDC on redeem");
+        assertEq(wbtcWethIndex.balanceOf(user2), shares2, "user2 balance must be unaffected");
+    }
+
+    // =========================================================================
+    //  Internal helpers
+    // =========================================================================
+
+    /**
+     * @dev  Overwrites the target weights in storage (s_weight0 / s_weight1, packed in
+     *       slot INDEX_WEIGHTS_SLOT) without going through the 2-day weight update
+     *       delay, which would make the forked price feeds stale.
+     */
+    function _setTargetWeights(uint128 _weight0) internal {
+        uint128 weight1 = uint128(MAX_PERCENTAGE) - _weight0;
+        vm.store(
+            address(wbtcWethIndex), bytes32(INDEX_WEIGHTS_SLOT), bytes32((uint256(weight1) << 128) | uint256(_weight0))
+        );
+        (uint128 w0, uint128 w1) = wbtcWethIndex.getAssetsWeights();
+        assertEq(w0, _weight0, "Weights storage slot changed");
+        assertEq(w1, weight1, "Weights storage slot changed");
+    }
+
+    /**
+     * @dev  Increases the WBTC/USD answer by 20 % via vm.mockCall, so the oracle
+     *       diverges from the real pool price.
+     *
+     *       All other fields (roundId, startedAt, updatedAt, answeredInRound)
+     *       are kept identical to the live values so staleness checks pass.
+     */
+    function _mockDoubleWbtcPrice() internal {
+        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
+            wbtcPriceFeed.latestRoundData();
+
+        vm.mockCall(
+            address(wbtcPriceFeed),
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(roundId, (answer * 120) / 100, startedAt, updatedAt, answeredInRound)
+        );
+    }
 }

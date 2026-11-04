@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Blocks the commit when a change to src/ altered the ABIs and the regenerated
-# packages/abi/src/generated.ts is not staged. Enable once per clone with:
+# packages/abi/src/generated.ts is not staged. Also checks formatting for Solidity
+# files before allowing the commit. Enable once per clone with:
 #   git config core.hooksPath .githooks
 set -euo pipefail
 
 if git diff --cached --name-only | grep -qE '^(src/|packages/abi/|foundry\.toml)'; then
     packages/abi/check-abi.sh
+fi
+
+if git diff --cached --name-only | grep -qE '\.(sol)$'; then
+    forge fmt --check
 fi

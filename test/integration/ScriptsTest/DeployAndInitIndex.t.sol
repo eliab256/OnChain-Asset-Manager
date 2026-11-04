@@ -17,64 +17,66 @@ import {AssetAvailable} from "../../../src/types.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 
 contract DeployAndInitIndexTest is Test, CodeConstants, ContractCodeConstants {
-  MultiSigWallet public multiSigWallet;
-  IndexManager public indexManager;
-  Router public router;
-  SwapManager public swapManager;
-  HelperConfig public helperConfig;
-  TimelockController public timelock;
-  address public deployer;
+    MultiSigWallet public multiSigWallet;
+    IndexManager public indexManager;
+    Router public router;
+    SwapManager public swapManager;
+    HelperConfig public helperConfig;
+    TimelockController public timelock;
+    address public deployer;
 
-  modifier onMainnetFork() {
-    vm.createSelectFork(vm.rpcUrl("mainnet"), MAINNET_FORK_BLOCK);
-    _;
-  }
+    modifier onMainnetFork() {
+        vm.createSelectFork(vm.rpcUrl("mainnet"), MAINNET_FORK_BLOCK);
+        _;
+    }
 
-  function setUp() public onMainnetFork {
-    DeployPeriphery mainnetDeployerPeriphery = new DeployPeriphery();
-    (indexManager, router, helperConfig, swapManager, multiSigWallet, timelock, deployer) =
-      mainnetDeployerPeriphery.run();
-  }
+    function setUp() public onMainnetFork {
+        DeployPeriphery mainnetDeployerPeriphery = new DeployPeriphery();
+        (indexManager, router, helperConfig, swapManager, multiSigWallet, timelock, deployer) =
+            mainnetDeployerPeriphery.run();
+    }
 
-  function testDeployIndexOnMainnet() public {
-    uint128 weight60 = 60 * WEIGHT_PRECISION;
-    uint128 weight40 = 40 * WEIGHT_PRECISION;
-    uint32 feePercentage = 1 * PERCENTAGE_FEE_PRECISION; // 1%
+    function testDeployIndexOnMainnet() public {
+        uint128 weight60 = 60 * WEIGHT_PRECISION;
+        uint128 weight40 = 40 * WEIGHT_PRECISION;
+        uint32 feePercentage = 1 * PERCENTAGE_FEE_PRECISION; // 1%
 
-    uint256 initialWbtcDeposit = 1 * 10 ** 8; // 1 WBTC
+        uint256 initialWbtcDeposit = 1 * 10 ** 8; // 1 WBTC
 
-    RunParams memory params = RunParams({
-      assetA: AssetAvailable.WETH,
-      assetB: AssetAvailable.WBTC,
-      weightA: weight60,
-      weightB: weight40,
-      feePercentage: feePercentage,
-      initialAssetADeposit: 0, // computed by the script via UnderlyingMath.calculateComplementaryAssetAmount
-      initialAssetBDeposit: initialWbtcDeposit
-    });
+        RunParams memory params = RunParams({
+            assetA: AssetAvailable.WETH,
+            assetB: AssetAvailable.WBTC,
+            weightA: weight60,
+            weightB: weight40,
+            feePercentage: feePercentage,
+            initialAssetADeposit: 0, // computed by the script via UnderlyingMath.calculateComplementaryAssetAmount
+            initialAssetBDeposit: initialWbtcDeposit
+        });
 
-    deal(WETH_MAINNET, deployer, 100e18);
-    deal(WBTC_MAINNET, deployer, 100e8);
+        deal(WETH_MAINNET, deployer, 100e18);
+        deal(WBTC_MAINNET, deployer, 100e8);
 
-    DeployAndInitNewIndex deployAndInitNewIndex = new DeployAndInitNewIndex();
+        DeployAndInitNewIndex deployAndInitNewIndex = new DeployAndInitNewIndex();
 
-    Index newIndex = deployAndInitNewIndex.run(helperConfig, address(indexManager), address(multiSigWallet), params);
+        Index newIndex = deployAndInitNewIndex.run(helperConfig, address(indexManager), address(multiSigWallet), params);
 
-    assertTrue(address(newIndex) != address(0), "Index address must not be zero");
-    assertTrue(newIndex.getInitializationStatus(), "Index must be initialized");
-    assertTrue(indexManager.checkIsIndexInitialized(address(newIndex)), "IndexManager must see index as initialized");
+        assertTrue(address(newIndex) != address(0), "Index address must not be zero");
+        assertTrue(newIndex.getInitializationStatus(), "Index must be initialized");
+        assertTrue(
+            indexManager.checkIsIndexInitialized(address(newIndex)), "IndexManager must see index as initialized"
+        );
 
-    // Reserves must be non-zero after initialization
-    (uint128 r0, uint128 r1) = newIndex.getAssetsReserves();
-    assertGt(r0, 0, "reserve0 must be > 0");
-    assertGt(r1, 0, "reserve1 must be > 0");
+        // Reserves must be non-zero after initialization
+        (uint128 r0, uint128 r1) = newIndex.getAssetsReserves();
+        assertGt(r0, 0, "reserve0 must be > 0");
+        assertGt(r1, 0, "reserve1 must be > 0");
 
-    // MultiSig must hold initial shares (it is now the depositor)
-    assertGt(newIndex.balanceOf(address(multiSigWallet)), 0, "multisig must have shares");
-    assertEq(newIndex.balanceOf(address(multiSigWallet)), newIndex.totalSupply(), "multisig must hold all shares");
+        // MultiSig must hold initial shares (it is now the depositor)
+        assertGt(newIndex.balanceOf(address(multiSigWallet)), 0, "multisig must have shares");
+        assertEq(newIndex.balanceOf(address(multiSigWallet)), newIndex.totalSupply(), "multisig must hold all shares");
 
-    // Verify weights are set correctly
-    (uint128 w0, uint128 w1) = newIndex.getAssetsWeights();
-    assertEq(w0 + w1, MAX_WEIGHT, "weights must sum to MAX_WEIGHT");
-  }
+        // Verify weights are set correctly
+        (uint128 w0, uint128 w1) = newIndex.getAssetsWeights();
+        assertEq(w0 + w1, MAX_WEIGHT, "weights must sum to MAX_WEIGHT");
+    }
 }

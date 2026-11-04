@@ -7,13 +7,13 @@ pragma solidity ^0.8.0;
  *      a long `new Contract(...)` expression (stack-too-deep with the optimizer off).
  */
 contract RawCreateDeployerMock {
-  function deploy(bytes memory _initCode) external returns (address deployed) {
-    assembly {
-      deployed := create(0, add(_initCode, 0x20), mload(_initCode))
-      if iszero(deployed) {
-        returndatacopy(0, 0, returndatasize())
-        revert(0, returndatasize())
-      }
+    function deploy(bytes memory _initCode) external returns (address deployed) {
+        assembly {
+            deployed := create(0, add(_initCode, 0x20), mload(_initCode))
+            if iszero(deployed) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+        }
     }
-  }
 }

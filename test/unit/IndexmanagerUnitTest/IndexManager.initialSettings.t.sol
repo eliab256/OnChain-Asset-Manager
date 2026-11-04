@@ -14,179 +14,182 @@ import "../../../src/events/IndexManagerEvents.sol";
 import "../../../src/errors/IndexErrors.sol";
 
 contract IndexManagerTest is BaseTest {
-  IndexAsset wethAsset60;
-  IndexAsset linkAsset40;
+    IndexAsset wethAsset60;
+    IndexAsset linkAsset40;
 
-  function setUp() public override {
-    super.setUp();
-  }
+    function setUp() public override {
+        super.setUp();
+    }
 
-  // =========================================================================
-  //  constructor
-  // =========================================================================
+    // =========================================================================
+    //  constructor
+    // =========================================================================
 
-  function testConstructorSetsInitialStateCorrectly() public {
-    SwapManager implementation = new SwapManager();
-    PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
-    Router routerImplementation = new Router();
-    vm.prank(deployer);
-    IndexManager newIndexManager = new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      address(implementation),
-      address(priceFeedManagerImplementation),
-      address(routerImplementation),
-      address(timelock),
-      address(indexFactory)
-    );
-    // getUsdc/getUsdcPriceFeed were removed from the IndexManager: USDC is read from its Router
-    // and the USDC feed from its PriceFeedManager, where a fresh manager has none registered.
-    assertEq(Router(newIndexManager.getRouterAddress()).getUsdc(), address(mockUsdc));
-    assertFalse(PriceFeedManager(newIndexManager.getPriceFeedManagerAddress()).hasPriceFeed(address(mockUsdc)));
-    assertEq(newIndexManager.getUniswapUniversalRouter(), address(mockUniRouter));
+    function testConstructorSetsInitialStateCorrectly() public {
+        SwapManager implementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        Router routerImplementation = new Router();
+        vm.prank(deployer);
+        IndexManager newIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(implementation),
+            address(priceFeedManagerImplementation),
+            address(routerImplementation),
+            address(timelock),
+            address(indexFactory)
+        );
+        // getUsdc/getUsdcPriceFeed were removed from the IndexManager: USDC is read from its Router
+        // and the USDC feed from its PriceFeedManager, where a fresh manager has none registered.
+        assertEq(Router(newIndexManager.getRouterAddress()).getUsdc(), address(mockUsdc));
+        assertFalse(PriceFeedManager(newIndexManager.getPriceFeedManagerAddress()).hasPriceFeed(address(mockUsdc)));
+        assertEq(newIndexManager.getUniswapUniversalRouter(), address(mockUniRouter));
 
-    assertTrue(newIndexManager.hasRole(newIndexManager.DEFAULT_ADMIN_ROLE(), deployer));
-    assertTrue(newIndexManager.hasRole(newIndexManager.ASSET_MANAGER_ROLE(), deployer));
-    assertTrue(newIndexManager.hasRole(newIndexManager.FEE_COLLECTOR_ROLE(), deployer));
-    assertTrue(newIndexManager.hasRole(newIndexManager.REBALANCER_ROLE(), deployer));
-  }
+        assertTrue(newIndexManager.hasRole(newIndexManager.DEFAULT_ADMIN_ROLE(), deployer));
+        assertTrue(newIndexManager.hasRole(newIndexManager.ASSET_MANAGER_ROLE(), deployer));
+        assertTrue(newIndexManager.hasRole(newIndexManager.FEE_COLLECTOR_ROLE(), deployer));
+        assertTrue(newIndexManager.hasRole(newIndexManager.REBALANCER_ROLE(), deployer));
+    }
 
-  function testConstructorDeploysAndInitializesSwapManagerProxy() public {
-    SwapManager implementation = new SwapManager();
-    PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
-    Router routerImplementation = new Router();
-    vm.prank(deployer);
-    IndexManager newIndexManager = new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      address(implementation),
-      address(priceFeedManagerImplementation),
-      address(routerImplementation),
-      address(timelock),
-      address(indexFactory)
-    );
+    function testConstructorDeploysAndInitializesSwapManagerProxy() public {
+        SwapManager implementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        Router routerImplementation = new Router();
+        vm.prank(deployer);
+        IndexManager newIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(implementation),
+            address(priceFeedManagerImplementation),
+            address(routerImplementation),
+            address(timelock),
+            address(indexFactory)
+        );
 
-    SwapManager proxy = SwapManager(newIndexManager.getSwapManagerAddress());
-    assertTrue(address(proxy) != address(implementation));
-    assertEq(proxy.owner(), address(newIndexManager));
-    assertEq(proxy.getUpgrader(), address(timelock));
-    assertEq(proxy.getImplementation(), address(implementation));
-    assertEq(
-      address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(implementation)
-    );
-  }
+        SwapManager proxy = SwapManager(newIndexManager.getSwapManagerAddress());
+        assertTrue(address(proxy) != address(implementation));
+        assertEq(proxy.owner(), address(newIndexManager));
+        assertEq(proxy.getUpgrader(), address(timelock));
+        assertEq(proxy.getImplementation(), address(implementation));
+        assertEq(
+            address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            address(implementation)
+        );
+    }
 
-  function testConstructorDeploysAndInitializesPriceFeedManagerProxy() public {
-    SwapManager swapManagerImplementation = new SwapManager();
-    PriceFeedManager implementation = new PriceFeedManager();
-    Router routerImplementation = new Router();
-    vm.prank(deployer);
-    IndexManager newIndexManager = new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      address(swapManagerImplementation),
-      address(implementation),
-      address(routerImplementation),
-      address(timelock),
-      address(indexFactory)
-    );
+    function testConstructorDeploysAndInitializesPriceFeedManagerProxy() public {
+        SwapManager swapManagerImplementation = new SwapManager();
+        PriceFeedManager implementation = new PriceFeedManager();
+        Router routerImplementation = new Router();
+        vm.prank(deployer);
+        IndexManager newIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
+            address(implementation),
+            address(routerImplementation),
+            address(timelock),
+            address(indexFactory)
+        );
 
-    PriceFeedManager proxy = PriceFeedManager(newIndexManager.getPriceFeedManagerAddress());
-    assertTrue(address(proxy) != address(implementation));
-    assertTrue(address(proxy) != newIndexManager.getSwapManagerAddress());
-    assertEq(proxy.owner(), address(newIndexManager));
-    assertEq(proxy.getUpgrader(), address(timelock));
-    assertEq(proxy.getImplementation(), address(implementation));
-    assertEq(
-      address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(implementation)
-    );
-    assertFalse(proxy.hasPriceFeed(address(mockUsdc)));
-  }
+        PriceFeedManager proxy = PriceFeedManager(newIndexManager.getPriceFeedManagerAddress());
+        assertTrue(address(proxy) != address(implementation));
+        assertTrue(address(proxy) != newIndexManager.getSwapManagerAddress());
+        assertEq(proxy.owner(), address(newIndexManager));
+        assertEq(proxy.getUpgrader(), address(timelock));
+        assertEq(proxy.getImplementation(), address(implementation));
+        assertEq(
+            address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            address(implementation)
+        );
+        assertFalse(proxy.hasPriceFeed(address(mockUsdc)));
+    }
 
-  function testConstructorRevertIfSwapManagerImplementationHasNoCode() public {
-    PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
-    Router routerImplementation = new Router();
-    address noCode = makeAddr("noCode");
-    vm.expectRevert(abi.encodeWithSelector(IndexManager__InvalidImplementation.selector, noCode));
-    new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      noCode,
-      address(priceFeedManagerImplementation),
-      address(routerImplementation),
-      address(timelock),
-      address(indexFactory)
-    );
-  }
+    function testConstructorRevertIfSwapManagerImplementationHasNoCode() public {
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        Router routerImplementation = new Router();
+        address noCode = makeAddr("noCode");
+        vm.expectRevert(abi.encodeWithSelector(IndexManager__InvalidImplementation.selector, noCode));
+        new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            noCode,
+            address(priceFeedManagerImplementation),
+            address(routerImplementation),
+            address(timelock),
+            address(indexFactory)
+        );
+    }
 
-  function testConstructorRevertIfPriceFeedManagerImplementationHasNoCode() public {
-    SwapManager swapManagerImplementation = new SwapManager();
-    Router routerImplementation = new Router();
-    address noCode = makeAddr("noCode");
-    vm.expectRevert(abi.encodeWithSelector(IndexManager__InvalidImplementation.selector, noCode));
-    new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      address(swapManagerImplementation),
-      noCode,
-      address(routerImplementation),
-      address(timelock),
-      address(indexFactory)
-    );
-  }
+    function testConstructorRevertIfPriceFeedManagerImplementationHasNoCode() public {
+        SwapManager swapManagerImplementation = new SwapManager();
+        Router routerImplementation = new Router();
+        address noCode = makeAddr("noCode");
+        vm.expectRevert(abi.encodeWithSelector(IndexManager__InvalidImplementation.selector, noCode));
+        new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
+            noCode,
+            address(routerImplementation),
+            address(timelock),
+            address(indexFactory)
+        );
+    }
 
-  function testConstructorRevertIfRouterImplementationHasNoCode() public {
-    SwapManager swapManagerImplementation = new SwapManager();
-    PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
-    address noCode = makeAddr("noCode");
-    vm.expectRevert(abi.encodeWithSelector(IndexManager__InvalidImplementation.selector, noCode));
-    new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      address(swapManagerImplementation),
-      address(priceFeedManagerImplementation),
-      noCode,
-      address(timelock),
-      address(indexFactory)
-    );
-  }
+    function testConstructorRevertIfRouterImplementationHasNoCode() public {
+        SwapManager swapManagerImplementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        address noCode = makeAddr("noCode");
+        vm.expectRevert(abi.encodeWithSelector(IndexManager__InvalidImplementation.selector, noCode));
+        new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
+            address(priceFeedManagerImplementation),
+            noCode,
+            address(timelock),
+            address(indexFactory)
+        );
+    }
 
-  function testConstructorDeploysAndInitializesRouterProxy() public {
-    SwapManager swapManagerImplementation = new SwapManager();
-    PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
-    Router implementation = new Router();
-    vm.prank(deployer);
-    IndexManager newIndexManager = new IndexManager(
-      address(mockUsdc),
-      address(mockUniRouter),
-      address(swapManagerImplementation),
-      address(priceFeedManagerImplementation),
-      address(implementation),
-      address(timelock),
-      address(indexFactory)
-    );
+    function testConstructorDeploysAndInitializesRouterProxy() public {
+        SwapManager swapManagerImplementation = new SwapManager();
+        PriceFeedManager priceFeedManagerImplementation = new PriceFeedManager();
+        Router implementation = new Router();
+        vm.prank(deployer);
+        IndexManager newIndexManager = new IndexManager(
+            address(mockUsdc),
+            address(mockUniRouter),
+            address(swapManagerImplementation),
+            address(priceFeedManagerImplementation),
+            address(implementation),
+            address(timelock),
+            address(indexFactory)
+        );
 
-    Router proxy = Router(newIndexManager.getRouterAddress());
-    assertTrue(address(proxy) != address(implementation));
-    assertTrue(address(proxy) != newIndexManager.getSwapManagerAddress());
-    assertTrue(address(proxy) != newIndexManager.getPriceFeedManagerAddress());
-    assertEq(proxy.getUpgrader(), address(timelock));
-    assertEq(proxy.getImplementation(), address(implementation));
-    assertEq(proxy.getIndexManager(), address(newIndexManager));
-    assertEq(proxy.getUsdc(), address(mockUsdc));
-    assertEq(
-      address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(implementation)
-    );
-  }
+        Router proxy = Router(newIndexManager.getRouterAddress());
+        assertTrue(address(proxy) != address(implementation));
+        assertTrue(address(proxy) != newIndexManager.getSwapManagerAddress());
+        assertTrue(address(proxy) != newIndexManager.getPriceFeedManagerAddress());
+        assertEq(proxy.getUpgrader(), address(timelock));
+        assertEq(proxy.getImplementation(), address(implementation));
+        assertEq(proxy.getIndexManager(), address(newIndexManager));
+        assertEq(proxy.getUsdc(), address(mockUsdc));
+        assertEq(
+            address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            address(implementation)
+        );
+    }
 
-  // =========================================================================
-  //  getRouterAddress
-  // =========================================================================
+    // =========================================================================
+    //  getRouterAddress
+    // =========================================================================
 
-  function testGetRouterAddressReturnsRouterProxyFromDeployScript() public view {
-    assertEq(indexManager.getRouterAddress(), address(router));
-    assertEq(router.getIndexManager(), address(indexManager));
-    assertEq(router.getUpgrader(), address(timelock));
-    assertTrue(router.getImplementation() != address(router), "router must be a proxy");
-  }
+    function testGetRouterAddressReturnsRouterProxyFromDeployScript() public view {
+        assertEq(indexManager.getRouterAddress(), address(router));
+        assertEq(router.getIndexManager(), address(indexManager));
+        assertEq(router.getUpgrader(), address(timelock));
+        assertTrue(router.getImplementation() != address(router), "router must be a proxy");
+    }
 }

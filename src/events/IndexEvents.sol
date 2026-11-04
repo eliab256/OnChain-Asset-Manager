@@ -11,12 +11,12 @@ pragma solidity ^0.8.0;
  * @param sharesMinted Initial shares minted to the depositor, 18 decimals (1 share = 1 USD at initialization).
  */
 event IndexInitialized(
-  address indexed depositor,
-  uint256 asset0Amount,
-  uint256 asset1Amount,
-  uint256 asset0UsdValue,
-  uint256 asset1UsdValue,
-  uint256 sharesMinted
+    address indexed depositor,
+    uint256 asset0Amount,
+    uint256 asset1Amount,
+    uint256 asset0UsdValue,
+    uint256 asset1UsdValue,
+    uint256 sharesMinted
 );
 
 /**
@@ -29,12 +29,12 @@ event IndexInitialized(
  * @param feeAmount Fee retained by the index and added to the accrued fees, in USDC token decimals.
  */
 event SharesMinted(
-  address indexed user,
-  uint256 sharesMinted,
-  uint256 asset0Amount,
-  uint256 asset1Amount,
-  uint256 usdcAmountIn,
-  uint256 feeAmount
+    address indexed user,
+    uint256 sharesMinted,
+    uint256 asset0Amount,
+    uint256 asset1Amount,
+    uint256 usdcAmountIn,
+    uint256 feeAmount
 );
 
 /**
@@ -47,12 +47,12 @@ event SharesMinted(
  * @param feeAmount Fee retained by the index and added to the accrued fees, in USDC token decimals.
  */
 event SharesBurned(
-  address indexed user,
-  uint256 sharesBurned,
-  uint256 asset0Amount,
-  uint256 asset1Amount,
-  uint256 usdcAmountOut,
-  uint256 feeAmount
+    address indexed user,
+    uint256 sharesBurned,
+    uint256 asset0Amount,
+    uint256 asset1Amount,
+    uint256 usdcAmountOut,
+    uint256 feeAmount
 );
 
 /**
@@ -63,7 +63,7 @@ event SharesBurned(
  * @param asset1ReserveAfter Asset1 reserve after the rebalance, in asset1 token decimals.
  */
 event IndexRebalanced(
-  uint256 asset0ReserveBefore, uint256 asset1ReserveBefore, uint256 asset0ReserveAfter, uint256 asset1ReserveAfter
+    uint256 asset0ReserveBefore, uint256 asset1ReserveBefore, uint256 asset0ReserveAfter, uint256 asset1ReserveAfter
 );
 
 /**
@@ -75,11 +75,11 @@ event IndexRebalanced(
  * @param executableAt Unix timestamp (seconds) from which the update can be executed.
  */
 event WeightsUpdateProposed(
-  uint128 oldAsset0Weight,
-  uint128 oldAsset1Weight,
-  uint128 newAsset0Weight,
-  uint128 newAsset1Weight,
-  uint256 executableAt
+    uint128 oldAsset0Weight,
+    uint128 oldAsset1Weight,
+    uint128 newAsset0Weight,
+    uint128 newAsset1Weight,
+    uint256 executableAt
 );
 
 /**

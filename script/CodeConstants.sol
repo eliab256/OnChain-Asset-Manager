@@ -2,55 +2,55 @@
 pragma solidity ^0.8.0;
 
 abstract contract CodeConstants {
-  // Chain IDs
-  uint256 public constant MAINNET_CHAIN_ID = 1;
-  uint256 public constant ANVIL_CHAIN_ID = 31337;
-  // Local anvil fork of mainnet started with `--chain-id 31338`, so nothing deployed or signed
-  // there can be confused with or replayed on mainnet.
-  uint256 public constant FORK_CHAIN_ID = 31338;
+    // Chain IDs
+    uint256 public constant MAINNET_CHAIN_ID = 1;
+    uint256 public constant ANVIL_CHAIN_ID = 31337;
+    // Local anvil fork of mainnet started with `--chain-id 31338`, so nothing deployed or signed
+    // there can be confused with or replayed on mainnet.
+    uint256 public constant FORK_CHAIN_ID = 31338;
 
-  uint8 public constant PRICE_FEED_DECIMALS = 8;
+    uint8 public constant PRICE_FEED_DECIMALS = 8;
 
-  // Price feed max delays (heartbeat + margin)
-  // ETH/BTC/LINK/COMP-USD heartbeat is 1h, USDC/USD heartbeat is 24h.
-  uint32 public constant ASSET_USD_PRICEFEED_MAX_DELAY = 1 hours + 15 minutes;
-  uint32 public constant USDC_USD_PRICEFEED_MAX_DELAY = 25 hours;
+    // Price feed max delays (heartbeat + margin)
+    // ETH/BTC/LINK/COMP-USD heartbeat is 1h, USDC/USD heartbeat is 24h.
+    uint32 public constant ASSET_USD_PRICEFEED_MAX_DELAY = 1 hours + 15 minutes;
+    uint32 public constant USDC_USD_PRICEFEED_MAX_DELAY = 25 hours;
 
-  //Multisig configuration
-  uint256 public constant MULTISIG_REQUIRED_CONFIRMATIONS = 2;
+    //Multisig configuration
+    uint256 public constant MULTISIG_REQUIRED_CONFIRMATIONS = 2;
 
-  // Minimum delay of the TimelockController that upgrades the SwapManager, PriceFeedManager and Router proxies
-  uint256 public constant TIMELOCK_MIN_DELAY = 2 days;
+    // Minimum delay of the TimelockController that upgrades the SwapManager, PriceFeedManager and Router proxies
+    uint256 public constant TIMELOCK_MIN_DELAY = 2 days;
 
-  ////////////////////////////
-  ////////// MAINNET /////////
-  ////////////////////////////
-  // Token Contracts
-  address public constant WETH_MAINNET = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-  address public constant USDC_MAINNET = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-  address public constant WBTC_MAINNET = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
-  address public constant LINK_MAINNET = 0x514910771AF9Ca656af840dff83E8264EcF986CA;
-  address public constant COMP_MAINNET = 0xc00e94Cb662C3520282E6f5717214004A7f26888;
+    ////////////////////////////
+    ////////// MAINNET /////////
+    ////////////////////////////
+    // Token Contracts
+    address public constant WETH_MAINNET = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address public constant USDC_MAINNET = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address public constant WBTC_MAINNET = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
+    address public constant LINK_MAINNET = 0x514910771AF9Ca656af840dff83E8264EcF986CA;
+    address public constant COMP_MAINNET = 0xc00e94Cb662C3520282E6f5717214004A7f26888;
 
-  // Pricefeeds Asset/USD Contracts
-  address public constant WETH_USD_PRICEFEED_MAINNET = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
-  address public constant USDC_USD_PRICEFEED_MAINNET = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
-  address public constant WBTC_USD_PRICEFEED_MAINNET = 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c;
-  address public constant LINK_USD_PRICEFEED_MAINNET = 0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c;
-  address public constant COMP_USD_PRICEFEED_MAINNET = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
+    // Pricefeeds Asset/USD Contracts
+    address public constant WETH_USD_PRICEFEED_MAINNET = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
+    address public constant USDC_USD_PRICEFEED_MAINNET = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
+    address public constant WBTC_USD_PRICEFEED_MAINNET = 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c;
+    address public constant LINK_USD_PRICEFEED_MAINNET = 0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c;
+    address public constant COMP_USD_PRICEFEED_MAINNET = 0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5;
 
-  // Uniswap V4 addresses
-  address public constant UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
+    // Uniswap V4 addresses
+    address public constant UNISWAP_V4_UNIVERSAL_ROUTER_MAINNET = 0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af;
 
-  // Default mnemonic of anvil: account i is derived at m/44'/60'/0'/0/i
-  string public constant ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
+    // Default mnemonic of anvil: account i is derived at m/44'/60'/0'/0/i
+    string public constant ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
 
-  address public constant ANVIL_DEPLOYER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+    address public constant ANVIL_DEPLOYER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 
-  uint256 constant ANVIL_DEPLOYER_PK = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    uint256 constant ANVIL_DEPLOYER_PK = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
 
-  // Anvil default account number 1,2,3
-  address public constant ANVIL_OWNER_1 = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
-  address public constant ANVIL_OWNER_2 = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC;
-  address public constant ANVIL_OWNER_3 = 0x90F79bf6EB2c4f870365E785982E1f101E93b906;
+    // Anvil default account number 1,2,3
+    address public constant ANVIL_OWNER_1 = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+    address public constant ANVIL_OWNER_2 = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC;
+    address public constant ANVIL_OWNER_3 = 0x90F79bf6EB2c4f870365E785982E1f101E93b906;
 }

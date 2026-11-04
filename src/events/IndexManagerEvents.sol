@@ -14,13 +14,13 @@ import {IndexAction} from "../types.sol";
  * @param assetManager Address that created the index.
  */
 event IndexCreated(
-  address indexed indexAddress,
-  address indexed asset0,
-  address indexed asset1,
-  uint128 asset0Weight,
-  uint128 asset1Weight,
-  uint32 feePercentage,
-  address assetManager
+    address indexed indexAddress,
+    address indexed asset0,
+    address indexed asset1,
+    uint128 asset0Weight,
+    uint128 asset1Weight,
+    uint32 feePercentage,
+    address assetManager
 );
 
 /**
@@ -50,5 +50,5 @@ event IndexActionTriggered(address indexed indexAddress, address indexed caller,
  *        possibly empty.
  */
 event IndexActionFailed(
-  address indexed indexAddress, address indexed caller, IndexAction indexed action, bytes reasonData
+    address indexed indexAddress, address indexed caller, IndexAction indexed action, bytes reasonData
 );

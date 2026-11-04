@@ -25,7 +25,7 @@ event Deposit(address indexed sender, uint256 value);
  * @param data Calldata that will be sent to the target.
  */
 event TransactionSubmitted(
-  uint256 indexed txId, address indexed proposer, address indexed target, uint256 value, bytes data
+    uint256 indexed txId, address indexed proposer, address indexed target, uint256 value, bytes data
 );
 
 /**

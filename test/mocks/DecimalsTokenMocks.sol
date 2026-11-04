@@ -8,13 +8,13 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  *      behind a proxy. `symbol()` works, so only the decimals validation can reject it.
  */
 contract DecimalsRevertingTokenMock is ERC20 {
-  error DecimalsRevertingTokenMock__DecimalsUnavailable();
+    error DecimalsRevertingTokenMock__DecimalsUnavailable();
 
-  constructor() ERC20("Decimals Reverting", "DREV") {}
+    constructor() ERC20("Decimals Reverting", "DREV") {}
 
-  function decimals() public pure override returns (uint8) {
-    revert DecimalsRevertingTokenMock__DecimalsUnavailable();
-  }
+    function decimals() public pure override returns (uint8) {
+        revert DecimalsRevertingTokenMock__DecimalsUnavailable();
+    }
 }
 
 /**
@@ -22,13 +22,13 @@ contract DecimalsRevertingTokenMock is ERC20 {
  *      so a `decimals()` call fails at the dispatcher.
  */
 contract NoDecimalsTokenMock {
-  function symbol() external pure returns (string memory) {
-    return "NODEC";
-  }
+    function symbol() external pure returns (string memory) {
+        return "NODEC";
+    }
 
-  function name() external pure returns (string memory) {
-    return "No Decimals";
-  }
+    function name() external pure returns (string memory) {
+        return "No Decimals";
+    }
 }
 
 /**
@@ -36,19 +36,19 @@ contract NoDecimalsTokenMock {
  *      like a non-compliant token with a hand-written return. `symbol()` works.
  */
 contract ShortDecimalsReturnTokenMock {
-  uint8 private constant TOKEN_DECIMALS = 18;
+    uint8 private constant TOKEN_DECIMALS = 18;
 
-  function symbol() external pure returns (string memory) {
-    return "SHORT";
-  }
-
-  function decimals() external pure {
-    assembly {
-      mstore(0x00, TOKEN_DECIMALS)
-      // return only the last byte of the word
-      return(0x1f, 0x01)
+    function symbol() external pure returns (string memory) {
+        return "SHORT";
     }
-  }
+
+    function decimals() external pure {
+        assembly {
+            mstore(0x00, TOKEN_DECIMALS)
+            // return only the last byte of the word
+            return(0x1f, 0x01)
+        }
+    }
 }
 
 /**
@@ -59,18 +59,18 @@ contract ShortDecimalsReturnTokenMock {
  *      A storage counter cannot be used: both calls are STATICCALLs (view), so no state can change.
  */
 contract ConstructorDecimalsRevertingTokenMock is ERC20 {
-  error ConstructorDecimalsRevertingTokenMock__CallerUnderConstruction();
+    error ConstructorDecimalsRevertingTokenMock__CallerUnderConstruction();
 
-  uint8 private constant TOKEN_DECIMALS = 18;
+    uint8 private constant TOKEN_DECIMALS = 18;
 
-  constructor() ERC20("Constructor Decimals Reverting", "CDREV") {}
+    constructor() ERC20("Constructor Decimals Reverting", "CDREV") {}
 
-  function decimals() public view override returns (uint8) {
-    if (msg.sender.code.length == 0) {
-      revert ConstructorDecimalsRevertingTokenMock__CallerUnderConstruction();
+    function decimals() public view override returns (uint8) {
+        if (msg.sender.code.length == 0) {
+            revert ConstructorDecimalsRevertingTokenMock__CallerUnderConstruction();
+        }
+        return TOKEN_DECIMALS;
     }
-    return TOKEN_DECIMALS;
-  }
 }
 
 /**
@@ -78,11 +78,11 @@ contract ConstructorDecimalsRevertingTokenMock is ERC20 {
  *      so a `symbol()` call fails at the dispatcher and the asset validation rejects it.
  */
 contract NoSymbolTokenMock {
-  uint8 private constant TOKEN_DECIMALS = 18;
+    uint8 private constant TOKEN_DECIMALS = 18;
 
-  function decimals() external pure returns (uint8) {
-    return TOKEN_DECIMALS;
-  }
+    function decimals() external pure returns (uint8) {
+        return TOKEN_DECIMALS;
+    }
 }
 
 /**
@@ -90,15 +90,15 @@ contract NoSymbolTokenMock {
  *      with an empty body. `decimals()` works, so only the symbol validation can reject it.
  */
 contract EmptySymbolReturnTokenMock {
-  uint8 private constant TOKEN_DECIMALS = 18;
+    uint8 private constant TOKEN_DECIMALS = 18;
 
-  function symbol() external pure {
-    assembly {
-      return(0x00, 0x00)
+    function symbol() external pure {
+        assembly {
+            return(0x00, 0x00)
+        }
     }
-  }
 
-  function decimals() external pure returns (uint8) {
-    return TOKEN_DECIMALS;
-  }
+    function decimals() external pure returns (uint8) {
+        return TOKEN_DECIMALS;
+    }
 }
