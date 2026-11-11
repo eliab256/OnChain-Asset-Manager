@@ -90,6 +90,8 @@ enum NotificationType {
   PRICE_FEED_STALE
   MULTISIG_TO_SIGN
   MULTISIG_READY
+  /// Shares received from another person (not a linked wallet): the UI asks for the purchase price.
+  SHARES_RECEIVED
 }
 
 enum KeeperJob {
@@ -282,7 +284,9 @@ model ShareTransfer {
   logIndex     Int
   timestamp    DateTime
 
-  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+  index Index         @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+  /// Personal cost, only for transfers between two users (see TransferCost).
+  cost  TransferCost?
 
   @@unique([chainId, txHash, logIndex])
   @@index([chainId, indexAddress, blockNumber])
@@ -290,29 +294,108 @@ model ShareTransfer {
   @@index([chainId, to])
 }
 
-/// Position of a user in an index. balance comes only from ShareTransfer; USDC totals from Trade.
+/// Position of a user in an index, chain data only: balance comes only from ShareTransfer, USDC totals from Trade.
+/// Cost basis and PnL are personal and live in PositionCost.
 model Position {
-  chainId          Int
-  indexAddress     String  @db.VarChar(42)
-  user             String  @db.VarChar(42)
+  chainId      Int
+  indexAddress String  @db.VarChar(42)
+  user         String  @db.VarChar(42)
   /// Shares, 18 decimals.
-  balance          Decimal @default(0) @db.Decimal(78, 0)
-  sharesMinted     Decimal @default(0) @db.Decimal(78, 0)
-  sharesBurned     Decimal @default(0) @db.Decimal(78, 0)
+  balance      Decimal @default(0) @db.Decimal(78, 0)
+  sharesMinted Decimal @default(0) @db.Decimal(78, 0)
+  sharesBurned Decimal @default(0) @db.Decimal(78, 0)
   /// USDC 6 decimals.
-  usdcIn           Decimal @default(0) @db.Decimal(78, 0)
-  usdcOut          Decimal @default(0) @db.Decimal(78, 0)
-  feesPaid         Decimal @default(0) @db.Decimal(78, 0)
+  usdcIn       Decimal @default(0) @db.Decimal(78, 0)
+  usdcOut      Decimal @default(0) @db.Decimal(78, 0)
+  feesPaid     Decimal @default(0) @db.Decimal(78, 0)
   /// USD 18 decimals, only from the seed.
-  seedUsdValue     Decimal @default(0) @db.Decimal(78, 0)
-  /// True if the user ever received shares by transfer: those shares count at zero cost.
-  hasTransferredIn Boolean @default(false)
-  updatedBlock     BigInt
+  seedUsdValue Decimal @default(0) @db.Decimal(78, 0)
+  updatedBlock BigInt
 
-  index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+  index Index         @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
+  cost  PositionCost?
 
   @@id([chainId, indexAddress, user])
   @@index([chainId, user])
+}
+
+// ─── Personal metrics ────────────────────────────────────────────────────────
+// Inputs from users (WalletGroup, WalletLink, TransferCostDeclaration) are off-chain, written by the API and
+// never deleted by a reorg. TransferCost and PositionCost are derived from them and from the chain tables, and
+// are rebuilt per (index, wallet group). Index metrics never read any of these tables. See db.md.
+
+/// Wallets declared by the same person (linkWallets). Chain-agnostic: a key controls the same address on every
+/// chain, so no chainId (deviation from the natural-key convention).
+model WalletGroup {
+  id        BigInt       @id @default(autoincrement())
+  createdAt DateTime     @default(now())
+  wallets   WalletLink[]
+}
+
+model WalletLink {
+  /// A wallet belongs to at most one group.
+  address   String   @id @db.VarChar(42)
+  groupId   BigInt
+  /// EIP-712 LinkWallets signature of this wallet (domain without chainId).
+  signature String   @db.Text
+  linkedAt  DateTime @default(now())
+
+  group WalletGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+/// Purchase price declared by the recipient of shares sent by another person (declareTransferCost).
+/// Feeds only the recipient's PositionCost. Keyed without logIndex: after a reorg the same tx can land in another
+/// block with another logIndex.
+model TransferCostDeclaration {
+  id               BigInt   @id @default(autoincrement())
+  chainId          Int
+  txHash           String   @db.Char(66)
+  indexAddress     String   @db.VarChar(42)
+  recipient        String   @db.VarChar(42)
+  /// USD 18 decimals per share.
+  pricePerShareUsd Decimal  @db.Decimal(78, 0)
+  /// Optional EIP-712 DeclareTransferCost signature of the recipient. Since SIWE sessions the API accepts the
+  /// declaration from a session of the recipient (or of its wallet group) without a signature.
+  signature        String?  @db.Text
+  declaredAt       DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([chainId, txHash, indexAddress, recipient])
+}
+
+/// Personal cost of a transfer between two users (mint and burn excluded). Derived from WalletLink and
+/// TransferCostDeclaration; deleted with its ShareTransfer on a reorg and rebuilt.
+model TransferCost {
+  transferId   BigInt   @id
+  /// True when from and to are in the same WalletGroup: the cost moves with the shares.
+  selfTransfer Boolean  @default(false)
+  /// Cost carried by the shares, USD 18 decimals: the sender's average cost (selfTransfer) or the declared price.
+  /// Null while the recipient has not declared a price.
+  costBasisUsd Decimal? @db.Decimal(78, 0)
+
+  transfer ShareTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@index([selfTransfer, costBasisUsd])
+}
+
+/// Personal cost and PnL of a position (average-cost method), one row per Position.
+model PositionCost {
+  chainId           Int
+  indexAddress      String   @db.VarChar(42)
+  user              String   @db.VarChar(42)
+  /// Cost of the held shares with a known cost, USD 18 decimals.
+  costBasisUsd      Decimal  @default(0) @db.Decimal(78, 0)
+  /// Held shares without a known cost (received from another person, price not declared yet), 18 decimals.
+  unknownCostShares Decimal  @default(0) @db.Decimal(78, 0)
+  /// Realized PnL on the known-cost part, USD 18 decimals, can be negative.
+  realizedPnlUsd    Decimal  @default(0) @db.Decimal(78, 0)
+  updatedAt         DateTime @updatedAt
+
+  position Position @relation(fields: [chainId, indexAddress, user], references: [chainId, indexAddress, user], onDelete: Cascade)
+
+  @@id([chainId, indexAddress, user])
 }
 
 /// Last allowance per (owner, spender) from Approval (approve and permit).
@@ -698,6 +781,39 @@ model ProxyUpgrade {
 
   @@unique([chainId, txHash, logIndex])
   @@index([chainId, proxy, blockNumber])
+}
+
+// ─── Sessions (SIWE) ─────────────────────────────────────────────────────────
+// Off-chain, written by the API, never touched by a reorg. Chain data stays public; personal off-chain data
+// (linked wallets, declared prices, PositionCost, notifications) needs a session. See localHelpers/apis.md.
+
+/// SIWE (EIP-4361) nonces issued by getSiweNonce. Single use: verifySiwe deletes the row.
+model SiweNonce {
+  nonce     String   @id @db.VarChar(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Sessions opened by verifySiwe. The cookie carries a random 32-byte token; only its SHA-256 is stored, so a
+/// leaked DB does not leak usable sessions. Chain-agnostic like WalletLink: the session proves the address.
+model Session {
+  /// SHA-256 of the session token, hex without 0x.
+  tokenHash  String    @id @db.Char(64)
+  address    String    @db.VarChar(42)
+  /// chainId of the signed SIWE message, informational.
+  chainId    Int
+  issuedAt   DateTime  @default(now())
+  /// issuedAt + 7 days, no sliding renewal.
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  /// Set by logout; the row stays as access history until the cleanup job removes expired sessions.
+  revokedAt  DateTime?
+  userAgent  String?
+
+  @@index([address])
+  @@index([expiresAt])
 }
 
 // ─── Notifications and keeper ────────────────────────────────────────────────
