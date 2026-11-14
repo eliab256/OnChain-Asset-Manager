@@ -49,6 +49,9 @@ enum ProposalStatus {
   PENDING
   EXECUTED
   CANCELLED
+  /// Past expiresAt and still open on-chain. Set by the indexer from the block timestamp, no event.
+  /// A later ...Cancelled moves it to CANCELLED.
+  EXPIRED
 }
 
 enum RebalanceOrigin {
@@ -94,10 +97,13 @@ enum NotificationType {
   SHARES_RECEIVED
   /// CallScheduled of an upgradeToAndCall on one of the three proxies: holders of every Index, before the delay ends.
   UPGRADE_SCHEDULED
-  /// PriceFeedUpdateProposed: holders of the Indexes that use that asset, before executableAt.
+  /// PriceFeedUpdateProposed: holders of the Indexes whose asset0 or asset1 is that asset, before executableAt.
+  /// For USDC, holders of every Index (mint and redeem read the USDC price of every Index).
   PRICE_FEED_PROPOSED
 }
 
+/// All three jobs run with the keeper's own account: REBALANCE and EXECUTE_WEIGHTS need REBALANCER_ROLE,
+/// COLLECT_FEES needs FEE_COLLECTOR_ROLE on the IndexManager.
 enum KeeperJob {
   REBALANCE
   EXECUTE_WEIGHTS
@@ -197,9 +203,13 @@ model Token {
 model Index {
   chainId          Int
   address          String    @db.VarChar(42)
+  /// ERC20 name of the shares ("Index SYM0/SYM1"), read once over RPC at IndexCreated: the event does not carry it.
+  name             String
+  /// ERC20 symbol of the shares ("IDXSYM0SYM1"), read with the name. Shares have 18 decimals.
+  symbol           String
   asset0           String    @db.VarChar(42)
   asset1           String    @db.VarChar(42)
-  /// Basis points of 1_000_000 (10_000 = 1%).
+  /// Units of 1_000_000 = 100% (10_000 = 1%).
   feePercentage    Int
   assetManager     String    @db.VarChar(42)
   /// Weights in units of 1_000_000 = 100%.
@@ -219,6 +229,8 @@ model Index {
   createdTxHash    String    @db.Char(66)
   createdAt        DateTime
   initialized      Boolean   @default(false)
+  /// Caller of IndexActionTriggered(INITIALIZE), i.e. the account that called the IndexManager (the MultiSig).
+  /// The depositor that provided the seed tokens can be another address: it is in Trade.user of the SEED row.
   initializer      String?   @db.VarChar(42)
   initializedBlock BigInt?
   initializedAt    DateTime?
@@ -399,7 +411,8 @@ model PositionCost {
 }
 
 /// Last allowance per (owner, spender) from Approval (approve and permit).
-/// transferFrom lowers it without an Approval in OZ v5: the indexer subtracts it from the Transfer.
+/// transferFrom lowers it without an Approval in OZ v5: on each Transfer the indexer re-reads
+/// allowance(owner, spender) over RPC at that block for the open, non-unlimited allowances of `from`.
 model Allowance {
   chainId      Int
   indexAddress String  @db.VarChar(42)
@@ -424,14 +437,16 @@ model Rebalance {
   indexAddress        String           @db.VarChar(42)
   origin              RebalanceOrigin
   outcome             RebalanceOutcome
-  /// From IndexActionTriggered / IndexActionFailed of the same tx, null if the index was called otherwise.
+  /// From IndexActionFailed itself, or by positional matching with the next IndexActionTriggered of the same Index
+  /// in the same tx (db.md, "Abbinamento del caller"), inside the block's DB transaction. Never null once written.
   caller              String?          @db.VarChar(42)
   /// Asset token decimals, only for SUCCESS.
   asset0ReserveBefore Decimal?         @db.Decimal(78, 0)
   asset1ReserveBefore Decimal?         @db.Decimal(78, 0)
   asset0ReserveAfter  Decimal?         @db.Decimal(78, 0)
   asset1ReserveAfter  Decimal?         @db.Decimal(78, 0)
-  /// Raw revert data, only for FAILED.
+  /// Raw revert data: FAILED rows, and SKIPPED rows from IndexActionFailed(REBALANCE) with Index__RebalanceNotNeeded.
+  /// Null for SKIPPED rows from WeightsUpdateRebalanceSkipped.
   reasonData          String?          @db.Text
   blockNumber         BigInt
   txHash              String           @db.Char(66)
@@ -446,6 +461,7 @@ model Rebalance {
 }
 
 /// Weight proposals: WeightsUpdateProposed opens, WeightsUpdated or WeightsUpdateCancelled closes.
+/// Past expiresAt an open row becomes EXPIRED (no event); only a cancel or an overwrite closes it then.
 model WeightProposal {
   id           BigInt         @id @default(autoincrement())
   chainId      Int
@@ -468,6 +484,9 @@ model WeightProposal {
   closedBlock  BigInt?
   closedTxHash String?        @db.Char(66)
   closedAt     DateTime?
+  /// True when the proposal was closed by a new proposal in the same tx (the contract emits ...Cancelled and then
+  /// ...Proposed when it overwrites an executable or expired proposal); false for an explicit cancel.
+  overwritten  Boolean        @default(false)
 
   index Index @relation(fields: [chainId, indexAddress], references: [chainId, address], onDelete: Cascade)
 
@@ -565,6 +584,7 @@ model PriceFeed {
 }
 
 /// PriceFeedUpdateProposed, closed by PriceFeedUpdated or PriceFeedUpdateCancelled.
+/// Past expiresAt an open row becomes EXPIRED (no event); only a cancel or an overwrite closes it then.
 model PriceFeedProposal {
   id           BigInt         @id @default(autoincrement())
   chainId      Int
@@ -582,6 +602,9 @@ model PriceFeedProposal {
   closedBlock  BigInt?
   closedTxHash String?        @db.Char(66)
   closedAt     DateTime?
+  /// True when the proposal was closed by a new proposal in the same tx (the contract emits ...Cancelled and then
+  /// ...Proposed when it overwrites an executable or expired proposal); false for an explicit cancel.
+  overwritten  Boolean        @default(false)
 
   @@unique([chainId, txHash, logIndex])
   @@index([chainId, asset, status])
@@ -759,7 +782,6 @@ model TimelockCall {
   /// Wei.
   value       Decimal @db.Decimal(78, 0)
   data        String  @db.Text
-  executed    Boolean @default(false)
 
   operation TimelockOperation @relation(fields: [chainId, timelock, operationId], references: [chainId, timelock, operationId], onDelete: Cascade)
 
@@ -772,7 +794,8 @@ model ProxyUpgrade {
   chainId             Int
   proxy               String   @db.VarChar(42)
   implementation      String   @db.VarChar(42)
-  /// CallExecuted of the timelock in the same tx, null for the proxy creation.
+  /// From the first CallExecuted of the same tx with a higher logIndex and target equal to the proxy.
+  /// Null for the proxy creation.
   timelockOperationId String?  @db.Char(66)
   blockNumber         BigInt
   txHash              String   @db.Char(66)
@@ -819,6 +842,7 @@ model Session {
 // ─── Notifications and keeper ────────────────────────────────────────────────
 
 /// In-app notifications, written by the indexer in the same DB transaction as the event that causes them.
+/// The API also updates read / readAt (markNotificationsRead, and the MULTISIG_TO_SIGN auto-close on submitMultisigSignature).
 model Notification {
   id           BigInt           @id @default(autoincrement())
   chainId      Int
