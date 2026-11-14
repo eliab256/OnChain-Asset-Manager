@@ -5,6 +5,7 @@
 // - uint256 / int256 as Decimal(78, 0) (raw on-chain units, no scaling), weights / fee / maxDelay as Int;
 // - every row derived from a log carries chainId, blockNumber, txHash, logIndex, timestamp and is
 //   unique on (chainId, txHash, logIndex): the indexer upserts on that key, so replaying a block is a no-op;
+//   PricePoint is read over RPC, not from a log, and is unique on (chainId, feed, roundId) instead;
 // - natural keys are composite with chainId (anvil 31337 and the mainnet fork 31338 share one DB).
 
 generator client {
@@ -36,7 +37,6 @@ enum ContractKind {
   ROUTER
   MULTISIG_WALLET
   TIMELOCK
-  PRICE_FEED_AGGREGATOR
 }
 
 enum TradeKind {
@@ -92,6 +92,10 @@ enum NotificationType {
   MULTISIG_READY
   /// Shares received from another person (not a linked wallet): the UI asks for the purchase price.
   SHARES_RECEIVED
+  /// CallScheduled of an upgradeToAndCall on one of the three proxies: holders of every Index, before the delay ends.
+  UPGRADE_SCHEDULED
+  /// PriceFeedUpdateProposed: holders of the Indexes that use that asset, before executableAt.
+  PRICE_FEED_PROPOSED
 }
 
 enum KeeperJob {
@@ -150,22 +154,18 @@ model RawEvent {
   @@index([chainId, blockNumber])
 }
 
-/// Contracts the indexer listens to: fixed ones from deployments/<chainId>.json, indexes from IndexCreated,
-/// price feed aggregators resolved from the feed proxy.
+/// Contracts the indexer listens to: fixed ones from deployments/<chainId>.json, indexes from IndexCreated.
+/// Price feeds are not here: their proxies are read with latestRoundData() at every block (see PriceFeed).
 model Contract {
-  chainId       Int
-  address       String       @db.VarChar(42)
-  kind          ContractKind
+  chainId    Int
+  address    String       @db.VarChar(42)
+  kind       ContractKind
   /// First block to scan for this contract.
-  startBlock    BigInt
-  /// For PRICE_FEED_AGGREGATOR: the feed proxy it sits behind.
-  parentAddress String?      @db.VarChar(42)
-  /// False once an aggregator has been replaced behind its proxy.
-  active        Boolean      @default(true)
-  createdAt     DateTime     @default(now())
+  startBlock BigInt
+  createdAt  DateTime     @default(now())
 
   @@id([chainId, address])
-  @@index([chainId, kind, active])
+  @@index([chainId, kind])
 }
 
 /// Errors of the indexer loop, for getIndexerStatus.
@@ -549,10 +549,8 @@ model NavSnapshot {
 model PriceFeed {
   chainId         Int
   asset           String    @db.VarChar(42)
-  /// Chainlink proxy registered in the PriceFeedManager.
+  /// Chainlink proxy registered in the PriceFeedManager, read with latestRoundData() at every block.
   feed            String    @db.VarChar(42)
-  /// Aggregator behind the proxy, the one that emits AnswerUpdated.
-  aggregator      String?   @db.VarChar(42)
   /// Seconds.
   maxDelay        Int
   decimals        Int?
@@ -589,24 +587,26 @@ model PriceFeedProposal {
   @@index([chainId, asset, status])
 }
 
-/// AnswerUpdated of the aggregators: price history for NAV and stale-feed checks.
+/// Rounds read with latestRoundData() on the feed proxy at every processed block, one row per new round.
 model PricePoint {
   id          BigInt   @id @default(autoincrement())
   chainId     Int
-  /// Feed proxy (the address the protocol knows).
+  asset       String   @db.VarChar(42)
+  /// Feed proxy the round was read from.
   feed        String   @db.VarChar(42)
-  aggregator  String   @db.VarChar(42)
+  /// Proxy round id: phaseId << 64 | aggregator round id.
   roundId     Decimal  @db.Decimal(78, 0)
   /// int256, feed decimals.
   answer      Decimal  @db.Decimal(78, 0)
+  /// updatedAt of the round (Chainlink), not of the block.
   updatedAt   DateTime
+  /// First block in which the indexer saw this round.
   blockNumber BigInt
-  txHash      String   @db.Char(66)
-  logIndex    Int
   timestamp   DateTime
 
-  @@unique([chainId, txHash, logIndex])
-  @@index([chainId, feed, updatedAt])
+  @@unique([chainId, feed, roundId])
+  @@index([chainId, asset, blockNumber])
+  @@index([chainId, asset, timestamp])
 }
 
 // ─── Governance ──────────────────────────────────────────────────────────────
@@ -830,7 +830,7 @@ model Notification {
   dedupKey     String
   read         Boolean          @default(false)
   readAt       DateTime?
-  /// Source log, null for notifications without an event (stale feed).
+  /// Source log; for PRICE_FEED_STALE the block in which the feed is first seen stale (no log, txHash null).
   blockNumber  BigInt?
   txHash       String?          @db.Char(66)
   createdAt    DateTime         @default(now())

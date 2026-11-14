@@ -1,8 +1,11 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateEnum
 CREATE TYPE "IndexAction" AS ENUM ('INITIALIZE', 'REBALANCE', 'PROPOSE_WEIGHTS', 'EXECUTE_WEIGHTS', 'CANCEL_WEIGHTS', 'COLLECT_FEES');
 
 -- CreateEnum
-CREATE TYPE "ContractKind" AS ENUM ('INDEX_MANAGER', 'INDEX', 'PRICE_FEED_MANAGER', 'SWAP_MANAGER', 'ROUTER', 'MULTISIG_WALLET', 'TIMELOCK', 'PRICE_FEED_AGGREGATOR');
+CREATE TYPE "ContractKind" AS ENUM ('INDEX_MANAGER', 'INDEX', 'PRICE_FEED_MANAGER', 'SWAP_MANAGER', 'ROUTER', 'MULTISIG_WALLET', 'TIMELOCK');
 
 -- CreateEnum
 CREATE TYPE "TradeKind" AS ENUM ('SEED', 'MINT', 'REDEEM');
@@ -26,7 +29,7 @@ CREATE TYPE "TimelockOpStatus" AS ENUM ('SCHEDULED', 'EXECUTED', 'CANCELLED');
 CREATE TYPE "SignatureStatus" AS ENUM ('VALID', 'USED', 'INVALIDATED', 'ARCHIVED');
 
 -- CreateEnum
-CREATE TYPE "NotificationType" AS ENUM ('TRADE_CONFIRMED', 'REBALANCE_EXECUTED', 'REBALANCE_FAILED', 'WEIGHTS_PROPOSED', 'WEIGHTS_UPDATED', 'WEIGHTS_CANCELLED', 'PRICE_FEED_STALE', 'MULTISIG_TO_SIGN', 'MULTISIG_READY');
+CREATE TYPE "NotificationType" AS ENUM ('TRADE_CONFIRMED', 'REBALANCE_EXECUTED', 'REBALANCE_FAILED', 'WEIGHTS_PROPOSED', 'WEIGHTS_UPDATED', 'WEIGHTS_CANCELLED', 'PRICE_FEED_STALE', 'MULTISIG_TO_SIGN', 'MULTISIG_READY', 'SHARES_RECEIVED', 'UPGRADE_SCHEDULED', 'PRICE_FEED_PROPOSED');
 
 -- CreateEnum
 CREATE TYPE "KeeperJob" AS ENUM ('REBALANCE', 'EXECUTE_WEIGHTS', 'COLLECT_FEES');
@@ -77,8 +80,6 @@ CREATE TABLE "Contract" (
     "address" VARCHAR(42) NOT NULL,
     "kind" "ContractKind" NOT NULL,
     "startBlock" BIGINT NOT NULL,
-    "parentAddress" VARCHAR(42),
-    "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Contract_pkey" PRIMARY KEY ("chainId","address")
@@ -186,10 +187,64 @@ CREATE TABLE "Position" (
     "usdcOut" DECIMAL(78,0) NOT NULL DEFAULT 0,
     "feesPaid" DECIMAL(78,0) NOT NULL DEFAULT 0,
     "seedUsdValue" DECIMAL(78,0) NOT NULL DEFAULT 0,
-    "hasTransferredIn" BOOLEAN NOT NULL DEFAULT false,
     "updatedBlock" BIGINT NOT NULL,
 
     CONSTRAINT "Position_pkey" PRIMARY KEY ("chainId","indexAddress","user")
+);
+
+-- CreateTable
+CREATE TABLE "WalletGroup" (
+    "id" BIGSERIAL NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "WalletGroup_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "WalletLink" (
+    "address" VARCHAR(42) NOT NULL,
+    "groupId" BIGINT NOT NULL,
+    "signature" TEXT NOT NULL,
+    "linkedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "WalletLink_pkey" PRIMARY KEY ("address")
+);
+
+-- CreateTable
+CREATE TABLE "TransferCostDeclaration" (
+    "id" BIGSERIAL NOT NULL,
+    "chainId" INTEGER NOT NULL,
+    "txHash" CHAR(66) NOT NULL,
+    "indexAddress" VARCHAR(42) NOT NULL,
+    "recipient" VARCHAR(42) NOT NULL,
+    "pricePerShareUsd" DECIMAL(78,0) NOT NULL,
+    "signature" TEXT,
+    "declaredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "TransferCostDeclaration_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TransferCost" (
+    "transferId" BIGINT NOT NULL,
+    "selfTransfer" BOOLEAN NOT NULL DEFAULT false,
+    "costBasisUsd" DECIMAL(78,0),
+
+    CONSTRAINT "TransferCost_pkey" PRIMARY KEY ("transferId")
+);
+
+-- CreateTable
+CREATE TABLE "PositionCost" (
+    "chainId" INTEGER NOT NULL,
+    "indexAddress" VARCHAR(42) NOT NULL,
+    "user" VARCHAR(42) NOT NULL,
+    "costBasisUsd" DECIMAL(78,0) NOT NULL DEFAULT 0,
+    "unknownCostShares" DECIMAL(78,0) NOT NULL DEFAULT 0,
+    "realizedPnlUsd" DECIMAL(78,0) NOT NULL DEFAULT 0,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PositionCost_pkey" PRIMARY KEY ("chainId","indexAddress","user")
 );
 
 -- CreateTable
@@ -308,7 +363,6 @@ CREATE TABLE "PriceFeed" (
     "chainId" INTEGER NOT NULL,
     "asset" VARCHAR(42) NOT NULL,
     "feed" VARCHAR(42) NOT NULL,
-    "aggregator" VARCHAR(42),
     "maxDelay" INTEGER NOT NULL,
     "decimals" INTEGER,
     "lastRoundId" DECIMAL(78,0),
@@ -345,14 +399,12 @@ CREATE TABLE "PriceFeedProposal" (
 CREATE TABLE "PricePoint" (
     "id" BIGSERIAL NOT NULL,
     "chainId" INTEGER NOT NULL,
+    "asset" VARCHAR(42) NOT NULL,
     "feed" VARCHAR(42) NOT NULL,
-    "aggregator" VARCHAR(42) NOT NULL,
     "roundId" DECIMAL(78,0) NOT NULL,
     "answer" DECIMAL(78,0) NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "blockNumber" BIGINT NOT NULL,
-    "txHash" CHAR(66) NOT NULL,
-    "logIndex" INTEGER NOT NULL,
     "timestamp" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "PricePoint_pkey" PRIMARY KEY ("id")
@@ -498,6 +550,29 @@ CREATE TABLE "ProxyUpgrade" (
 );
 
 -- CreateTable
+CREATE TABLE "SiweNonce" (
+    "nonce" VARCHAR(64) NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SiweNonce_pkey" PRIMARY KEY ("nonce")
+);
+
+-- CreateTable
+CREATE TABLE "Session" (
+    "tokenHash" CHAR(64) NOT NULL,
+    "address" VARCHAR(42) NOT NULL,
+    "chainId" INTEGER NOT NULL,
+    "issuedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "revokedAt" TIMESTAMP(3),
+    "userAgent" TEXT,
+
+    CONSTRAINT "Session_pkey" PRIMARY KEY ("tokenHash")
+);
+
+-- CreateTable
 CREATE TABLE "Notification" (
     "id" BIGSERIAL NOT NULL,
     "chainId" INTEGER NOT NULL,
@@ -549,7 +624,7 @@ CREATE INDEX "RawEvent_chainId_blockNumber_idx" ON "RawEvent"("chainId", "blockN
 CREATE UNIQUE INDEX "RawEvent_chainId_txHash_logIndex_key" ON "RawEvent"("chainId", "txHash", "logIndex");
 
 -- CreateIndex
-CREATE INDEX "Contract_chainId_kind_active_idx" ON "Contract"("chainId", "kind", "active");
+CREATE INDEX "Contract_chainId_kind_idx" ON "Contract"("chainId", "kind");
 
 -- CreateIndex
 CREATE INDEX "IndexerError_chainId_createdAt_idx" ON "IndexerError"("chainId", "createdAt");
@@ -583,6 +658,15 @@ CREATE UNIQUE INDEX "ShareTransfer_chainId_txHash_logIndex_key" ON "ShareTransfe
 
 -- CreateIndex
 CREATE INDEX "Position_chainId_user_idx" ON "Position"("chainId", "user");
+
+-- CreateIndex
+CREATE INDEX "WalletLink_groupId_idx" ON "WalletLink"("groupId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TransferCostDeclaration_chainId_txHash_indexAddress_recipie_key" ON "TransferCostDeclaration"("chainId", "txHash", "indexAddress", "recipient");
+
+-- CreateIndex
+CREATE INDEX "TransferCost_selfTransfer_costBasisUsd_idx" ON "TransferCost"("selfTransfer", "costBasisUsd");
 
 -- CreateIndex
 CREATE INDEX "Allowance_chainId_owner_idx" ON "Allowance"("chainId", "owner");
@@ -639,10 +723,13 @@ CREATE INDEX "PriceFeedProposal_chainId_asset_status_idx" ON "PriceFeedProposal"
 CREATE UNIQUE INDEX "PriceFeedProposal_chainId_txHash_logIndex_key" ON "PriceFeedProposal"("chainId", "txHash", "logIndex");
 
 -- CreateIndex
-CREATE INDEX "PricePoint_chainId_feed_updatedAt_idx" ON "PricePoint"("chainId", "feed", "updatedAt");
+CREATE INDEX "PricePoint_chainId_asset_blockNumber_idx" ON "PricePoint"("chainId", "asset", "blockNumber");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "PricePoint_chainId_txHash_logIndex_key" ON "PricePoint"("chainId", "txHash", "logIndex");
+CREATE INDEX "PricePoint_chainId_asset_timestamp_idx" ON "PricePoint"("chainId", "asset", "timestamp");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PricePoint_chainId_feed_roundId_key" ON "PricePoint"("chainId", "feed", "roundId");
 
 -- CreateIndex
 CREATE INDEX "RoleMember_chainId_account_idx" ON "RoleMember"("chainId", "account");
@@ -669,6 +756,15 @@ CREATE INDEX "ProxyUpgrade_chainId_proxy_blockNumber_idx" ON "ProxyUpgrade"("cha
 CREATE UNIQUE INDEX "ProxyUpgrade_chainId_txHash_logIndex_key" ON "ProxyUpgrade"("chainId", "txHash", "logIndex");
 
 -- CreateIndex
+CREATE INDEX "SiweNonce_expiresAt_idx" ON "SiweNonce"("expiresAt");
+
+-- CreateIndex
+CREATE INDEX "Session_address_idx" ON "Session"("address");
+
+-- CreateIndex
+CREATE INDEX "Session_expiresAt_idx" ON "Session"("expiresAt");
+
+-- CreateIndex
 CREATE INDEX "Notification_chainId_recipient_read_createdAt_idx" ON "Notification"("chainId", "recipient", "read", "createdAt");
 
 -- CreateIndex
@@ -691,6 +787,15 @@ ALTER TABLE "ShareTransfer" ADD CONSTRAINT "ShareTransfer_chainId_indexAddress_f
 
 -- AddForeignKey
 ALTER TABLE "Position" ADD CONSTRAINT "Position_chainId_indexAddress_fkey" FOREIGN KEY ("chainId", "indexAddress") REFERENCES "Index"("chainId", "address") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "WalletLink" ADD CONSTRAINT "WalletLink_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "WalletGroup"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TransferCost" ADD CONSTRAINT "TransferCost_transferId_fkey" FOREIGN KEY ("transferId") REFERENCES "ShareTransfer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PositionCost" ADD CONSTRAINT "PositionCost_chainId_indexAddress_user_fkey" FOREIGN KEY ("chainId", "indexAddress", "user") REFERENCES "Position"("chainId", "indexAddress", "user") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Allowance" ADD CONSTRAINT "Allowance_chainId_indexAddress_fkey" FOREIGN KEY ("chainId", "indexAddress") REFERENCES "Index"("chainId", "address") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -721,3 +826,4 @@ ALTER TABLE "MultisigSignature" ADD CONSTRAINT "MultisigSignature_chainId_wallet
 
 -- AddForeignKey
 ALTER TABLE "TimelockCall" ADD CONSTRAINT "TimelockCall_chainId_timelock_operationId_fkey" FOREIGN KEY ("chainId", "timelock", "operationId") REFERENCES "TimelockOperation"("chainId", "timelock", "operationId") ON DELETE CASCADE ON UPDATE CASCADE;
+
