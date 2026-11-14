@@ -51,11 +51,42 @@ contract IndexManagerRebalanceTest is BaseTest {
     }
 
     // =========================================================================
+    //  Helpers
+    // =========================================================================
+
+    /// @dev Absolute distance between the effective and the target weight of asset0 of `_index` (4 decimals).
+    function _weight0Deviation(IIndex _index) internal view returns (uint128) {
+        (uint128 targetWeight0,) = _index.getAssetsWeights();
+        (uint128 effectiveWeight0,) = _index.getAssetsEffectiveWeights();
+        return effectiveWeight0 > targetWeight0 ? effectiveWeight0 - targetWeight0 : targetWeight0 - effectiveWeight0;
+    }
+
+    // =========================================================================
     //  rebalanceSingleIndex
     // =========================================================================
 
+    function testRebalanceSingleIndexViaMultiSigRebalancesIndex() public {
+        // The MultiSig holds REBALANCER_ROLE as the emergency fallback when the keeper is down.
+        IIndex index = IIndex(address(initializedIndex));
+        _makeAsset0Overweight();
+        (uint128 targetWeight0Before, uint128 targetWeight1Before) = index.getAssetsWeights();
+        (uint128 reserve0Before, uint128 reserve1Before) = index.getAssetsReserves();
+        assertGt(_weight0Deviation(index), REBALANCE_THRESHOLD, "the index must need a rebalance before the call");
+
+        vm.prank(address(multiSigWallet));
+        indexManager.rebalanceSingleIndex(address(initializedIndex));
+
+        (uint128 targetWeight0, uint128 targetWeight1) = index.getAssetsWeights();
+        (uint128 reserve0, uint128 reserve1) = index.getAssetsReserves();
+        assertLe(_weight0Deviation(index), REBALANCE_THRESHOLD, "the index must be back within the threshold");
+        assertLt(reserve0, reserve0Before, "the overweight asset0 reserve must decrease");
+        assertGt(reserve1, reserve1Before, "the underweight asset1 reserve must increase");
+        assertEq(targetWeight0, targetWeight0Before, "target weight0 must not change");
+        assertEq(targetWeight1, targetWeight1Before, "target weight1 must not change");
+    }
+
     function testRebalanceSingleIndexRevertIfIndexNotInitialized() public {
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.expectRevert(
             abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex))
         );
@@ -73,7 +104,7 @@ contract IndexManagerRebalanceTest is BaseTest {
     }
 
     function testRebalanceIndexEmitsIndexActionFailedWhenBalanced() public {
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.rebalanceSingleIndex(address(initializedIndex));
 
@@ -81,7 +112,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.REBALANCE,
             abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
@@ -95,7 +126,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         mockWethPriceFeed.updateAnswer(newWethPrice);
         _refreshExchangeRates();
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.rebalanceSingleIndex(address(initializedIndex));
 
@@ -114,7 +145,7 @@ contract IndexManagerRebalanceTest is BaseTest {
 
         assertTrue(rebalanceEmitted, "IndexRebalanced event not emitted");
         assertEq(indexFromEvent, address(initializedIndex), "Event emitted by wrong index");
-        _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.REBALANCE);
+        _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.REBALANCE);
     }
 
     // =========================================================================
@@ -126,7 +157,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         indexes[0] = address(initializedIndex);
         indexes[1] = address(nonInitializedIndex);
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.expectRevert(
             abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex))
         );
@@ -137,7 +168,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         address[] memory indexes = new address[](2);
         indexes[0] = address(initializedIndex);
         indexes[1] = address(newIndexLinkWeth);
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.rebalanceMultipleIndexes(indexes);
 
@@ -149,7 +180,7 @@ contract IndexManagerRebalanceTest is BaseTest {
             _assertSingleActionFailedFor(
                 logs,
                 indexes[i],
-                deployer,
+                rebalancer,
                 IndexAction.REBALANCE,
                 abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
             );
@@ -195,7 +226,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         indexes[1] = address(newIndexWbtcComp);
         indexes[2] = address(initializedIndex);
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.rebalanceMultipleIndexes(indexes);
 
@@ -222,7 +253,7 @@ contract IndexManagerRebalanceTest is BaseTest {
         assertEq(indexesFromEvent[1], address(newIndexWbtcComp), "Event emitted by wrong index");
         assertEq(indexesFromEvent[2], address(initializedIndex), "Event emitted by wrong index");
         for (uint256 i = 0; i < indexes.length; i++) {
-            _assertSingleActionTriggeredFor(logs, indexes[i], deployer, IndexAction.REBALANCE);
+            _assertSingleActionTriggeredFor(logs, indexes[i], rebalancer, IndexAction.REBALANCE);
         }
         assertEq(
             _countManagerEvents(logs, IndexActionTriggered.selector),
@@ -246,17 +277,17 @@ contract IndexManagerRebalanceTest is BaseTest {
         address[] memory indexes = indexManager.getInitializedIndexes();
         assertEq(indexes.length, 3, "three initialized indexes expected");
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.rebalanceMultipleIndexes(indexes);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        _assertSingleActionTriggeredFor(logs, address(initializedIndex), deployer, IndexAction.REBALANCE);
-        _assertSingleActionTriggeredFor(logs, address(newIndexLinkWeth), deployer, IndexAction.REBALANCE);
+        _assertSingleActionTriggeredFor(logs, address(initializedIndex), rebalancer, IndexAction.REBALANCE);
+        _assertSingleActionTriggeredFor(logs, address(newIndexLinkWeth), rebalancer, IndexAction.REBALANCE);
         _assertSingleActionFailedFor(
             logs,
             address(newIndexWbtcComp),
-            deployer,
+            rebalancer,
             IndexAction.REBALANCE,
             abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );

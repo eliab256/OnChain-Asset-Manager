@@ -9,6 +9,7 @@ import {
   encodeAbiParameters,
   encodeFunctionData,
   erc20Abi,
+  getAddress,
   http,
   isAddressEqual,
   keccak256,
@@ -26,6 +27,8 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { expect } from "vitest";
+import anvilDeployment from "../../../../deployments/31337.json" with { type: "json" };
+import forkDeployment from "../../../../deployments/31338.json" with { type: "json" };
 import {
   ANVIL_CHAIN_ID,
   Erc20Manager,
@@ -56,14 +59,19 @@ export const MAINNET_FORK_BLOCK = 26_178_000n;
 /** Mainnet Multicall3: present on the fork only, plain anvil has no Multicall3. */
 export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
-// Well-known anvil dev keys (public test values, not secrets): 0 = deployer (FEE_COLLECTOR and
-// REBALANCER after DeployPeriphery), 1 and 2 = MultiSig owners. The buyers use keys derived from a
-// label instead: on mainnet every anvil dev account carries an EIP-7702 delegation (0xef0100…) at
-// the pinned block, so USDC verifies their permits through ERC-1271 and rejects ECDSA signatures.
+// Well-known anvil dev keys (public test values, not secrets): 0 = deployer, which DeployPeriphery
+// leaves with no IndexManager role (it only signs the mock calls on 31337), 1 and 2 = MultiSig owners.
+// The keepers are the forge `makeAddr("rebalancer")` / `makeAddr("feeCollector")` accounts of
+// HelperConfig (key = keccak256 of the label): DeployPeriphery grants them REBALANCER_ROLE and
+// FEE_COLLECTOR_ROLE, the MultiSig holds both as fallback. The buyers use keys derived from a label
+// too: on mainnet every anvil dev account carries an EIP-7702 delegation (0xef0100…) at the pinned
+// block, so USDC verifies their permits through ERC-1271 and rejects ECDSA signatures.
 const KEYS = {
   deployer: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
   owner1: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
   owner2: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+  rebalancer: keccak256(stringToHex("rebalancer")),
+  feeCollector: keccak256(stringToHex("feeCollector")),
   user: keccak256(stringToHex("oam-sdk-fork-test:user")),
   other: keccak256(stringToHex("oam-sdk-fork-test:other")),
 } as const satisfies Record<string, Hex>;
@@ -96,6 +104,8 @@ function makeClients(chain: Chain) {
     deployer: wallet(KEYS.deployer),
     owner1: wallet(KEYS.owner1),
     owner2: wallet(KEYS.owner2),
+    rebalancer: wallet(KEYS.rebalancer),
+    feeCollector: wallet(KEYS.feeCollector),
     user: wallet(KEYS.user),
     other: wallet(KEYS.other),
     /** For addresses unlocked with `anvil_impersonateAccount` (the MultiSig, a contract). */
@@ -116,7 +126,17 @@ export type ForkContext = Clients & {
   asset0: Address;
   asset1: Address;
   universalRouter: Address;
+  /** Keeper accounts as written by the deploy (`config` of deployments/<chainId>.json), not derived from the keys. */
+  keepers: Keepers;
 };
+
+export type Keepers = { rebalancer: Address; feeCollector: Address };
+
+/** `config.rebalancer` / `config.feeCollector` of the deployment file, the source the other addresses come from. */
+export function deploymentKeepers(chainId: SupportedChainId): Keepers {
+  const { config } = chainId === ANVIL_CHAIN_ID ? anvilDeployment : forkDeployment;
+  return { rebalancer: getAddress(config.rebalancer), feeCollector: getAddress(config.feeCollector) };
+}
 
 /** The chain id of the node at RPC_URL, or undefined when no node answers. */
 export async function detectChainId(): Promise<number | undefined> {
@@ -168,8 +188,10 @@ export async function setupContext(): Promise<ForkContext | undefined> {
     asset0,
     asset1,
     universalRouter,
+    keepers: deploymentKeepers(chainId),
   };
-  for (const wallet of [ctx.user, ctx.other]) {
+  // FundAccounts already gives the keepers gas on 31337; set it anyway so the fork does not depend on that run.
+  for (const wallet of [ctx.user, ctx.other, ctx.rebalancer, ctx.feeCollector]) {
     await ctx.testClient.setBalance({ address: wallet.account.address, value: 10n ** 20n });
   }
   if (ctx.isMock) {
@@ -483,7 +505,10 @@ export async function buyShares(
 
 // ─── Governance ───────────────────────────────────────────────────────────────
 
-/** Runs a call through the 2-of-3 MultiSig, as the real ASSET_MANAGER does: submit, two confirmations, execute. */
+/**
+ * Runs a call through the 2-of-3 MultiSig, as the real ASSET_MANAGER does (and as the fallback
+ * keeper does, the MultiSig also holding REBALANCER and FEE_COLLECTOR): submit, two confirmations, execute.
+ */
 export async function sendThroughMultiSig(ctx: ForkContext, call: MethodParameters): Promise<TransactionReceipt> {
   const multiSig = ctx.addresses.multiSigWallet;
   const txId = await ctx.publicClient.readContract({

@@ -26,12 +26,12 @@ abstract contract ContractCodeConstants {
     uint8 internal constant DECIMALS_STANDARD = 18;
 
     /**
-     * @dev The precision for percentage fee calculations, in basis points (1 basis point = 0.01%).
+     * @dev The number of percentage units per 1%: 1 unit = 0.0001%, so MAX_PERCENTAGE (1_000_000) = 100%.
      */
     uint32 internal constant PERCENTAGE_FEE_PRECISION = 10000;
 
     /**
-     * @dev The maximum percentage value, in basis points.
+     * @dev The maximum percentage value (100%), in percentage units (1 unit = 0.0001%).
      */
     uint32 internal constant MAX_PERCENTAGE = 100 * PERCENTAGE_FEE_PRECISION;
 
@@ -55,7 +55,7 @@ abstract contract ContractCodeConstants {
     uint256 internal constant WEIGHT_UPDATE_EXECUTION_WINDOW = 3 days;
 
     /**
-     * @dev The precision for weight calculations.
+     * @dev The number of weight units per 1%: 1 unit = 0.0001%, so MAX_WEIGHT (1_000_000) = 100%.
      */
     uint128 internal constant WEIGHT_PRECISION = 10000;
 
@@ -71,12 +71,12 @@ abstract contract ContractCodeConstants {
     uint128 internal constant MIN_WEIGHT = 1 * WEIGHT_PRECISION;
 
     /**
-     * @dev The weight deviation threshold for triggering a rebalance, in basis points
+     * @dev The weight deviation threshold for triggering a rebalance, in weight units (30_000 = 3%).
      */
     uint128 internal constant REBALANCE_THRESHOLD = 3 * WEIGHT_PRECISION;
 
     /**
-     * @dev The maximum slippage tolerated on a rebalance swap, relative to the swapped notional (1%).
+     * @dev The maximum slippage tolerated on a rebalance swap, relative to the swapped notional, in percentage units (10_000 = 1%).
      * @dev Used both for the router amountOutMinimum (derived from oracle prices) and for the
      *      post-swap check on the total USD value. Must cover pool fee, price impact and oracle deviation.
      */

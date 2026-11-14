@@ -18,8 +18,26 @@ contract IndexManagerWeightsTest is BaseTest {
     IIndex public newIndexLinkWeth;
     IIndex public newIndexWbtcComp;
 
+    /// Holds only ASSET_MANAGER_ROLE (the MultiSig's role): may propose and cancel, not execute
+    address internal s_assetManagerOnly = makeAddr("assetManagerOnly");
+    /// Holds only REBALANCER_ROLE (the off-chain keeper's role): may execute, not propose or cancel
+    address internal s_rebalancerOnly = makeAddr("rebalancerOnly");
+    /// Holds no role on the IndexManager
+    address internal s_noRole = makeAddr("noRole");
+
+    bytes32 internal s_assetManagerRole;
+    bytes32 internal s_rebalancerRole;
+
     function setUp() public override {
         super.setUp();
+
+        s_assetManagerRole = indexManager.ASSET_MANAGER_ROLE();
+        s_rebalancerRole = indexManager.REBALANCER_ROLE();
+
+        vm.startPrank(deployer);
+        indexManager.grantRole(s_assetManagerRole, s_assetManagerOnly);
+        indexManager.grantRole(s_rebalancerRole, s_rebalancerOnly);
+        vm.stopPrank();
 
         RunParams memory firstIndexParams = RunParams({
             assetA: AssetAvailable.WETH,
@@ -49,6 +67,186 @@ contract IndexManagerWeightsTest is BaseTest {
 
         newIndexWbtcComp =
             deployScript.run(helperConfig, address(indexManager), address(multiSigWallet), secondIndexParams);
+    }
+
+    // =========================================================================
+    //  Helpers
+    // =========================================================================
+
+    /// @dev Proposes `_newWeight0` on `_index` as the deployer (ASSET_MANAGER_ROLE).
+    function _proposeAsDeployer(address _index, uint128 _newWeight0) internal {
+        vm.prank(deployer);
+        indexManager.proposeNewWeights(_index, _newWeight0);
+    }
+
+    /// @dev Proposes weight30 on initializedIndex and newIndexLinkWeth and warps past WEIGHT_UPDATE_DELAY,
+    ///      so both proposals are executable. Returns the two indexes.
+    function _proposeTwoAndWarpToExecutable() internal returns (address[] memory indexes) {
+        _proposeAsDeployer(address(initializedIndex), weight30);
+        _proposeAsDeployer(address(newIndexLinkWeth), weight30);
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+        _refreshPriceFeeds();
+        _refreshExchangeRates();
+
+        indexes = new address[](2);
+        indexes[0] = address(initializedIndex);
+        indexes[1] = address(newIndexLinkWeth);
+    }
+
+    /// @dev Proposes weight30 on initializedIndex and warps past WEIGHT_UPDATE_DELAY.
+    function _proposeSingleAndWarpToExecutable() internal {
+        _proposeAsDeployer(address(initializedIndex), weight30);
+        vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
+        _refreshPriceFeeds();
+        _refreshExchangeRates();
+    }
+
+    /// @dev Encoded AccessControlUnauthorizedAccount(_account, _role).
+    function _unauthorized(address _account, bytes32 _role) internal pure returns (bytes memory) {
+        return abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _account, _role);
+    }
+
+    // =========================================================================
+    //  Access control — role isolation (execute needs REBALANCER_ROLE,
+    //  propose and cancel need ASSET_MANAGER_ROLE)
+    // =========================================================================
+
+    function testExecuteSingleWeightUpdateRevertIfCallerHasOnlyAssetManagerRole() public {
+        _proposeSingleAndWarpToExecutable();
+
+        vm.prank(s_assetManagerOnly);
+        vm.expectRevert(_unauthorized(s_assetManagerOnly, s_rebalancerRole));
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+    }
+
+    function testExecuteSingleWeightUpdateRevertIfCallerHasNoRole() public {
+        _proposeSingleAndWarpToExecutable();
+
+        vm.prank(s_noRole);
+        vm.expectRevert(_unauthorized(s_noRole, s_rebalancerRole));
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+    }
+
+    function testExecuteSingleWeightUpdateByRebalancerOnlyUpdatesWeights() public {
+        _proposeSingleAndWarpToExecutable();
+        (uint128 weight0Before,) = initializedIndex.getAssetsWeights();
+        (uint128 pending0Before,, uint256 executableAtBefore) = initializedIndex.getAssetsPendingWeights();
+        assertNotEq(weight0Before, weight30, "weight0 must differ from the proposal before execution");
+        assertEq(pending0Before, weight30, "proposal must be pending before execution");
+        assertGt(executableAtBefore, 0, "pending timestamp must be set before execution");
+
+        vm.prank(s_rebalancerOnly);
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+
+        (uint128 weight0, uint128 weight1) = initializedIndex.getAssetsWeights();
+        assertEq(weight0, weight30, "weight0 must be updated by the rebalancer");
+        assertEq(weight1, MAX_WEIGHT - weight30, "weight1 must be updated by the rebalancer");
+        (uint128 pending0, uint128 pending1, uint256 executableAt) = initializedIndex.getAssetsPendingWeights();
+        assertEq(pending0, 0, "pending weight0 must be cleared");
+        assertEq(pending1, 0, "pending weight1 must be cleared");
+        assertEq(executableAt, 0, "pending timestamp must be cleared");
+    }
+
+    function testExecuteSingleWeightUpdateByRebalancerOnlyEmitsActionTriggeredWithRebalancerAsCaller() public {
+        _proposeSingleAndWarpToExecutable();
+
+        vm.recordLogs();
+        vm.prank(s_rebalancerOnly);
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        _assertOnlyActionTriggered(logs, address(initializedIndex), s_rebalancerOnly, IndexAction.EXECUTE_WEIGHTS);
+    }
+
+    function testExecuteSingleWeightUpdateViaMultiSigUpdatesWeights() public {
+        // The MultiSig holds REBALANCER_ROLE as the emergency fallback when the keeper is down.
+        _proposeSingleAndWarpToExecutable();
+        (uint128 weight0Before,) = initializedIndex.getAssetsWeights();
+        (uint128 pending0Before, uint128 pending1Before, uint256 executableAtBefore) =
+            initializedIndex.getAssetsPendingWeights();
+        assertNotEq(weight0Before, weight30, "weight0 must differ from the proposal before execution");
+        assertEq(pending0Before, weight30, "proposal weight0 must be pending before execution");
+        assertEq(pending1Before, MAX_WEIGHT - weight30, "proposal weight1 must be pending before execution");
+        assertGt(executableAtBefore, 0, "pending timestamp must be set before execution");
+
+        vm.prank(address(multiSigWallet));
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+
+        (uint128 weight0, uint128 weight1) = initializedIndex.getAssetsWeights();
+        assertEq(weight0, weight30, "weight0 must be updated by the MultiSig");
+        assertEq(weight1, MAX_WEIGHT - weight30, "weight1 must be updated by the MultiSig");
+        (uint128 pending0, uint128 pending1, uint256 executableAt) = initializedIndex.getAssetsPendingWeights();
+        assertEq(pending0, 0, "pending weight0 must be cleared");
+        assertEq(pending1, 0, "pending weight1 must be cleared");
+        assertEq(executableAt, 0, "pending timestamp must be cleared");
+    }
+
+    function testExecuteWeightUpdateForMultipleIndexesRevertIfCallerHasOnlyAssetManagerRole() public {
+        address[] memory indexes = _proposeTwoAndWarpToExecutable();
+
+        vm.prank(s_assetManagerOnly);
+        vm.expectRevert(_unauthorized(s_assetManagerOnly, s_rebalancerRole));
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+    }
+
+    function testExecuteWeightUpdateForMultipleIndexesRevertIfCallerHasNoRole() public {
+        address[] memory indexes = _proposeTwoAndWarpToExecutable();
+
+        vm.prank(s_noRole);
+        vm.expectRevert(_unauthorized(s_noRole, s_rebalancerRole));
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+    }
+
+    function testExecuteWeightUpdateForMultipleIndexesByRebalancerOnlyUpdatesWeights() public {
+        address[] memory indexes = _proposeTwoAndWarpToExecutable();
+        for (uint256 i = 0; i < indexes.length; i++) {
+            (uint128 pending0Before,,) = IIndex(indexes[i]).getAssetsPendingWeights();
+            assertEq(pending0Before, weight30, "proposal must be pending before execution");
+        }
+
+        vm.prank(s_rebalancerOnly);
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+
+        for (uint256 i = 0; i < indexes.length; i++) {
+            (uint128 weight0, uint128 weight1) = IIndex(indexes[i]).getAssetsWeights();
+            assertEq(weight0, weight30, "weight0 must be updated by the rebalancer");
+            assertEq(weight1, MAX_WEIGHT - weight30, "weight1 must be updated by the rebalancer");
+            (uint128 pending0, uint128 pending1, uint256 executableAt) = IIndex(indexes[i]).getAssetsPendingWeights();
+            assertEq(pending0, 0, "pending weight0 must be cleared");
+            assertEq(pending1, 0, "pending weight1 must be cleared");
+            assertEq(executableAt, 0, "pending timestamp must be cleared");
+        }
+    }
+
+    function testExecuteWeightUpdateForMultipleIndexesByRebalancerOnlyEmitsActionTriggeredWithRebalancerAsCaller()
+        public
+    {
+        address[] memory indexes = _proposeTwoAndWarpToExecutable();
+
+        vm.recordLogs();
+        vm.prank(s_rebalancerOnly);
+        indexManager.executeWeightUpdateForMultipleIndexes(indexes);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        for (uint256 i = 0; i < indexes.length; i++) {
+            _assertSingleActionTriggeredFor(logs, indexes[i], s_rebalancerOnly, IndexAction.EXECUTE_WEIGHTS);
+        }
+        assertEq(_countManagerEvents(logs, IndexActionTriggered.selector), 2, "one IndexActionTriggered per index");
+        assertEq(_countManagerEvents(logs, IndexActionFailed.selector), 0, "no IndexActionFailed expected");
+    }
+
+    function testProposeNewWeightsRevertIfCallerHasOnlyRebalancerRole() public {
+        vm.prank(s_rebalancerOnly);
+        vm.expectRevert(_unauthorized(s_rebalancerOnly, s_assetManagerRole));
+        indexManager.proposeNewWeights(address(initializedIndex), weight30);
+    }
+
+    function testCancelWeightUpdateRevertIfCallerHasOnlyRebalancerRole() public {
+        _proposeAsDeployer(address(initializedIndex), weight30);
+
+        vm.prank(s_rebalancerOnly);
+        vm.expectRevert(_unauthorized(s_rebalancerOnly, s_assetManagerRole));
+        indexManager.cancelWeightUpdate(address(initializedIndex));
     }
 
     // =========================================================================
@@ -128,7 +326,7 @@ contract IndexManagerWeightsTest is BaseTest {
     // // =========================================================================
 
     function testExecuteWeightUpdateRevertIfIndexNotInitialized() public {
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.expectRevert(
             abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex))
         );
@@ -136,7 +334,7 @@ contract IndexManagerWeightsTest is BaseTest {
     }
 
     function testExecuteWeightUpdateEmitsIndexActionFailedWhenNoPendingUpdate() public {
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
@@ -144,7 +342,7 @@ contract IndexManagerWeightsTest is BaseTest {
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
@@ -161,7 +359,7 @@ contract IndexManagerWeightsTest is BaseTest {
         // Attempt execution after WEIGHT_UPDATE_DELAY (2 days) has elapsed.
         vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + 1);
         _refreshPriceFeeds();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
@@ -188,7 +386,7 @@ contract IndexManagerWeightsTest is BaseTest {
             rebalanceFailedEventFound,
             "WeightsUpdateRebalanceFailed event should be emitted from Index when rebalance fails"
         );
-        _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+        _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
 
         // Verify weights were actually updated despite rebalance failure
         (uint128 newWeight0, uint128 newWeight1) = initializedIndex.getAssetsWeights();
@@ -201,7 +399,7 @@ contract IndexManagerWeightsTest is BaseTest {
         indexManager.proposeNewWeights(address(initializedIndex), weight50);
 
         // Attempt execution before WEIGHT_UPDATE_DELAY (2 days) has elapsed.
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
@@ -209,7 +407,7 @@ contract IndexManagerWeightsTest is BaseTest {
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
@@ -220,7 +418,7 @@ contract IndexManagerWeightsTest is BaseTest {
         indexManager.proposeNewWeights(address(initializedIndex), weight50);
 
         vm.warp(block.timestamp + WEIGHT_UPDATE_DELAY + WEIGHT_UPDATE_EXECUTION_WINDOW + 1);
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
 
@@ -228,7 +426,7 @@ contract IndexManagerWeightsTest is BaseTest {
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__WeightUpdateExpired.selector)
         );
@@ -285,7 +483,7 @@ contract IndexManagerWeightsTest is BaseTest {
         indexes[0] = address(nonInitializedIndex);
         indexes[1] = address(initializedIndex);
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.expectRevert(
             abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex))
         );
@@ -306,7 +504,7 @@ contract IndexManagerWeightsTest is BaseTest {
         indexes[1] = address(newIndexLinkWeth);
         indexes[2] = address(newIndexWbtcComp); // this will fail execution because it has no pending weight update
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.executeWeightUpdateForMultipleIndexes(indexes);
 
@@ -344,7 +542,7 @@ contract IndexManagerWeightsTest is BaseTest {
         _assertSingleActionFailedFor(
             logs,
             address(newIndexWbtcComp),
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
@@ -363,7 +561,7 @@ contract IndexManagerWeightsTest is BaseTest {
         address[] memory indexes = indexManager.getInitializedIndexes();
         assertEq(indexes.length, 3, "three initialized indexes expected");
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeWeightUpdateForMultipleIndexes(indexes);
 
         (uint128 w0, uint128 w1) = initializedIndex.getAssetsWeights();
@@ -392,7 +590,7 @@ contract IndexManagerWeightsTest is BaseTest {
 
         address[] memory indexes = indexManager.getInitializedIndexes();
 
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         vm.recordLogs();
         indexManager.executeWeightUpdateForMultipleIndexes(indexes);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -402,12 +600,12 @@ contract IndexManagerWeightsTest is BaseTest {
                 _assertSingleActionFailedFor(
                     logs,
                     indexes[i],
-                    deployer,
+                    rebalancer,
                     IndexAction.EXECUTE_WEIGHTS,
                     abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
                 );
             } else {
-                _assertSingleActionTriggeredFor(logs, indexes[i], deployer, IndexAction.EXECUTE_WEIGHTS);
+                _assertSingleActionTriggeredFor(logs, indexes[i], rebalancer, IndexAction.EXECUTE_WEIGHTS);
             }
         }
         assertEq(

@@ -1,7 +1,9 @@
 // IndexManagerCalls executed on chain with the accounts that actually hold the roles after
-// DeployPeriphery: the deployer keeps FEE_COLLECTOR and REBALANCER, the MultiSig is admin and
-// ASSET_MANAGER. Index actions failing with a custom error do not revert: they are read back with
-// parseIndexActionFailure. Since the single entry points bubble up common errors (out of gas,
+// DeployPeriphery: the MultiSig is admin and ASSET_MANAGER and holds REBALANCER and FEE_COLLECTOR as
+// fallback; the keeper accounts of the deployment config hold REBALANCER (rebalance, executeWeightUpdate)
+// and FEE_COLLECTOR (collectFees); the deployer holds no role. The keeper actions are sent by the
+// keepers, the MultiSig fallback has its own named test. Index actions failing with a custom error
+// do not revert: they are read back with parseIndexActionFailure. Since the single entry points bubble up common errors (out of gas,
 // Error(string), Panic), and Index.executeWeightUpdate re-throws them from its inner rebalance,
 // eth_estimateGas is enough for every single action; the batch ones still swallow everything.
 import { indexAbi, indexManagerAbi } from "@oam/abi";
@@ -30,6 +32,7 @@ import {
   parseIndexActionFailure,
   parseUsdc,
   type IndexManagerRole,
+  type MethodParameters,
 } from "../../src/index.js";
 import {
   balanceOf,
@@ -81,7 +84,18 @@ function weightsRebalanceFailures(logs: readonly Log[], index: `0x${string}`): s
 export function indexManagerSuite(ctx: ForkContext): void {
   const indexManager = () => ctx.addresses.indexManager;
   const deployer = () => ctx.deployer.account.address;
+  const rebalancer = () => ctx.keepers.rebalancer;
+  const feeCollector = () => ctx.keepers.feeCollector;
   const single = () => ({ indexManager: indexManager(), index: ctx.index });
+
+  /** The SDK error layer must decode the OpenZeppelin revert with the account and the missing role hash. */
+  async function expectUnauthorized(account: Address, call: MethodParameters, role: IndexManagerRole): Promise<void> {
+    const { functionName } = decodeFunctionData({ abi: indexManagerAbiOf(ctx), data: call.calldata });
+    const error = await simulateError(ctx, account, call, indexManagerAbiOf(ctx), functionName);
+    expect(error, `${functionName} from ${account}`).toBeInstanceOf(ContractRevertError);
+    expect((error as ContractRevertError).errorName).toBe("AccessControlUnauthorizedAccount");
+    expect((error as ContractRevertError).args).toEqual([account, IndexManagerCalls.roleHash(role)]);
+  }
 
   async function pending() {
     return IndexManager.toPendingWeightUpdate(await ctx.publicClient.readContract(IndexManager.pendingWeightsRead(ctx.index)));
@@ -100,17 +114,32 @@ export function indexManagerSuite(ctx: ForkContext): void {
       }
     });
 
-    it("hasRoleRead: MultiSig is admin and asset manager, the deployer keeps only fee collector and rebalancer", async () => {
-      const has = (role: IndexManagerRole, account: `0x${string}`) =>
+    // The keys are derived here, the addresses are read from the deploy: a drift between the two
+    // would make every keeper test fail with AccessControlUnauthorizedAccount for the wrong reason.
+    it("keeper wallets are the config.rebalancer / config.feeCollector accounts of the deployment file", () => {
+      expect(ctx.rebalancer.account.address).toBe(ctx.keepers.rebalancer);
+      expect(ctx.feeCollector.account.address).toBe(ctx.keepers.feeCollector);
+      expect(isAddressEqual(ctx.keepers.rebalancer, ctx.keepers.feeCollector)).toBe(false);
+      expect(isAddressEqual(ctx.keepers.rebalancer, deployer())).toBe(false);
+      expect(isAddressEqual(ctx.keepers.feeCollector, deployer())).toBe(false);
+    });
+
+    it("hasRoleRead: MultiSig holds all four roles, each keeper only its own, the deployer and a user none", async () => {
+      const has = (role: IndexManagerRole, account: Address) =>
         ctx.publicClient.readContract(IndexManagerCalls.hasRoleRead({ indexManager: indexManager(), role, account }));
-      const multiSig = ctx.addresses.multiSigWallet;
-      expect(await has("DEFAULT_ADMIN", multiSig)).toBe(true);
-      expect(await has("ASSET_MANAGER", multiSig)).toBe(true);
-      expect(await has("DEFAULT_ADMIN", deployer())).toBe(false);
-      expect(await has("ASSET_MANAGER", deployer())).toBe(false);
-      expect(await has("FEE_COLLECTOR", deployer())).toBe(true);
-      expect(await has("REBALANCER", deployer())).toBe(true);
-      expect(await has("FEE_COLLECTOR", ctx.user.account.address)).toBe(false);
+      const expected: readonly (readonly [string, Address, readonly IndexManagerRole[]])[] = [
+        ["MultiSig", ctx.addresses.multiSigWallet, ["DEFAULT_ADMIN", "ASSET_MANAGER", "REBALANCER", "FEE_COLLECTOR"]],
+        ["rebalancer", ctx.keepers.rebalancer, ["REBALANCER"]],
+        ["fee collector", ctx.keepers.feeCollector, ["FEE_COLLECTOR"]],
+        ["deployer", deployer(), []],
+        ["user", ctx.user.account.address, []],
+      ];
+      const roles: readonly IndexManagerRole[] = ["DEFAULT_ADMIN", "ASSET_MANAGER", "REBALANCER", "FEE_COLLECTOR"];
+      for (const [name, account, held] of expected) {
+        for (const role of roles) {
+          expect(await has(role, account), `${name} ${role}`).toBe(held.includes(role));
+        }
+      }
     });
 
     it("registry reads find the Index in either asset order and reject non-Index addresses", async () => {
@@ -146,11 +175,12 @@ export function indexManagerSuite(ctx: ForkContext): void {
   });
 
   describe("collectFees", () => {
-    it("the fee collector receives exactly the accrued fees; Index fees reset; no IndexActionFailed", async () => {
+    it("the fee collector (the caller) receives exactly the accrued fees; Index fees reset; no IndexActionFailed", async () => {
       await buyShares(ctx, ctx.user, parseUsdc("40000"), TOLERANCE);
       const fees = (await loadIndex(ctx)).snapshot.totalFees;
       expect(fees).toBeGreaterThan(0n);
-      const usdcBefore = await balanceOf(ctx, ctx.addresses.usdc, deployer());
+      const usdcBefore = await balanceOf(ctx, ctx.addresses.usdc, feeCollector());
+      const multiSigBefore = await balanceOf(ctx, ctx.addresses.usdc, ctx.addresses.multiSigWallet);
       const collectedBefore = await ctx.publicClient.readContract({
         address: indexManager(),
         abi: indexManagerAbi,
@@ -164,9 +194,14 @@ export function indexManagerSuite(ctx: ForkContext): void {
       expect(call.to).toBe(indexManager());
       expect(call.value).toBe(0n);
 
-      const receipt = await send(ctx, ctx.deployer, call);
+      const receipt = await send(ctx, ctx.feeCollector, call);
       expect(parseIndexActionFailure(receipt.logs, single())).toBeUndefined();
-      expect(await balanceOf(ctx, ctx.addresses.usdc, deployer())).toBe(usdcBefore + fees);
+      const triggered = indexActionsTriggered(receipt.logs, indexManager());
+      expect(triggered.map((log) => log.action)).toEqual(["COLLECT_FEES"]);
+      expect(isAddressEqual(triggered[0]?.caller ?? ctx.index, feeCollector())).toBe(true);
+      expect(await balanceOf(ctx, ctx.addresses.usdc, feeCollector())).toBe(usdcBefore + fees);
+      // The fallback holder of FEE_COLLECTOR_ROLE gets nothing when the keeper collects.
+      expect(await balanceOf(ctx, ctx.addresses.usdc, ctx.addresses.multiSigWallet)).toBe(multiSigBefore);
       expect((await loadIndex(ctx)).snapshot.totalFees).toBe(0n);
       expect(
         await ctx.publicClient.readContract({ address: indexManager(), abi: indexManagerAbi, functionName: "getTotalFeesCollected" }),
@@ -175,22 +210,22 @@ export function indexManagerSuite(ctx: ForkContext): void {
 
     it("nothing to collect: the tx succeeds and parseIndexActionFailure reports Index__NoFeesToCollect", async () => {
       await buyShares(ctx, ctx.user, parseUsdc("100"), TOLERANCE);
-      await send(ctx, ctx.deployer, IndexManagerCalls.collectFeesCallParameters(single()));
+      await send(ctx, ctx.feeCollector, IndexManagerCalls.collectFeesCallParameters(single()));
       const receipt = await send(
         ctx,
-        ctx.deployer,
+        ctx.feeCollector,
         IndexManagerCalls.collectFeesManyCallParameters({ indexManager: indexManager(), indexes: [ctx.index] }),
       );
       const failure = parseIndexActionFailure(receipt.logs, single());
       expect(failure).toBeDefined();
       expect(failure?.action).toBe("COLLECT_FEES");
       expect(failure?.errorName).toBe("Index__NoFeesToCollect");
-      expect(isAddressEqual(failure?.caller ?? ctx.index, deployer())).toBe(true);
+      expect(isAddressEqual(failure?.caller ?? ctx.index, feeCollector())).toBe(true);
       expect(isAddressEqual(failure?.index ?? ctx.addresses.usdc, ctx.index)).toBe(true);
     });
 
     it("wrong emitter ignored: the same IndexActionFailed is not accepted from another address or for another Index", async () => {
-      const receipt = await send(ctx, ctx.deployer, IndexManagerCalls.rebalanceCallParameters(single()));
+      const receipt = await send(ctx, ctx.rebalancer, IndexManagerCalls.rebalanceCallParameters(single()));
       expect(parseIndexActionFailure(receipt.logs, single())).toBeDefined();
       expect(parseIndexActionFailure(receipt.logs, { indexManager: ctx.index, index: ctx.index })).toBeUndefined();
       expect(parseIndexActionFailure(receipt.logs, { indexManager: indexManager(), index: ctx.addresses.usdc })).toBeUndefined();
@@ -198,17 +233,16 @@ export function indexManagerSuite(ctx: ForkContext): void {
       expect(parseIndexActionFailure(spoofed, single())).toBeUndefined();
     });
 
-    it("an account without FEE_COLLECTOR_ROLE is rejected with AccessControlUnauthorizedAccount", async () => {
-      const error = await simulateError(
-        ctx,
-        ctx.user.account.address,
-        IndexManagerCalls.collectFeesCallParameters(single()),
-        indexManagerAbiOf(ctx),
-        "collectFees",
-      );
-      expect(error).toBeInstanceOf(ContractRevertError);
-      expect((error as ContractRevertError).errorName).toBe("AccessControlUnauthorizedAccount");
-      expect((error as ContractRevertError).args).toEqual([ctx.user.account.address, IndexManagerCalls.roleHash("FEE_COLLECTOR")]);
+    // The rebalancer is a keeper too, but fees must only ever reach the FEE_COLLECTOR_ROLE holders.
+    it("accounts without FEE_COLLECTOR_ROLE (user, deployer, rebalancer) are rejected with AccessControlUnauthorizedAccount", async () => {
+      for (const account of [ctx.user.account.address, deployer(), ctx.keepers.rebalancer]) {
+        for (const call of [
+          IndexManagerCalls.collectFeesCallParameters(single()),
+          IndexManagerCalls.collectFeesManyCallParameters({ indexManager: indexManager(), indexes: [ctx.index] }),
+        ]) {
+          await expectUnauthorized(account, call, "FEE_COLLECTOR");
+        }
+      }
     });
   });
 
@@ -219,10 +253,11 @@ export function indexManagerSuite(ctx: ForkContext): void {
         IndexManagerCalls.rebalanceCallParameters(single()),
         IndexManagerCalls.rebalanceManyCallParameters({ indexManager: indexManager(), indexes: [ctx.index] }),
       ]) {
-        const receipt = await send(ctx, ctx.deployer, call);
+        const receipt = await send(ctx, ctx.rebalancer, call);
         const failure = parseIndexActionFailure(receipt.logs, single());
         expect(failure?.action).toBe("REBALANCE");
         expect(failure?.errorName).toBe("Index__RebalanceNotNeeded");
+        expect(isAddressEqual(failure?.caller ?? ctx.index, rebalancer())).toBe(true);
       }
     });
 
@@ -231,7 +266,7 @@ export function indexManagerSuite(ctx: ForkContext): void {
       const before = await loadIndex(ctx);
       expect(before.needsRebalance()).toBe(true);
 
-      const receipt = await send(ctx, ctx.deployer, IndexManagerCalls.rebalanceCallParameters(single()));
+      const receipt = await send(ctx, ctx.rebalancer, IndexManagerCalls.rebalanceCallParameters(single()));
       expect(parseIndexActionFailure(receipt.logs, single())).toBeUndefined();
       const after = await loadIndex(ctx);
       expect(after.snapshot.reserve0).toBeLessThan(before.snapshot.reserve0);
@@ -251,18 +286,18 @@ export function indexManagerSuite(ctx: ForkContext): void {
       const before = await loadIndex(ctx);
       expect(before.needsRebalance()).toBe(true);
       const call = IndexManagerCalls.rebalanceCallParameters(single());
-      const estimated = await estimateGas(ctx, deployer(), call);
+      const estimated = await estimateGas(ctx, rebalancer(), call);
 
       for (const options of [{}, { gas: estimated }]) {
         const id = await snapshot(ctx);
-        const receipt = await send(ctx, ctx.deployer, call, options);
+        const receipt = await send(ctx, ctx.rebalancer, call, options);
         expect(receipt.gasUsed).toBeLessThanOrEqual(estimated);
         expect(parseIndexActionFailure(receipt.logs, single())).toBeUndefined();
         const triggered = indexActionsTriggered(receipt.logs, indexManager());
         expect(triggered).toHaveLength(1);
         expect(triggered[0]?.action).toBe("REBALANCE");
         expect(isAddressEqual(triggered[0]?.index ?? ctx.addresses.usdc, ctx.index)).toBe(true);
-        expect(isAddressEqual(triggered[0]?.caller ?? ctx.index, deployer())).toBe(true);
+        expect(isAddressEqual(triggered[0]?.caller ?? ctx.index, rebalancer())).toBe(true);
         const after = await loadIndex(ctx);
         expect(after.snapshot.reserve0).toBeLessThan(before.snapshot.reserve0);
         expect(after.snapshot.reserve1).toBeGreaterThan(before.snapshot.reserve1);
@@ -277,14 +312,15 @@ export function indexManagerSuite(ctx: ForkContext): void {
       await moveMockPrice(ctx, ctx.asset0, 120n, 100n);
       const before = await loadIndex(ctx);
       const call = IndexManagerCalls.rebalanceCallParameters(single());
-      const estimated = await estimateGas(ctx, deployer(), call);
+      // The caller must hold REBALANCER_ROLE: without it every limit reverts and the test proves nothing.
+      const estimated = await estimateGas(ctx, rebalancer(), call);
 
       for (const step of UNDER_ESTIMATE_STEPS) {
         const gas = estimated - step;
         await expect(
-          ctx.publicClient.call({ account: deployer(), to: call.to, data: call.calldata, gas }),
+          ctx.publicClient.call({ account: rebalancer(), to: call.to, data: call.calldata, gas }),
         ).rejects.toThrow();
-        const receipt = await sendUnchecked(ctx, ctx.deployer, call, { gas });
+        const receipt = await sendUnchecked(ctx, ctx.rebalancer, call, { gas });
         expect(receipt.status, `gas ${gas} (estimate - ${step})`).toBe("reverted");
         expect(receipt.logs).toHaveLength(0);
         const after = await loadIndex(ctx);
@@ -293,19 +329,19 @@ export function indexManagerSuite(ctx: ForkContext): void {
       }
     });
 
-    it("an account without REBALANCER_ROLE is rejected", async () => {
-      const error = await simulateError(
-        ctx,
-        ctx.user.account.address,
-        IndexManagerCalls.rebalanceCallParameters(single()),
-        indexManagerAbiOf(ctx),
-        "rebalance",
-      );
-      expect((error as ContractRevertError).errorName).toBe("AccessControlUnauthorizedAccount");
+    it("accounts without REBALANCER_ROLE (user, deployer, fee collector) are rejected with AccessControlUnauthorizedAccount", async () => {
+      for (const account of [ctx.user.account.address, deployer(), feeCollector()]) {
+        for (const call of [
+          IndexManagerCalls.rebalanceCallParameters(single()),
+          IndexManagerCalls.rebalanceManyCallParameters({ indexManager: indexManager(), indexes: [ctx.index] }),
+        ]) {
+          await expectUnauthorized(account, call, "REBALANCER");
+        }
+      }
     });
   });
 
-  describe("weights (ASSET_MANAGER = MultiSig)", () => {
+  describe("weights (propose/cancel: ASSET_MANAGER = MultiSig; execute: REBALANCER = keeper, MultiSig as fallback)", () => {
     it("proposeNewWeights through the MultiSig: pending weights and timelock read back with toPendingWeightUpdate", async () => {
       expect(await pending()).toBeUndefined();
       const call = IndexManagerCalls.proposeNewWeightsCallParameters({ ...single(), newWeight0: NEW_WEIGHT0 });
@@ -333,19 +369,21 @@ export function indexManagerSuite(ctx: ForkContext): void {
     it("executeWeightUpdate before the delay: IndexActionFailed with Index__NotPendingWeightUpdate, weights unchanged", async () => {
       const multiSig = await impersonateMultiSig(ctx);
       await send(ctx, multiSig, IndexManagerCalls.proposeNewWeightsCallParameters({ ...single(), newWeight0: NEW_WEIGHT0 }));
-      const receipt = await send(ctx, multiSig, IndexManagerCalls.executeWeightUpdateCallParameters(single()));
+      const receipt = await send(ctx, ctx.rebalancer, IndexManagerCalls.executeWeightUpdateCallParameters(single()));
       const failure = parseIndexActionFailure(receipt.logs, single());
       expect(failure?.action).toBe("EXECUTE_WEIGHTS");
       expect(failure?.errorName).toBe("Index__NotPendingWeightUpdate");
+      expect(isAddressEqual(failure?.caller ?? ctx.index, rebalancer())).toBe(true);
       expect((await loadIndex(ctx)).snapshot.weight0).toBe(500_000n);
     });
 
     /**
-     * Proposes NEW_WEIGHT0 as the MultiSig and moves chain time past the delay. The warp makes every
+     * Proposes NEW_WEIGHT0 as the MultiSig (ASSET_MANAGER) and moves chain time past the delay; the
+     * execution is left to the caller (the rebalancer keeper, or the MultiSig fallback). The warp makes every
      * feed stale (maxDelay is far below two days): on mocks they are refreshed so the rebalance inside
      * executeWeightUpdate can price the assets; the mainnet feeds cannot be, see the tests below.
      */
-    async function proposeAndWait() {
+    async function proposeAndWait(): Promise<void> {
       const multiSig = await impersonateMultiSig(ctx);
       await send(ctx, multiSig, IndexManagerCalls.proposeNewWeightsCallParameters({ ...single(), newWeight0: NEW_WEIGHT0 }));
       const proposal = await pending();
@@ -353,15 +391,14 @@ export function indexManagerSuite(ctx: ForkContext): void {
       await ctx.testClient.increaseTime({ seconds: Number((proposal?.executableAt ?? now) - now + 1n) });
       await ctx.testClient.mine({ blocks: 1 });
       if (ctx.isMock) await refreshMockFeeds(ctx);
-      return multiSig;
     }
 
     it("executeWeightUpdate after the delay (chain time, not the local clock) applies the new weights", async () => {
-      const multiSig = await proposeAndWait();
+      await proposeAndWait();
       // Batch entry point: KEEPER_GAS_LIMIT is still required, see its comment.
       const receipt = await send(
         ctx,
-        multiSig,
+        ctx.rebalancer,
         IndexManagerCalls.executeWeightUpdateManyCallParameters({ indexManager: indexManager(), indexes: [ctx.index] }),
         { gas: KEEPER_GAS_LIMIT },
       );
@@ -376,13 +413,51 @@ export function indexManagerSuite(ctx: ForkContext): void {
     });
 
     it("gas: the single executeWeightUpdate with the estimated limit applies the weights and the IndexManager reports it", async () => {
-      const multiSig = await proposeAndWait();
-      const receipt = await send(ctx, multiSig, IndexManagerCalls.executeWeightUpdateCallParameters(single()));
+      await proposeAndWait();
+      const receipt = await send(ctx, ctx.rebalancer, IndexManagerCalls.executeWeightUpdateCallParameters(single()));
       expect(parseIndexActionFailure(receipt.logs, single())).toBeUndefined();
-      expect(indexActionsTriggered(receipt.logs, indexManager()).map((log) => log.action)).toEqual(["EXECUTE_WEIGHTS"]);
+      const triggered = indexActionsTriggered(receipt.logs, indexManager());
+      expect(triggered.map((log) => log.action)).toEqual(["EXECUTE_WEIGHTS"]);
+      expect(isAddressEqual(triggered[0]?.caller ?? ctx.index, rebalancer())).toBe(true);
       const [weight0, weight1] = await ctx.publicClient.readContract(IndexManager.snapshotReads(ctx.index)[4]);
       expect([weight0, weight1]).toEqual([NEW_WEIGHT0, MAX_WEIGHT - NEW_WEIGHT0]);
       expect(await pending()).toBeUndefined();
+    });
+
+    // REBALANCER_ROLE is also held by the MultiSig, so the owners can still apply a weight change when
+    // the keeper is down. Run through the real 2-of-3 flow: msg.sender at the IndexManager is the MultiSig.
+    it("fallback path: the MultiSig (REBALANCER_ROLE fallback holder) executes the weight update through submit/confirm/execute", async () => {
+      await proposeAndWait();
+      const receipt = await sendThroughMultiSig(ctx, IndexManagerCalls.executeWeightUpdateCallParameters(single()));
+      expect(parseIndexActionFailure(receipt.logs, single())).toBeUndefined();
+      const triggered = indexActionsTriggered(receipt.logs, indexManager());
+      expect(triggered.map((log) => log.action)).toEqual(["EXECUTE_WEIGHTS"]);
+      expect(isAddressEqual(triggered[0]?.caller ?? ctx.index, ctx.addresses.multiSigWallet)).toBe(true);
+      const [weight0, weight1] = await ctx.publicClient.readContract(IndexManager.snapshotReads(ctx.index)[4]);
+      expect([weight0, weight1]).toEqual([NEW_WEIGHT0, MAX_WEIGHT - NEW_WEIGHT0]);
+      expect(await pending()).toBeUndefined();
+    });
+
+    // After the delay, so the only reason left to refuse the call is the role. Before 2026-11-14 the
+    // call required ASSET_MANAGER_ROLE; the fee collector is a keeper too, but not this one. The mined
+    // tx proves the refusal is a revert, not an IndexActionFailed that would leave a success receipt.
+    it("accounts without REBALANCER_ROLE (user, deployer, fee collector) cannot execute a ready weight update; the proposal stays pending", async () => {
+      await proposeAndWait();
+      const proposal = await pending();
+      expect(proposal).toBeDefined();
+      for (const account of [ctx.user.account.address, deployer(), feeCollector()]) {
+        for (const call of [
+          IndexManagerCalls.executeWeightUpdateCallParameters(single()),
+          IndexManagerCalls.executeWeightUpdateManyCallParameters({ indexManager: indexManager(), indexes: [ctx.index] }),
+        ]) {
+          await expectUnauthorized(account, call, "REBALANCER");
+        }
+      }
+      const receipt = await sendUnchecked(ctx, ctx.user, IndexManagerCalls.executeWeightUpdateCallParameters(single()), {
+        gas: KEEPER_GAS_LIMIT,
+      });
+      expect(receipt.status).toBe("reverted");
+      expect(await pending()).toEqual(proposal);
     });
 
     // The weight change moves the target by 10%, past REBALANCE_THRESHOLD, so the Index rebalances
@@ -392,13 +467,13 @@ export function indexManagerSuite(ctx: ForkContext): void {
     // Both the implicit estimate (no gas) and the same estimate passed explicitly, so a keeper that
     // pins the estimated limit gets the same outcome.
     it.runIf(ctx.isMock)("gas: the rebalance inside an estimated single executeWeightUpdate is not starved of gas", async () => {
-      const multiSig = await proposeAndWait();
+      await proposeAndWait();
       const call = IndexManagerCalls.executeWeightUpdateCallParameters(single());
-      const estimated = await estimateGas(ctx, ctx.addresses.multiSigWallet, call);
+      const estimated = await estimateGas(ctx, rebalancer(), call);
 
       for (const options of [{}, { gas: estimated }]) {
         const id = await snapshot(ctx);
-        const receipt = await send(ctx, multiSig, call, options);
+        const receipt = await send(ctx, ctx.rebalancer, call, options);
         expect(receipt.gasUsed).toBeLessThanOrEqual(estimated);
         expect(parseIndexActionFailure(receipt.logs, single())).toBeUndefined();
         expect(indexActionsTriggered(receipt.logs, indexManager()).map((log) => log.action)).toEqual(["EXECUTE_WEIGHTS"]);
@@ -414,7 +489,7 @@ export function indexManagerSuite(ctx: ForkContext): void {
     // Any limit under the estimate must revert as a whole (mined with status reverted, no logs),
     // never apply the weights with a starved rebalance nor consume the proposal.
     it("gas: below the estimate the single executeWeightUpdate reverts and the proposal stays pending", async () => {
-      const multiSig = await proposeAndWait();
+      await proposeAndWait();
       const proposal = await pending();
       expect(proposal).toBeDefined();
       // Raw Index reads, no prices: after the warp the mainnet feeds are stale and loadIndex would revert.
@@ -425,11 +500,12 @@ export function indexManagerSuite(ctx: ForkContext): void {
       });
       const before = await indexState();
       const call = IndexManagerCalls.executeWeightUpdateCallParameters(single());
-      const estimated = await estimateGas(ctx, ctx.addresses.multiSigWallet, call);
+      // The caller must hold REBALANCER_ROLE: without it every limit reverts and the test proves nothing.
+      const estimated = await estimateGas(ctx, rebalancer(), call);
 
       for (const step of UNDER_ESTIMATE_STEPS) {
         const gas = estimated - step;
-        const receipt = await sendUnchecked(ctx, multiSig, call, { gas });
+        const receipt = await sendUnchecked(ctx, ctx.rebalancer, call, { gas });
         expect(receipt.status, `gas ${gas} (estimate - ${step})`).toBe("reverted");
         expect(receipt.logs).toHaveLength(0);
         expect(await pending()).toEqual(proposal);
@@ -452,20 +528,24 @@ export function indexManagerSuite(ctx: ForkContext): void {
       expect((error as ContractRevertError).errorName).toBe("Index__InvalidWeight");
     });
 
-    it("an account without ASSET_MANAGER_ROLE cannot propose", async () => {
-      const error = await simulateError(
-        ctx,
-        deployer(),
-        IndexManagerCalls.proposeNewWeightsCallParameters({ ...single(), newWeight0: NEW_WEIGHT0 }),
-        indexManagerAbiOf(ctx),
-        "proposeNewWeights",
-      );
-      expect((error as ContractRevertError).errorName).toBe("AccessControlUnauthorizedAccount");
+    // The keepers hold the roles that execute a weight change, never the one that chooses it.
+    it("accounts without ASSET_MANAGER_ROLE (deployer, rebalancer, fee collector) cannot propose or cancel", async () => {
+      const multiSig = await impersonateMultiSig(ctx);
+      await send(ctx, multiSig, IndexManagerCalls.proposeNewWeightsCallParameters({ ...single(), newWeight0: NEW_WEIGHT0 }));
+      for (const account of [deployer(), rebalancer(), feeCollector()]) {
+        for (const call of [
+          IndexManagerCalls.proposeNewWeightsCallParameters({ ...single(), newWeight0: NEW_WEIGHT0 + 1n }),
+          IndexManagerCalls.cancelWeightUpdateCallParameters(single()),
+        ]) {
+          await expectUnauthorized(account, call, "ASSET_MANAGER");
+        }
+      }
     });
   });
 
   // checkInitialized mirrors the areIndexesInitialized modifier on the list read from the chain: the SDK and the
-  // contract must reject the same first address. The deployer holds REBALANCER_ROLE (checked before the list).
+  // contract must reject the same first address. The batch is simulated as the rebalancer keeper, because
+  // REBALANCER_ROLE is checked before the list and any other caller would only see AccessControlUnauthorizedAccount.
   describe("checkInitialized agrees with IndexManager__NotIndexInitialized", () => {
     const outsider = getAddress(keccak256(stringToHex("oam-sdk-fork-test:not-an-index")).slice(0, 42));
 
@@ -476,7 +556,7 @@ export function indexManagerSuite(ctx: ForkContext): void {
     async function batchError(indexes: readonly Address[]) {
       const error = await simulateError(
         ctx,
-        deployer(),
+        rebalancer(),
         IndexManagerCalls.rebalanceManyCallParameters({ indexManager: indexManager(), indexes }),
         indexManagerAbiOf(ctx),
         "rebalanceMany",
@@ -496,7 +576,7 @@ export function indexManagerSuite(ctx: ForkContext): void {
     }
 
     it("the deployed Index passes: it is in initializedIndexesRead", async () => {
-      expect(await ctx.publicClient.readContract(IndexManagerCalls.hasRoleRead({ indexManager: indexManager(), role: "REBALANCER", account: deployer() }))).toBe(true);
+      expect(await ctx.publicClient.readContract(IndexManagerCalls.hasRoleRead({ indexManager: indexManager(), role: "REBALANCER", account: rebalancer() }))).toBe(true);
       const initialized = await initializedIndexes();
       expect(() => IndexManagerCalls.checkInitialized({ indexes: [ctx.index], initializedIndexes: initialized })).not.toThrow();
       expect(() =>

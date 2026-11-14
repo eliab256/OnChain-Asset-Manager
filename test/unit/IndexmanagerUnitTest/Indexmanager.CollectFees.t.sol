@@ -76,7 +76,7 @@ contract IndexManagerTest is BaseTest {
     // =========================================================================
 
     function testcollectFeesFromSingleIndexRevertIfIndexNotInitialized() public {
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         vm.expectRevert(
             abi.encodeWithSelector(IndexManager__NotIndexInitialized.selector, address(nonInitializedIndex))
         );
@@ -94,11 +94,6 @@ contract IndexManagerTest is BaseTest {
     }
 
     function testcollectFeesFromSingleIndexEmitNoFeesToCollectEvent() public {
-        // Grant FEE_COLLECTOR_ROLE to feeCollector
-        // (IndexManager constructor grants roles only to deployer)
-        vm.prank(deployer);
-        indexManager.grantRole(keccak256("FEE_COLLECTOR_ROLE"), feeCollector);
-
         (, uint128 feeToCollect) = initializedIndex.getFeesInfo();
         assertEq(feeToCollect, 0);
         vm.prank(feeCollector);
@@ -116,11 +111,6 @@ contract IndexManagerTest is BaseTest {
     }
 
     function testCollectFeesEmitEvent() public {
-        // Grant FEE_COLLECTOR_ROLE to feeCollector
-        // (IndexManager constructor grants roles only to deployer)
-        vm.prank(deployer);
-        indexManager.grantRole(keccak256("FEE_COLLECTOR_ROLE"), feeCollector);
-
         _generateFees(address(initializedIndex));
 
         (, uint128 feeToCollect) = initializedIndex.getFeesInfo();
@@ -163,7 +153,7 @@ contract IndexManagerTest is BaseTest {
 
         _generateFees(address(initializedIndex));
 
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         indexManager.collectFeesFromSingleIndex(address(initializedIndex));
 
         // With zero fees the value stays 0; assertGe documents the invariant.
@@ -183,18 +173,53 @@ contract IndexManagerTest is BaseTest {
         assertGt(feesToCollect, feesAfterMint, "Redeem must accrue fees");
         assertLe(feesToCollect - feesAfterMint, 10000 * 10 ** 6, "Redeem fee not in USDC token decimals");
 
-        uint256 collectorBalanceBefore = mockUsdc.balanceOf(deployer);
-        vm.prank(deployer);
+        uint256 collectorBalanceBefore = mockUsdc.balanceOf(feeCollector);
+        vm.prank(feeCollector);
         indexManager.collectFeesFromSingleIndex(address(initializedIndex));
 
         (, uint128 feesAfterCollect) = initializedIndex.getFeesInfo();
         assertEq(feesAfterCollect, 0, "Fees not reset after collection");
         assertEq(
-            mockUsdc.balanceOf(deployer) - collectorBalanceBefore,
+            mockUsdc.balanceOf(feeCollector) - collectorBalanceBefore,
             feesToCollect,
             "Collector did not receive the accrued fees"
         );
         assertEq(mockUsdc.balanceOf(address(initializedIndex)), 0, "Index must hold no USDC after collection");
+    }
+
+    function testCollectFeesFromSingleIndexViaMultiSigPaysFeesToMultiSig() public {
+        // The MultiSig holds FEE_COLLECTOR_ROLE as the emergency fallback; collectFees pays msg.sender.
+        _generateFees(address(initializedIndex));
+        (, uint128 feesToCollect) = initializedIndex.getFeesInfo();
+        assertGt(feesToCollect, 0, "fees must have accrued");
+        uint256 multiSigBalanceBefore = mockUsdc.balanceOf(address(multiSigWallet));
+        uint256 feeCollectorBalanceBefore = mockUsdc.balanceOf(feeCollector);
+        uint256 indexBalanceBefore = mockUsdc.balanceOf(address(initializedIndex));
+        uint256 totalFeesBefore = indexManager.getTotalFeesCollected();
+
+        vm.prank(address(multiSigWallet));
+        indexManager.collectFeesFromSingleIndex(address(initializedIndex));
+
+        (, uint128 feesAfterCollect) = initializedIndex.getFeesInfo();
+        assertEq(feesAfterCollect, 0, "Fees not reset after collection");
+        assertEq(
+            mockUsdc.balanceOf(address(multiSigWallet)) - multiSigBalanceBefore,
+            feesToCollect,
+            "the MultiSig must receive the accrued fees"
+        );
+        assertEq(
+            mockUsdc.balanceOf(feeCollector), feeCollectorBalanceBefore, "the keeper fee collector must receive nothing"
+        );
+        assertEq(
+            indexBalanceBefore - mockUsdc.balanceOf(address(initializedIndex)),
+            feesToCollect,
+            "the Index must pay out exactly the accrued fees"
+        );
+        assertEq(
+            indexManager.getTotalFeesCollected(),
+            totalFeesBefore + feesToCollect,
+            "Total fees collected must grow by the collected fees"
+        );
     }
 
     // =========================================================================
@@ -211,21 +236,21 @@ contract IndexManagerTest is BaseTest {
         indexes[0] = address(initializedIndex);
         indexes[1] = address(newIndexLinkWeth); // this index has no fees to collect
         indexes[2] = address(newIndexWbtcComp);
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         vm.recordLogs();
         indexManager.collectFeesFromMultipleIndexes(indexes);
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        _assertSingleActionTriggeredFor(logs, address(initializedIndex), deployer, IndexAction.COLLECT_FEES);
+        _assertSingleActionTriggeredFor(logs, address(initializedIndex), feeCollector, IndexAction.COLLECT_FEES);
         _assertSingleActionFailedFor(
             logs,
             address(newIndexLinkWeth),
-            deployer,
+            feeCollector,
             IndexAction.COLLECT_FEES,
             abi.encodeWithSelector(Index__NoFeesToCollect.selector)
         );
-        _assertSingleActionTriggeredFor(logs, address(newIndexWbtcComp), deployer, IndexAction.COLLECT_FEES);
+        _assertSingleActionTriggeredFor(logs, address(newIndexWbtcComp), feeCollector, IndexAction.COLLECT_FEES);
         assertEq(
             _countManagerEvents(logs, IndexActionTriggered.selector),
             2,
@@ -258,9 +283,9 @@ contract IndexManagerTest is BaseTest {
         assertEq(noFees, 0, "newIndexLinkWeth must have no fees");
         assertGt(expectedTotal, 0, "fees must have accrued");
         uint256 totalBefore = indexManager.getTotalFeesCollected();
-        uint256 collectorBalanceBefore = mockUsdc.balanceOf(deployer);
+        uint256 collectorBalanceBefore = mockUsdc.balanceOf(feeCollector);
 
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         indexManager.collectFeesFromMultipleIndexes(indexes);
 
         assertEq(
@@ -269,7 +294,7 @@ contract IndexManagerTest is BaseTest {
             "Total fees collected must grow by the sum of every index's fees"
         );
         assertEq(
-            mockUsdc.balanceOf(deployer) - collectorBalanceBefore,
+            mockUsdc.balanceOf(feeCollector) - collectorBalanceBefore,
             expectedTotal,
             "Collector must receive the sum of every index's fees"
         );
@@ -284,7 +309,7 @@ contract IndexManagerTest is BaseTest {
         _generateFees(address(newIndexWbtcComp));
         address[] memory indexes = indexManager.getInitializedIndexes();
 
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         vm.recordLogs();
         indexManager.collectFeesFromMultipleIndexes(indexes);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -294,12 +319,12 @@ contract IndexManagerTest is BaseTest {
                 _assertSingleActionFailedFor(
                     logs,
                     indexes[i],
-                    deployer,
+                    feeCollector,
                     IndexAction.COLLECT_FEES,
                     abi.encodeWithSelector(Index__NoFeesToCollect.selector)
                 );
             } else {
-                _assertSingleActionTriggeredFor(logs, indexes[i], deployer, IndexAction.COLLECT_FEES);
+                _assertSingleActionTriggeredFor(logs, indexes[i], feeCollector, IndexAction.COLLECT_FEES);
             }
         }
         assertEq(

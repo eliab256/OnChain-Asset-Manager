@@ -155,12 +155,12 @@ contract IndexManagerWeightUpdateInnerRebalanceTest is BaseTest {
         return abi.encodeCall(indexManager.executeSingleWeightUpdate, (address(initializedIndex)));
     }
 
-    /// @dev Calls executeSingleWeightUpdate on the initialized index as deployer with `_gas` gas
-    ///      (all the available gas when 0) and returns the outcome and the recorded logs.
+    /// @dev Calls executeSingleWeightUpdate on the initialized index as the rebalancer (REBALANCER_ROLE)
+    ///      with `_gas` gas (all the available gas when 0) and returns the outcome and the recorded logs.
     function _callSingle(uint256 _gas) internal returns (bool success, bytes memory returnData, Vm.Log[] memory logs) {
         bytes memory callData = _singleCallData();
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         if (_gas == 0) {
             (success, returnData) = address(indexManager).call(callData);
         } else {
@@ -266,7 +266,7 @@ contract IndexManagerWeightUpdateInnerRebalanceTest is BaseTest {
             "reasonData must be the raw inner rebalance revert data"
         );
 
-        uint256 actionPosition = _assertOnlyActionTriggered(_logs, index, deployer, IndexAction.EXECUTE_WEIGHTS);
+        uint256 actionPosition = _assertOnlyActionTriggered(_logs, index, rebalancer, IndexAction.EXECUTE_WEIGHTS);
         assertLt(failedPosition, actionPosition, "IndexActionTriggered must follow the Index events");
     }
 
@@ -282,7 +282,7 @@ contract IndexManagerWeightUpdateInnerRebalanceTest is BaseTest {
     function _measureSingleGas() internal returns (uint256 gasUsed) {
         bytes memory callData = _singleCallData();
         uint256 snapshot = vm.snapshotState();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         uint256 gasBefore = gasleft();
         (bool success,) = address(indexManager).call(callData);
         gasUsed = gasBefore - gasleft();
@@ -319,7 +319,7 @@ contract IndexManagerWeightUpdateInnerRebalanceTest is BaseTest {
         _mockInnerRebalanceRevert(address(s_secondIndex), _revertData);
         bytes memory callData = abi.encodeCall(indexManager.executeWeightUpdateForMultipleIndexes, (_twoIndexes()));
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         (success,) = address(indexManager).call(callData);
         logs = vm.getRecordedLogs();
     }
@@ -343,10 +343,10 @@ contract IndexManagerWeightUpdateInnerRebalanceTest is BaseTest {
         (, Vm.Log[] memory logs) = _callBatchWithInnerRevertOnSecond(_revertData);
 
         uint256 failedPosition = _assertSingleActionFailedFor(
-            logs, address(s_secondIndex), deployer, IndexAction.EXECUTE_WEIGHTS, _revertData
+            logs, address(s_secondIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS, _revertData
         );
         uint256 triggeredPosition =
-            _assertSingleActionTriggeredFor(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+            _assertSingleActionTriggeredFor(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
         assertLt(failedPosition, triggeredPosition, "the loop must continue after the failing index");
         assertEq(_countManagerEvents(logs, IndexActionFailed.selector), 1, "exactly one IndexActionFailed in the batch");
         assertEq(
@@ -507,7 +507,7 @@ contract IndexManagerWeightUpdateInnerRebalanceTest is BaseTest {
         assertEq(rebalancedCount, 1, "IndexRebalanced must be emitted once");
         assertEq(failedCount, 0, "the rebalance must not fail");
         assertLt(updatedPosition, rebalancedPosition, "WeightsUpdated must precede IndexRebalanced");
-        _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+        _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
     }
 
     // =========================================================================

@@ -60,7 +60,8 @@ const mockUsdcAbi = parseAbi(["function burn(address from, uint256 amount)"]);
 
 export function batchesSuite(ctx: ForkContext): void {
   const indexManager = () => ctx.addresses.indexManager;
-  const deployer = () => ctx.deployer.account.address;
+  // The batches are sent by the keeper accounts that hold the roles on the deploy; fees go to the caller.
+  const feeCollector = () => ctx.keepers.feeCollector;
 
   const reserves = async (index: Address) => ctx.publicClient.readContract(IndexManager.snapshotReads(index)[3]);
   const weights = async (index: Address) => ctx.publicClient.readContract(IndexManager.snapshotReads(index)[4]);
@@ -70,14 +71,14 @@ export function batchesSuite(ctx: ForkContext): void {
   const totalFeesCollected = async () =>
     ctx.publicClient.readContract({ address: indexManager(), abi: indexManagerAbi, functionName: "getTotalFeesCollected" });
 
-  async function proposeAndWait(proposals: readonly (readonly [Address, bigint])[]) {
+  /** Proposes as the MultiSig (ASSET_MANAGER) and waits the delay; the rebalancer keeper executes. */
+  async function proposeAndWait(proposals: readonly (readonly [Address, bigint])[]): Promise<void> {
     const multiSig = await impersonateMultiSig(ctx);
     for (const [index, newWeight0] of proposals) {
       await send(ctx, multiSig, IndexManagerCalls.proposeNewWeightsCallParameters({ indexManager: indexManager(), index, newWeight0 }));
     }
     await ctx.testClient.increaseTime({ seconds: Number(WEIGHT_UPDATE_DELAY + 1n) });
     await ctx.testClient.mine({ blocks: 1 });
-    return multiSig;
   }
 
   describe.runIf(ctx.isMock)("batches over three Indexes (anvil mocks)", () => {
@@ -120,7 +121,7 @@ export function batchesSuite(ctx: ForkContext): void {
 
       const receipt = await send(
         ctx,
-        ctx.deployer,
+        ctx.rebalancer,
         IndexManagerCalls.rebalanceManyCallParameters({ indexManager: indexManager(), indexes }),
         { gas: BATCH_GAS_LIMIT },
       );
@@ -148,7 +149,7 @@ export function batchesSuite(ctx: ForkContext): void {
 
     it("executeWeightUpdateForMultipleIndexes: rebalanced, skipped, rebalance failed, and not pending", async () => {
       // A moves 10% (past the 3% threshold), C 1% (within it), B prices a stale COMP in its rebalance.
-      const multiSig = await proposeAndWait([
+      await proposeAndWait([
         [A(), 600_000n],
         [C, 510_000n],
         [B, 400_000n],
@@ -162,7 +163,7 @@ export function batchesSuite(ctx: ForkContext): void {
 
       const receipt = await send(
         ctx,
-        multiSig,
+        ctx.rebalancer,
         IndexManagerCalls.executeWeightUpdateManyCallParameters({ indexManager: indexManager(), indexes }),
         { gas: BATCH_GAS_LIMIT },
       );
@@ -217,12 +218,12 @@ export function batchesSuite(ctx: ForkContext): void {
         value: 0n,
       });
       const indexes = [A(), B, C, A()];
-      const collectorBefore = await balanceOf(ctx, ctx.addresses.usdc, deployer());
+      const collectorBefore = await balanceOf(ctx, ctx.addresses.usdc, feeCollector());
       const totalBefore = await totalFeesCollected();
 
       const receipt = await send(
         ctx,
-        ctx.deployer,
+        ctx.feeCollector,
         IndexManagerCalls.collectFeesManyCallParameters({ indexManager: indexManager(), indexes }),
         { gas: BATCH_GAS_LIMIT },
       );
@@ -234,7 +235,7 @@ export function batchesSuite(ctx: ForkContext): void {
         noFees: [{ index: B }, { index: A() }],
         failed: [{ index: C, reasonData: insufficient, reason: protocolReason("ERC20InsufficientBalance", [C, 0n, feesC]) }],
       });
-      expect(await balanceOf(ctx, ctx.addresses.usdc, deployer())).toBe(collectorBefore + feesA);
+      expect(await balanceOf(ctx, ctx.addresses.usdc, feeCollector())).toBe(collectorBefore + feesA);
       expect(await totalFeesCollected()).toBe(totalBefore + feesA);
       expect(await accruedFees(A())).toBe(0n);
       expect(await accruedFees(C)).toBe(feesC);
@@ -247,7 +248,7 @@ export function batchesSuite(ctx: ForkContext): void {
     it("rebalanceMultipleIndexes: not needed twice at the pinned prices, failed with a stale price after a warp", async () => {
       const indexes = [X(), X()];
       const call = IndexManagerCalls.rebalanceManyCallParameters({ indexManager: indexManager(), indexes });
-      const balanced = await send(ctx, ctx.deployer, call, { gas: BATCH_GAS_LIMIT });
+      const balanced = await send(ctx, ctx.rebalancer, call, { gas: BATCH_GAS_LIMIT });
       expect(parseRebalanceBatch(balanced.logs, { indexManager: indexManager(), indexes })).toEqual({
         rebalanced: [],
         notNeeded: [{ index: X() }, { index: X() }],
@@ -256,7 +257,7 @@ export function batchesSuite(ctx: ForkContext): void {
 
       await ctx.testClient.increaseTime({ seconds: Number(STALE_FOR) });
       await ctx.testClient.mine({ blocks: 1 });
-      const stale = await send(ctx, ctx.deployer, call, { gas: BATCH_GAS_LIMIT });
+      const stale = await send(ctx, ctx.rebalancer, call, { gas: BATCH_GAS_LIMIT });
       const failure = { index: X(), reasonData: PRICE_IS_STALE, reason: protocolReason("PriceFeedManager__PriceIsStale") };
       expect(parseRebalanceBatch(stale.logs, { indexManager: indexManager(), indexes })).toEqual({
         rebalanced: [],
@@ -266,12 +267,12 @@ export function batchesSuite(ctx: ForkContext): void {
     });
 
     it("executeWeightUpdateForMultipleIndexes: weights applied with the inner rebalance failed (stale after the delay), then not pending", async () => {
-      const multiSig = await proposeAndWait([[X(), 600_000n]]);
+      await proposeAndWait([[X(), 600_000n]]);
       const before = await reserves(X());
       const indexes = [X(), X()];
       const receipt = await send(
         ctx,
-        multiSig,
+        ctx.rebalancer,
         IndexManagerCalls.executeWeightUpdateManyCallParameters({ indexManager: indexManager(), indexes }),
         { gas: BATCH_GAS_LIMIT },
       );
@@ -295,11 +296,11 @@ export function batchesSuite(ctx: ForkContext): void {
       await buyShares(ctx, ctx.user, parseUsdc("1000"), TOLERANCE);
       const fees = await accruedFees(X());
       expect(fees).toBeGreaterThan(0n);
-      const collectorBefore = await balanceOf(ctx, ctx.addresses.usdc, deployer());
+      const collectorBefore = await balanceOf(ctx, ctx.addresses.usdc, feeCollector());
       const indexes = [X(), X()];
       const receipt = await send(
         ctx,
-        ctx.deployer,
+        ctx.feeCollector,
         IndexManagerCalls.collectFeesManyCallParameters({ indexManager: indexManager(), indexes }),
         { gas: BATCH_GAS_LIMIT },
       );
@@ -308,7 +309,7 @@ export function batchesSuite(ctx: ForkContext): void {
         noFees: [{ index: X() }],
         failed: [],
       });
-      expect(await balanceOf(ctx, ctx.addresses.usdc, deployer())).toBe(collectorBefore + fees);
+      expect(await balanceOf(ctx, ctx.addresses.usdc, feeCollector())).toBe(collectorBefore + fees);
     });
 
     // Mainnet USDC (FiatTokenV2_2) reverts with require(..., "ERC20: transfer amount exceeds balance"):
@@ -320,7 +321,7 @@ export function batchesSuite(ctx: ForkContext): void {
       const indexes = [X()];
       const receipt = await send(
         ctx,
-        ctx.deployer,
+        ctx.feeCollector,
         IndexManagerCalls.collectFeesManyCallParameters({ indexManager: indexManager(), indexes }),
         { gas: BATCH_GAS_LIMIT },
       );

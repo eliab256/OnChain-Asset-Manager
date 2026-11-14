@@ -42,7 +42,8 @@ interface IIndexManager {
 
     /**
      * @notice Executes the pending target weights update of a single initialized index.
-     * @dev Callable only by ASSET_MANAGER_ROLE. Reverts with IndexManager__NotIndexInitialized if the index is not initialized.
+     * @dev Callable only by REBALANCER_ROLE: the update was already proposed by ASSET_MANAGER_ROLE and waited
+     *      WEIGHT_UPDATE_DELAY. Reverts with IndexManager__NotIndexInitialized if the index is not initialized.
      *      If the index reverts with a custom error, does not revert: emits IndexActionFailed (EXECUTE_WEIGHTS) with the raw
      *      revert data instead. If it reverts with a common error (revert data shorter than 4 bytes (out of gas, bare revert()),
      *      Error(string) or Panic(uint256)),
@@ -58,7 +59,8 @@ interface IIndexManager {
 
     /**
      * @notice Executes the pending target weights update of several initialized indexes in a single transaction.
-     * @dev Callable only by ASSET_MANAGER_ROLE. Reverts with IndexManager__NotIndexInitialized if any index is not initialized.
+     * @dev Callable only by REBALANCER_ROLE: each update was already proposed by ASSET_MANAGER_ROLE and waited
+     *      WEIGHT_UPDATE_DELAY. Reverts with IndexManager__NotIndexInitialized if any index is not initialized.
      *      A failing index does not revert the batch: it emits IndexActionFailed (EXECUTE_WEIGHTS) with the raw revert data,
      *      whatever the error, and the loop continues. This includes a common error (e.g. out of gas) of the rebalance
      *      attempted inside executeWeightUpdate: the index reverts, so its weights update stays pending.

@@ -58,10 +58,10 @@ All of these are constants in `src/ContractCodeConstants.sol` or `src/IndexManag
  Owner 1   Owner 2   Owner 3
      \        |        /          2-of-3, EIP-712 confirmations
       MultiSigWallet ─────────────────────────────────┐
-         │ DEFAULT_ADMIN_ROLE + ASSET_MANAGER_ROLE     │ proposer / executor / canceller
+         │ admin + asset manager (+ keeper roles)      │ proposer / executor / canceller
          ▼                                             ▼
    IndexManager (not upgradeable)            TimelockController (min delay 2 days, no admin)
-   │  REBALANCER_ROLE, FEE_COLLECTOR_ROLE              │ the only upgrader of the three proxies
+   │  keeper: REBALANCER_ROLE, FEE_COLLECTOR_ROLE      │ the only upgrader of the three proxies
    │                                                   │
    ├─ owner of ──► SwapManager proxy ◄─────────────────┤
    ├─ owner of ──► PriceFeedManager proxy ◄────────────┤
@@ -88,7 +88,7 @@ There are three kinds of contracts, and the split is deliberate:
 3. Deploy the `IndexFactory`, passing it `type(Index).creationCode`.
 4. Deploy the `IndexManager`. Its constructor creates the three ERC1967 proxies (SwapManager, PriceFeedManager, Router) from fresh implementations, sets itself as owner and the timelock as upgrader.
 5. Register the USDC/USD feed while the deployer still holds `ASSET_MANAGER_ROLE`.
-6. Grant `DEFAULT_ADMIN_ROLE` and `ASSET_MANAGER_ROLE` to the MultiSig and revoke both from the deployer. The deployer keeps `REBALANCER_ROLE` and `FEE_COLLECTOR_ROLE`.
+6. Grant `DEFAULT_ADMIN_ROLE` and `ASSET_MANAGER_ROLE` to the MultiSig, `REBALANCER_ROLE` to `config.rebalancer` and the MultiSig, `FEE_COLLECTOR_ROLE` to `config.feeCollector` and the MultiSig, then revoke every role from the deployer.
 
 `script/DeployAndInitNewIndex.s.sol` then goes through the MultiSig (submit, confirm, execute) to register any missing asset feed, call `createIndex` and call `initializeIndex` with the seed deposit.
 
@@ -147,7 +147,7 @@ Redeem mirrors this: it sells the overweight asset first, measures what left the
 | `initializeIndex(depositor, index, amount0, route0Usdc, route1Usdc, route01)` | `ASSET_MANAGER_ROLE` | Registers the three swap routes in the SwapManager, then calls `Index.initialize` |
 | `rebalanceSingleIndex`, `rebalanceMultipleIndexes` | `REBALANCER_ROLE` | |
 | `proposeNewWeights(index, weight0)`, `cancelWeightUpdate` | `ASSET_MANAGER_ROLE` | weight1 is always `100% − weight0` |
-| `executeSingleWeightUpdate`, `executeWeightUpdateForMultipleIndexes` | `ASSET_MANAGER_ROLE` | |
+| `executeSingleWeightUpdate`, `executeWeightUpdateForMultipleIndexes` | `REBALANCER_ROLE` | Executes a proposal the MultiSig already made, after the 2-day delay |
 | `collectFeesFromSingleIndex`, `collectFeesFromMultipleIndexes` | `FEE_COLLECTOR_ROLE` | Fees go to the caller; `getTotalFeesCollected()` keeps the running total |
 
 Getters: `getDeployedIndexes`, `getInitializedIndexes` (pass it to the batch functions to cover every index), `getIndexByAssetsAddresses` (any order), `getIndexAssets`, `isIndexAddress`, `checkIsIndexInitialized`, and the addresses of the Router, SwapManager, PriceFeedManager, IndexFactory and Universal Router.
@@ -265,16 +265,18 @@ Several upgrades can be grouped with `scheduleBatch`/`executeBatch`. There's no 
 
 ### IndexManager roles (OpenZeppelin `AccessControl`)
 
-The constructor grants all four roles to the deployer. `DeployPeriphery` then moves `DEFAULT_ADMIN_ROLE` and `ASSET_MANAGER_ROLE` to the MultiSig; the deployer keeps `REBALANCER_ROLE` and `FEE_COLLECTOR_ROLE`.
+The constructor grants all four roles to the deployer. `DeployPeriphery` then hands them out as in the table below and revokes them from the deployer, which keeps no role. The exception is a network where the deployer is itself `config.rebalancer` or `config.feeCollector` (as in the mainnet config): there it keeps that role.
 
 | Role | Holder after deploy | Can | Cannot |
 |---|---|---|---|
 | `DEFAULT_ADMIN_ROLE` | MultiSig | Grant and revoke any role on the IndexManager | Call operational functions, upgrade the proxies |
-| `ASSET_MANAGER_ROLE` | MultiSig | Create and initialize indexes; propose, execute and cancel weight updates; register and replace price feeds on the PriceFeedManager | Rebalance, collect fees, mint or redeem |
-| `REBALANCER_ROLE` | Deployer | Rebalance one index or a list (`getInitializedIndexes()` covers all) | Create indexes, change weights, collect fees |
-| `FEE_COLLECTOR_ROLE` | Deployer | Withdraw fees from one index or a list; fees go to the caller | Rebalance, create indexes, change weights |
+| `ASSET_MANAGER_ROLE` | MultiSig | Create and initialize indexes; propose and cancel weight updates; register and replace price feeds on the PriceFeedManager | Rebalance, execute weight updates, collect fees, mint or redeem |
+| `REBALANCER_ROLE` | `config.rebalancer` (the keeper) and the MultiSig | Rebalance one index or a list (`getInitializedIndexes()` covers all); execute weight updates whose delay has passed | Create indexes, propose or cancel weights, collect fees |
+| `FEE_COLLECTOR_ROLE` | `config.feeCollector` (the keeper) and the MultiSig | Withdraw fees from one index or a list; fees go to the caller | Rebalance, create indexes, change weights |
 
-Splitting the roles means the rebalancer can be a keeper bot with a hot key, while index creation and weights stay behind the MultiSig.
+Splitting the roles means the rebalancer can be a keeper bot with a hot key, while index creation and weight proposals stay behind the MultiSig. Executing a weight update sits with the rebalancer because the keeper only runs a proposal the MultiSig already approved and that already waited the 2-day delay; giving the keeper `ASSET_MANAGER_ROLE` instead would also let it create indexes, propose weights and replace price feeds.
+
+The MultiSig also holds the two keeper roles as an emergency fallback. If the keeper is down or its key is lost, the MultiSig can rebalance, execute weight updates and collect fees itself. Fees collected that way go to the MultiSig, because `collectFees` pays `msg.sender`. The keeper addresses are `config.rebalancer` and `config.feeCollector` in `deployments/<chainId>.json`.
 
 ### Index access control
 
@@ -335,7 +337,7 @@ These come from the internal security review (no Critical or High findings open)
 
 - **No exit without swaps, no pause (M-02).** Mint, redeem and rebalance all need fresh prices from three feeds and a working swap route. If a feed goes stale, redeems revert until it recovers or is replaced (at least 2 days). Routes can only change through a SwapManager upgrade: `updateRoute` exists but the IndexManager doesn't expose it. The planned fix is an in-kind redeem that pays out a share of both reserves with no oracle and no swap.
 - **Oracle-lag arbitrage (M-04).** Shares are priced at the Chainlink NAV while deposits and withdrawals lean toward one asset. When the market moves within a feed's deviation threshold, a trader can capture part of that gap at the expense of passive holders, minus the protocol and pool fees. Still to be measured on a fork.
-- **The deployer keeps the rebalancer and fee collector roles (L-10).** Fine for local development; a real deployment would hand them to a keeper and the MultiSig.
+- **Keeper roles (L-10).** Since 2026-11-14 `DeployPeriphery` gives `REBALANCER_ROLE` and `FEE_COLLECTOR_ROLE` to the configured keeper addresses and to the MultiSig instead of leaving them to the deployer. In the mainnet config both keeper addresses are still the deployer, so there the deployer keeps them. The change, like the move of weight-update execution to `REBALANCER_ROLE`, hasn't been through the review yet.
 - **IndexFactory, SplitCode and the custom/common error split** haven't been through the review yet.
 
 ---
@@ -419,7 +421,7 @@ make integrationtest  # integration tests only, fork required
 │   ├── DeployPeriphery.s.sol        # MultiSig, timelock, IndexFactory, IndexManager (+ proxies), USDC feed, roles
 │   ├── DeployAndInitNewIndex.s.sol  # Missing feeds, createIndex and initializeIndex through the MultiSig
 │   ├── DeploymentFile.sol           # Path of deployments/<chainId>.json and write guard (only under --broadcast)
-│   ├── FundAccounts.s.sol           # Tops up WETH/WBTC/USDC of the test accounts
+│   ├── FundAccounts.s.sol           # Tops up WETH/WBTC/USDC of the test accounts and ETH of the keepers
 │   ├── HelperConfig.s.sol           # Network config (mainnet, fork 31338) and Anvil mocks
 │   ├── HelperConfigFromDeployment.s.sol # Same config, Anvil mocks loaded from deployments/
 │   └── RefreshMockFeeds.s.sol       # Anvil only: re-publishes every mock feed answer
@@ -463,7 +465,7 @@ make anvil / make anvil-fork   # plain Anvil / the mainnet fork (chain id 31338)
 make deploy-anvil           # periphery + WETH/WBTC index on plain Anvil, then fund the test accounts
 make deploy-fork            # fund the test accounts, then periphery + WETH/WBTC index on the fork
 make deploy-index           # one more index on an existing deployment (INDEX_* env vars)
-make fund                   # top up WETH/WBTC/USDC of Anvil accounts 0-9 (Anvil or fork)
+make fund                   # top up WETH/WBTC/USDC of Anvil accounts 0-9 and gas ETH of the keepers (Anvil or fork)
 make refresh-feeds          # Anvil only: make every mock feed fresh again
 make snapshot               # fresh Anvil + deploy + fund, state saved to .anvil/31337.json
 make anvil-load             # start Anvil from the snapshot
@@ -510,7 +512,7 @@ make anvil-fork
 make deploy-fork
 ```
 
-`deploy-fork` runs `FundAccounts` (100 WETH, 5 WBTC and 1,000,000 USDC written into the balance slots of Anvil accounts 0-9, with no swaps, so the WBTC/WETH pool stays aligned with Chainlink), then `DeployPeriphery` and `DeployAndInitNewIndex`. `deploy-anvil` runs `DeployPeriphery`, `DeployAndInitNewIndex` and then `FundAccounts`, which mints the same amounts of the mock tokens. `FundAccounts` only tops up, so `make fund` can run again at any time. `FUND_ACCOUNTS` (comma-separated addresses), `FUND_ACCOUNT_COUNT`, `FUND_WETH`, `FUND_WBTC` and `FUND_USDC` change accounts and amounts. The broadcasts use `--legacy` because Anvil forwards `eth_feeHistory` with reward percentiles to the upstream RPC, which may answer 503.
+`deploy-fork` runs `FundAccounts` (100 WETH, 5 WBTC and 1,000,000 USDC written into the balance slots of Anvil accounts 0-9, with no swaps, so the WBTC/WETH pool stays aligned with Chainlink), then `DeployPeriphery` and `DeployAndInitNewIndex`. `deploy-anvil` runs `DeployPeriphery`, `DeployAndInitNewIndex` and then `FundAccounts`, which mints the same amounts of the mock tokens. `FundAccounts` also brings the two keeper accounts (`config.rebalancer` and `config.feeCollector`) up to 10 ETH for gas: with a transfer from account 0 on Anvil, and with `anvil_setBalance` on the fork, so no transaction is sent before the deploy and the fork addresses don't move. `FundAccounts` only tops up, so `make fund` can run again at any time. `FUND_ACCOUNTS` (comma-separated addresses), `FUND_ACCOUNT_COUNT`, `FUND_WETH`, `FUND_WBTC` and `FUND_USDC` change accounts and amounts. The broadcasts use `--legacy` because Anvil forwards `eth_feeHistory` with reward percentiles to the upstream RPC, which may answer 503.
 
 Every run writes `deployments/<chainId>.json`: chain id, `startBlock`, deployer, MultiSig (owners, threshold), timelock, IndexManager, IndexFactory, the three proxies with their implementations, the network config, the Anvil mocks and an `indexes` object keyed by index address. `DeployPeriphery` rewrites the file and `DeployAndInitNewIndex` adds one entry under `indexes`. The file is written only with `--broadcast`, never during `forge test`. Block numbers are the ones the script sees, so treat them as lower bounds when indexing.
 
@@ -543,7 +545,7 @@ From the command line `DeployAndInitNewIndex` needs `--sig "run()"`; the Make ta
 
 ## 10. Testing
 
-**1009 tests in 50 suites, all passing**: 926 unit tests and 83 integration tests on the mainnet fork.
+**1035 tests in 51 suites, all passing**: 942 unit tests and 93 integration tests on the mainnet fork.
 
 ### Mocks
 

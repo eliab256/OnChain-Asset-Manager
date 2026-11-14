@@ -281,7 +281,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     function executeSingleWeightUpdate(address _indexAddress)
         public
         isIndexInitialized(_indexAddress)
-        onlyRole(ASSET_MANAGER_ROLE)
+        onlyRole(REBALANCER_ROLE)
     {
         _tryIndexAction(_indexAddress, IndexAction.EXECUTE_WEIGHTS, true);
     }
@@ -302,7 +302,7 @@ contract IndexManager is IIndexManager, AccessControl, ContractCodeConstants {
     /// @dev Inherit from IIndexManager. See interface for details.
     function executeWeightUpdateForMultipleIndexes(address[] calldata _indexAddresses)
         public
-        onlyRole(ASSET_MANAGER_ROLE)
+        onlyRole(REBALANCER_ROLE)
         areIndexesInitialized(_indexAddresses)
     {
         _tryIndexActions(_indexAddresses, IndexAction.EXECUTE_WEIGHTS);

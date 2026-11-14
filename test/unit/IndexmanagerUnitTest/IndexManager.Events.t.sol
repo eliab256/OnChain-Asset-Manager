@@ -124,14 +124,14 @@ contract IndexManagerEventsTest is BaseTest {
 
     function testCollectFeesFromSingleIndexFailureEmitsActionFailedWithNoFeesToCollect() public {
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         indexManager.collectFeesFromSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            feeCollector,
             IndexAction.COLLECT_FEES,
             abi.encodeWithSelector(Index__NoFeesToCollect.selector)
         );
@@ -139,14 +139,14 @@ contract IndexManagerEventsTest is BaseTest {
 
     function testRebalanceSingleIndexFailureEmitsActionFailedWithRebalanceNotNeeded() public {
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.rebalanceSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.REBALANCE,
             abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
@@ -156,29 +156,30 @@ contract IndexManagerEventsTest is BaseTest {
         bytes memory expectedReason = _breakRebalanceSwap();
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.rebalanceSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        _assertOnlyActionFailed(logs, address(initializedIndex), deployer, IndexAction.REBALANCE, expectedReason);
+        _assertOnlyActionFailed(logs, address(initializedIndex), rebalancer, IndexAction.REBALANCE, expectedReason);
     }
 
     function testExecuteSingleWeightUpdateFailureEmitsActionFailedWithNotPendingWeightUpdate() public {
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         _assertOnlyActionFailed(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
     }
 
     function testExecuteSingleWeightUpdateFailureViaMultiSigLogsMultiSigAsCaller() public {
+        // The MultiSig holds REBALANCER_ROLE as the emergency fallback of the keeper.
         vm.recordLogs();
         vm.prank(address(multiSigWallet));
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
@@ -203,15 +204,15 @@ contract IndexManagerEventsTest is BaseTest {
         assertGt(feesToCollect, 0, "fees must have accrued");
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(feeCollector);
         indexManager.collectFeesFromSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.COLLECT_FEES);
+        _assertOnlyActionTriggered(logs, address(initializedIndex), feeCollector, IndexAction.COLLECT_FEES);
 
         (uint256 count, uint256 eventIndex) = _findLogs(logs, address(initializedIndex), FeesCollected.selector);
         assertEq(count, 1, "Index FeesCollected was not emitted");
-        assertEq(_topicToAddress(logs[eventIndex].topics[1]), deployer, "fee collector");
+        assertEq(_topicToAddress(logs[eventIndex].topics[1]), feeCollector, "fee collector");
         assertEq(abi.decode(logs[eventIndex].data, (uint256)), feesToCollect, "fee amount");
     }
 
@@ -223,11 +224,11 @@ contract IndexManagerEventsTest is BaseTest {
         _refreshExchangeRates();
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+        _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
         (uint256 count,) = _findLogs(logs, address(initializedIndex), WeightsUpdated.selector);
         assertEq(count, 1, "Index WeightsUpdated was not emitted");
     }

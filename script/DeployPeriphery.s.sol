@@ -30,8 +30,14 @@ contract DeployPeriphery is Script, CodeConstants {
 
     /**
      * @notice Deploys the MultiSigWallet, the TimelockController, the IndexFactory, the IndexManager
-     *         and its three proxies, then hands the IndexManager roles over to the MultiSigWallet.
-     * @dev Under `forge script --broadcast` it also rewrites `deployments/<chainId>.json` from scratch.
+     *         and its three proxies, then hands the IndexManager roles over: DEFAULT_ADMIN_ROLE and
+     *         ASSET_MANAGER_ROLE to the MultiSigWallet, REBALANCER_ROLE to `config.rebalancer` and
+     *         FEE_COLLECTOR_ROLE to `config.feeCollector`, both keeper roles also to the MultiSigWallet.
+     * @dev The MultiSigWallet holds the keeper roles as an emergency fallback when the keeper is down;
+     *      fees it collects are paid to the MultiSigWallet. The deployer ends with no role, unless it is
+     *      itself `config.rebalancer` or `config.feeCollector` (as on mainnet), in which case it keeps
+     *      only that role. Under `forge script --broadcast` it also rewrites `deployments/<chainId>.json`
+     *      from scratch.
      */
     function run()
         external
@@ -82,12 +88,20 @@ contract DeployPeriphery is Script, CodeConstants {
             config.usdcAddress, config.usdcPriceFeedAddress, config.usdcPriceFeedMaxDelay
         );
 
-        // 4. Transfer ownership to MultiSigWallet
-        // Grant roles to the multi-sig first
+        // 4. Hand the IndexManager roles over: admin and asset manager to the MultiSigWallet, keeper roles
+        //    to the configured rebalancer and fee collector, with the MultiSigWallet as fallback holder
+        // Grant all roles first
         indexManager.grantRole(indexManager.DEFAULT_ADMIN_ROLE(), address(multiSigWallet));
         indexManager.grantRole(indexManager.ASSET_MANAGER_ROLE(), address(multiSigWallet));
-        // Revoke ASSET_MANAGER_ROLE before DEFAULT_ADMIN_ROLE (revoking requires admin)
+        indexManager.grantRole(indexManager.REBALANCER_ROLE(), address(multiSigWallet));
+        indexManager.grantRole(indexManager.FEE_COLLECTOR_ROLE(), address(multiSigWallet));
+        indexManager.grantRole(indexManager.REBALANCER_ROLE(), config.rebalancer);
+        indexManager.grantRole(indexManager.FEE_COLLECTOR_ROLE(), config.feeCollector);
+        // Revoke the other deployer roles before DEFAULT_ADMIN_ROLE (revoking requires admin);
+        // a deployer that is also the configured keeper keeps that role
         indexManager.revokeRole(indexManager.ASSET_MANAGER_ROLE(), deployer);
+        if (deployer != config.rebalancer) indexManager.revokeRole(indexManager.REBALANCER_ROLE(), deployer);
+        if (deployer != config.feeCollector) indexManager.revokeRole(indexManager.FEE_COLLECTOR_ROLE(), deployer);
         indexManager.revokeRole(indexManager.DEFAULT_ADMIN_ROLE(), deployer);
 
         console.log("============== Deployment Summary ==============");

@@ -61,7 +61,7 @@ Le preview ignorano il price impact degli swap, come quelle del contratto: il mi
 | Classe | Scritture (`…CallParameters`) | Letture (`…Read`) e parser |
 |---|---|---|
 | `RouterManager` | `buy`, `buyWithPermit`, `sell` | `minMintPreviewRead`, `minRedeemPreviewRead`, `maxToleranceRead`, `usdcRead`, `indexManagerRead`; `checkBuy` / `checkSell` su stato già letto |
-| `IndexManagerCalls` | `rebalance`, `executeWeightUpdate`, `collectFees` (singoli e `…Many`), `proposeNewWeights`, `cancelWeightUpdate`; admin (tramite MultiSig): `createIndex`, `initializeIndex`, `grantRole`, `revokeRole` | `deployedIndexesRead`, `initializedIndexesRead`, `isIndexInitializedRead`, `indexByAssetsRead`, `hasRoleRead`; `roleHash`; `checkInitialized` su `initializedIndexesRead` già letto (stesso controllo dei modificatori: un indirizzo non inizializzato fa revert di tutta la batch) |
+| `IndexManagerCalls` | keeper: `rebalance`, `executeWeightUpdate` (`REBALANCER_ROLE`), `collectFees` (`FEE_COLLECTOR_ROLE`), singoli e `…Many`; admin tramite MultiSig: `proposeNewWeights`, `cancelWeightUpdate`, `createIndex`, `initializeIndex`, `grantRole`, `revokeRole` | `deployedIndexesRead`, `initializedIndexesRead`, `isIndexInitializedRead`, `indexByAssetsRead`, `hasRoleRead`; `roleHash`; `checkInitialized` su `initializedIndexesRead` già letto (stesso controllo dei modificatori: un indirizzo non inizializzato fa revert di tutta la batch) |
 | `IndexManager` | nessuna: sull'Index si scrive solo via Router e IndexManager | `snapshotReads` + `toSnapshot`, `pendingWeightsRead` + `toPendingWeightUpdate`, `usdValueRead`, `effectiveWeightsRead` |
 | `PriceFeedManagerCalls` | `registerPriceFeed`, `proposePriceFeedUpdate`, `executePriceFeedUpdate`, `cancelPriceFeedUpdate` (tramite MultiSig) | nessuna: sono in `PriceFeedReads` |
 | `MultiSigCalls` | `submit` (avvolge qualunque `MethodParameters`), `confirm`, `confirmWithSig`, `execute`, `revoke` | `transactionRead`, `transactionCountRead`, `ownersRead`, `isOwnerRead`, `requiredConfirmationsRead`, `isConfirmedRead`, `confirmNonceRead`, `confirmDigestRead`, `eip712DomainRead`; `checkExecutable` su stato già letto |
@@ -190,7 +190,9 @@ Classi attuali: `ZeroAmountError`, `InvalidToleranceError`, `InvalidDeadlineErro
 
 ## 9. Test
 
-**Stato (2026-10-28, dopo il modulo MultiSig).** Unit e property: 713 test su 24 file, tutti verdi (anche con `FC_SEED` fissi). Fork: 90 test in un solo file di ingresso (`test/sdk.integration.test.ts`, che carica `test/suites/*.ts`, compresa `multiSig.ts`); su anvil 31337 ne passano 83 e 7 si saltano, sul fork 31338 ne passano 79 e 11 si saltano (i test che hanno senso solo sull'altra chain).
+**Stato (2026-10-28, dopo il modulo MultiSig).** Unit e property: 713 test su 24 file, tutti verdi (anche con `FC_SEED` fissi). Fork (dal 2026-11-14): 93 test in un solo file di ingresso (`test/sdk.integration.test.ts`, che carica `test/suites/*.ts`, compresa `multiSig.ts`); su anvil 31337 ne passano 86 e 7 si saltano, sul fork 31338 ne passano 82 e 11 si saltano (i test che hanno senso solo sull'altra chain).
+
+**Account del keeper nei test (2026-11-14).** Su 31337 e 31338 i keeper dell'IndexManager sono `config.rebalancer` (`REBALANCER_ROLE`: rebalance ed esecuzione dei pesi) e `config.feeCollector` (`FEE_COLLECTOR_ROLE`) di `deployments/<chainId>.json`, con chiave privata uguale al keccak256 dell'etichetta (`makeAddr` di forge). Il MultiSig ha entrambi i ruoli come riserva e il deployer non ha ruoli: i test mandano le azioni del keeper da `ctx.rebalancer` e `ctx.feeCollector` (`test/helpers/chain.ts`, `deploymentKeepers`).
 
 I test del modulo MultiSig hanno trovato 3 bug, corretti lo stesso giorno: firme high-s e firme con v = 0/1 accettate da `confirmWithSigCallParameters` (on-chain `ECDSA.recover` le rifiuta), `value` della proposta fuori da uint256 che lasciava uscire un errore di viem. Senza nodo attivo la suite fork si salta da sola.
 

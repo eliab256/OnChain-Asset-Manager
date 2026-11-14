@@ -124,6 +124,97 @@ contract DeployPeripheryTest is Test, CodeConstants {
     }
 
     ////////////////////////////////////////////////////////////////////
+    ////////////////////////// IndexManager roles //////////////////////
+    ////////////////////////////////////////////////////////////////////
+
+    function testDeployPeripheryMultiSigHoldsAllIndexManagerRolesOnAnvil() public {
+        _runDeployPeriphery();
+
+        _assertHoldsRoles(address(multiSigWallet), true, true, true, true, "multisig");
+    }
+
+    function testDeployPeripheryKeepersHoldOnlyTheirRoleOnAnvil() public {
+        _runDeployPeriphery();
+        address rebalancer = isolatedHelperConfig.getRebalancer();
+        address feeCollector = isolatedHelperConfig.getFeeCollector();
+        assertNotEq(rebalancer, feeCollector, "anvil config must use distinct keepers");
+        assertNotEq(rebalancer, address(multiSigWallet), "the rebalancer must not be the multisig");
+        assertNotEq(feeCollector, address(multiSigWallet), "the fee collector must not be the multisig");
+
+        _assertHoldsRoles(rebalancer, false, false, true, false, "rebalancer");
+        _assertHoldsRoles(feeCollector, false, false, false, true, "feeCollector");
+    }
+
+    function testDeployPeripheryDeployerHoldsNoIndexManagerRoleOnAnvil() public {
+        DeployPeriphery deployPeriphery = _runDeployPeriphery();
+        assertNotEq(mainnetDeployer, isolatedHelperConfig.getRebalancer(), "anvil deployer must not be the rebalancer");
+        assertNotEq(
+            mainnetDeployer, isolatedHelperConfig.getFeeCollector(), "anvil deployer must not be the fee collector"
+        );
+
+        _assertHoldsRoles(mainnetDeployer, false, false, false, false, "deployer");
+        _assertHoldsRoles(address(deployPeriphery), false, false, false, false, "script contract");
+    }
+
+    /// @dev On the mainnet config the deployer is also the configured rebalancer and fee collector: it keeps
+    ///      exactly those two keeper roles after run(), while admin and asset manager go to the multisig only.
+    ///      Asserted on the state right after run(): IntegrationBase grants admin and asset manager back to the
+    ///      deployer afterwards, this test does not.
+    function testDeployPeripheryDeployerKeepsOnlyKeeperRolesWhenItIsTheKeeperOnMainnet() public selectFork("mainnet") {
+        _runDeployPeriphery();
+        assertEq(isolatedHelperConfig.getRebalancer(), mainnetDeployer, "mainnet rebalancer must be the deployer");
+        assertEq(isolatedHelperConfig.getFeeCollector(), mainnetDeployer, "mainnet fee collector must be the deployer");
+
+        _assertHoldsRoles(mainnetDeployer, false, false, true, true, "deployer");
+        _assertHoldsRoles(address(multiSigWallet), true, true, true, true, "multisig");
+    }
+
+    /// @dev Runs DeployPeriphery on the active chain and stores its outputs in the test state.
+    function _runDeployPeriphery() internal returns (DeployPeriphery deployPeriphery) {
+        deployPeriphery = new DeployPeriphery();
+        (
+            mainnetIndexManager,
+            mainnetRouter,
+            isolatedHelperConfig,
+            mainnetSwapManager,
+            multiSigWallet,
+            timelock,
+            mainnetDeployer
+        ) = deployPeriphery.run();
+    }
+
+    /// @dev Asserts `_account` holds exactly the given subset of the four IndexManager roles.
+    function _assertHoldsRoles(
+        address _account,
+        bool _admin,
+        bool _assetManager,
+        bool _rebalancer,
+        bool _feeCollector,
+        string memory _label
+    ) internal view {
+        assertEq(
+            mainnetIndexManager.hasRole(mainnetIndexManager.DEFAULT_ADMIN_ROLE(), _account),
+            _admin,
+            string.concat(_label, ": DEFAULT_ADMIN_ROLE")
+        );
+        assertEq(
+            mainnetIndexManager.hasRole(mainnetIndexManager.ASSET_MANAGER_ROLE(), _account),
+            _assetManager,
+            string.concat(_label, ": ASSET_MANAGER_ROLE")
+        );
+        assertEq(
+            mainnetIndexManager.hasRole(mainnetIndexManager.REBALANCER_ROLE(), _account),
+            _rebalancer,
+            string.concat(_label, ": REBALANCER_ROLE")
+        );
+        assertEq(
+            mainnetIndexManager.hasRole(mainnetIndexManager.FEE_COLLECTOR_ROLE(), _account),
+            _feeCollector,
+            string.concat(_label, ": FEE_COLLECTOR_ROLE")
+        );
+    }
+
+    ////////////////////////////////////////////////////////////////////
     ////////////////////////// TimelockController //////////////////////
     ////////////////////////////////////////////////////////////////////
 

@@ -15,7 +15,8 @@ function assertTxId(operation: string, txId: bigint): void {
 }
 
 /**
- * Calls to the MultiSigWallet (2 of 3), which holds `DEFAULT_ADMIN_ROLE` and `ASSET_MANAGER_ROLE` on the IndexManager.
+ * Calls to the MultiSigWallet (2 of 3), which holds `DEFAULT_ADMIN_ROLE` and `ASSET_MANAGER_ROLE` on the IndexManager,
+ * plus `REBALANCER_ROLE` and `FEE_COLLECTOR_ROLE` as a fallback for the keeper.
  * Flow: an owner submits a proposal wrapping any `MethodParameters` of the SDK (`submitCallParameters`), the owners
  * confirm it on-chain (`confirmCallParameters`) or off-chain with an EIP-712 signature (`buildConfirmTypedData`,
  * then anyone sends `confirmWithSigCallParameters`), and an owner executes it once the confirmations are enough.

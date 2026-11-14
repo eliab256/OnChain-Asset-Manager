@@ -82,19 +82,16 @@ contract IndexManagerCommonErrorsTest is BaseTest {
                 initialAssetBDeposit: SECOND_INDEX_LINK_DEPOSIT
             })
         );
-
-        bytes32 feeCollectorRole = indexManager.FEE_COLLECTOR_ROLE();
-        vm.prank(deployer);
-        indexManager.grantRole(feeCollectorRole, feeCollector);
     }
 
     // =========================================================================
     //  Helpers
     // =========================================================================
 
-    /// @dev Account holding the role required by `_action` (REBALANCER, ASSET_MANAGER or FEE_COLLECTOR).
+    /// @dev Keeper account that holds the role required by `_action` after DeployPeriphery: the rebalancer
+    ///      (REBALANCER_ROLE) for REBALANCE and EXECUTE_WEIGHTS, the fee collector (FEE_COLLECTOR_ROLE) for COLLECT_FEES.
     function _callerFor(IndexAction _action) internal view returns (address) {
-        return _action == IndexAction.COLLECT_FEES ? feeCollector : deployer;
+        return _action == IndexAction.COLLECT_FEES ? feeCollector : rebalancer;
     }
 
     /// @dev Calldata the IndexManager sends to the Index for `_action` (collectFees always to the caller).

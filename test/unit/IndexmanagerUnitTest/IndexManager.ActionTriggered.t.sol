@@ -58,10 +58,6 @@ contract IndexManagerActionTriggeredTest is BaseTest {
                 initialAssetBDeposit: SECOND_INDEX_LINK_DEPOSIT
             })
         );
-
-        bytes32 feeCollectorRole = indexManager.FEE_COLLECTOR_ROLE();
-        vm.prank(deployer);
-        indexManager.grantRole(feeCollectorRole, feeCollector);
     }
 
     // =========================================================================
@@ -199,18 +195,31 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _unbalanceInitializedIndexOnly();
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.rebalanceSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         uint256 actionPosition =
-            _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.REBALANCE);
+            _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.REBALANCE);
+        _assertIndexEventBeforeAction(logs, address(initializedIndex), IndexRebalanced.selector, actionPosition);
+    }
+
+    function testRebalanceSingleIndexViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller() public {
+        _unbalanceInitializedIndexOnly();
+
+        vm.recordLogs();
+        vm.prank(address(multiSigWallet));
+        indexManager.rebalanceSingleIndex(address(initializedIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        uint256 actionPosition =
+            _assertOnlyActionTriggered(logs, address(initializedIndex), address(multiSigWallet), IndexAction.REBALANCE);
         _assertIndexEventBeforeAction(logs, address(initializedIndex), IndexRebalanced.selector, actionPosition);
     }
 
     function testRebalanceSingleIndexFailureEmitsNoActionTriggered() public {
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.rebalanceSingleIndex(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
@@ -222,7 +231,7 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _assertSingleActionFailedFor(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.REBALANCE,
             abi.encodeWithSelector(Index__RebalanceNotNeeded.selector)
         );
@@ -232,13 +241,13 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _unbalanceInitializedIndexOnly();
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.rebalanceMultipleIndexes(_twoIndexes());
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         _assertBatchOneSuccessOneFailure(
             logs,
-            deployer,
+            rebalancer,
             IndexAction.REBALANCE,
             abi.encodeWithSelector(Index__RebalanceNotNeeded.selector),
             IndexRebalanced.selector
@@ -286,12 +295,12 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _refreshExchangeRates();
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         uint256 actionPosition =
-            _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+            _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
         _assertIndexEventBeforeAction(logs, address(initializedIndex), WeightsUpdated.selector, actionPosition);
     }
 
@@ -303,12 +312,12 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _updatePriceFeedsWithNewPrices(0, 0, WBTC_INITIAL_PRICE * 2, 0);
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         uint256 actionPosition =
-            _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+            _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
         _assertIndexEventBeforeAction(
             logs, address(initializedIndex), WeightsUpdateRebalanceSkipped.selector, actionPosition
         );
@@ -321,20 +330,35 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         deal(address(mockWbtc), address(mockUniRouter), 0);
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         uint256 actionPosition =
-            _assertOnlyActionTriggered(logs, address(initializedIndex), deployer, IndexAction.EXECUTE_WEIGHTS);
+            _assertOnlyActionTriggered(logs, address(initializedIndex), rebalancer, IndexAction.EXECUTE_WEIGHTS);
         _assertIndexEventBeforeAction(
             logs, address(initializedIndex), WeightsUpdateRebalanceFailed.selector, actionPosition
         );
     }
 
+    function testExecuteSingleWeightUpdateViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller() public {
+        _proposeAndWarpToExecutable(address(initializedIndex), weight70);
+        _refreshExchangeRates();
+
+        vm.recordLogs();
+        vm.prank(address(multiSigWallet));
+        indexManager.executeSingleWeightUpdate(address(initializedIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        uint256 actionPosition = _assertOnlyActionTriggered(
+            logs, address(initializedIndex), address(multiSigWallet), IndexAction.EXECUTE_WEIGHTS
+        );
+        _assertIndexEventBeforeAction(logs, address(initializedIndex), WeightsUpdated.selector, actionPosition);
+    }
+
     function testExecuteSingleWeightUpdateFailureEmitsNoActionTriggered() public {
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeSingleWeightUpdate(address(initializedIndex));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
@@ -346,7 +370,7 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _assertSingleActionFailedFor(
             logs,
             address(initializedIndex),
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector)
         );
@@ -357,13 +381,13 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         _refreshExchangeRates();
 
         vm.recordLogs();
-        vm.prank(deployer);
+        vm.prank(rebalancer);
         indexManager.executeWeightUpdateForMultipleIndexes(_twoIndexes());
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         _assertBatchOneSuccessOneFailure(
             logs,
-            deployer,
+            rebalancer,
             IndexAction.EXECUTE_WEIGHTS,
             abi.encodeWithSelector(Index__NotPendingWeightUpdate.selector),
             WeightsUpdated.selector
@@ -418,6 +442,31 @@ contract IndexManagerActionTriggeredTest is BaseTest {
         uint256 actionPosition =
             _assertOnlyActionTriggered(logs, address(initializedIndex), feeCollector, IndexAction.COLLECT_FEES);
         _assertIndexEventBeforeAction(logs, address(initializedIndex), FeesCollected.selector, actionPosition);
+    }
+
+    function testCollectFeesFromSingleIndexViaMultiSigEmitsActionTriggeredWithMultiSigAsCaller() public {
+        _mintSharesViaRouter(user1, FEE_GENERATING_DEPOSIT);
+        (, uint128 feesToCollect) = initializedIndex.getFeesInfo();
+        assertGt(feesToCollect, 0, "fees must have accrued");
+
+        vm.recordLogs();
+        vm.prank(address(multiSigWallet));
+        indexManager.collectFeesFromSingleIndex(address(initializedIndex));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        uint256 actionPosition = _assertOnlyActionTriggered(
+            logs, address(initializedIndex), address(multiSigWallet), IndexAction.COLLECT_FEES
+        );
+        _assertIndexEventBeforeAction(logs, address(initializedIndex), FeesCollected.selector, actionPosition);
+
+        (, uint256 feesPosition) = _findIndexEvent(logs, address(initializedIndex), FeesCollected.selector);
+        assertEq(logs[feesPosition].topics.length, 2, "FeesCollected must have 1 indexed param");
+        assertEq(
+            address(uint160(uint256(logs[feesPosition].topics[1]))),
+            address(multiSigWallet),
+            "FeesCollected must log the MultiSig as collector"
+        );
+        assertEq(abi.decode(logs[feesPosition].data, (uint256)), feesToCollect, "FeesCollected must log the amount");
     }
 
     function testCollectFeesFromSingleIndexFailureEmitsNoActionTriggered() public {

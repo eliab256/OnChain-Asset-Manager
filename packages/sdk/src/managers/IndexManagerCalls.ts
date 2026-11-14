@@ -78,7 +78,10 @@ export abstract class IndexManagerCalls {
     );
   }
 
-  /** `ASSET_MANAGER_ROLE`. Executes a weight proposal whose timelock has elapsed. */
+  /**
+   * `REBALANCER_ROLE`, sent directly by the keeper account (or by the MultiSig as fallback). Executes a weight
+   * proposal whose timelock has elapsed.
+   */
   static executeWeightUpdateCallParameters(params: SingleIndexParams): MethodParameters {
     return call(
       params.indexManager,
@@ -90,7 +93,7 @@ export abstract class IndexManagerCalls {
     );
   }
 
-  /** `ASSET_MANAGER_ROLE`. @throws {EmptyIndexListError} */
+  /** `REBALANCER_ROLE` (keeper account, or the MultiSig as fallback). @throws {EmptyIndexListError} */
   static executeWeightUpdateManyCallParameters(params: ManyIndexesParams): MethodParameters {
     assertNotEmpty("executeWeightUpdateMany", params.indexes);
     return call(
