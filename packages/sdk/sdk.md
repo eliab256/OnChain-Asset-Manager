@@ -164,7 +164,7 @@ I parser degli eventi accettano solo i log del contratto atteso (l'Index per `Sh
 
 Su anvil puro Multicall3 non è deployato: lì si usa `Promise.all` di `readContract`. Sul fork 31338 c'è quello di mainnet.
 
-I dati dell'indexer (via API) servono solo a trovare i candidati. Prima di inviare una tx il keeper ricostruisce lo snapshot dalla chain, perché l'indexer può essere qualche blocco indietro.
+Il keeper trova i candidati leggendo la chain (deciso il 2026-11-14): elenco degli Index da `initializedIndexesRead`, poi snapshot, proposta pendente e fee di ciascuno. Non usa i dati dell'indexer, che può essere fermo o qualche blocco indietro.
 
 ## 7. Errori
 

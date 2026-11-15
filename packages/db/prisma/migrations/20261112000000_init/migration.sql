@@ -11,7 +11,7 @@ CREATE TYPE "ContractKind" AS ENUM ('INDEX_MANAGER', 'INDEX', 'PRICE_FEED_MANAGE
 CREATE TYPE "TradeKind" AS ENUM ('SEED', 'MINT', 'REDEEM');
 
 -- CreateEnum
-CREATE TYPE "ProposalStatus" AS ENUM ('PENDING', 'EXECUTED', 'CANCELLED');
+CREATE TYPE "ProposalStatus" AS ENUM ('PENDING', 'EXECUTED', 'CANCELLED', 'EXPIRED');
 
 -- CreateEnum
 CREATE TYPE "RebalanceOrigin" AS ENUM ('DIRECT', 'WEIGHTS_UPDATE');
@@ -112,6 +112,8 @@ CREATE TABLE "Token" (
 CREATE TABLE "Index" (
     "chainId" INTEGER NOT NULL,
     "address" VARCHAR(42) NOT NULL,
+    "name" TEXT NOT NULL,
+    "symbol" TEXT NOT NULL,
     "asset0" VARCHAR(42) NOT NULL,
     "asset1" VARCHAR(42) NOT NULL,
     "feePercentage" INTEGER NOT NULL,
@@ -302,6 +304,7 @@ CREATE TABLE "WeightProposal" (
     "closedBlock" BIGINT,
     "closedTxHash" CHAR(66),
     "closedAt" TIMESTAMP(3),
+    "overwritten" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "WeightProposal_pkey" PRIMARY KEY ("id")
 );
@@ -391,6 +394,7 @@ CREATE TABLE "PriceFeedProposal" (
     "closedBlock" BIGINT,
     "closedTxHash" CHAR(66),
     "closedAt" TIMESTAMP(3),
+    "overwritten" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "PriceFeedProposal_pkey" PRIMARY KEY ("id")
 );
@@ -529,7 +533,6 @@ CREATE TABLE "TimelockCall" (
     "target" VARCHAR(42) NOT NULL,
     "value" DECIMAL(78,0) NOT NULL,
     "data" TEXT NOT NULL,
-    "executed" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "TimelockCall_pkey" PRIMARY KEY ("chainId","timelock","operationId","callIndex")
 );
