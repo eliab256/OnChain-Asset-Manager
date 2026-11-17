@@ -2,13 +2,13 @@
 
 Regole e struttura dell'indexer off-chain. Legge i blocchi della chain, decodifica gli eventi del protocollo e scrive le tabelle di `@oam/db`. Se cambi una convenzione descritta in questo file, aggiornalo nello stesso commit.
 
-**Stato (2026-11-15): progetto, il codice non c'è ancora.** In `apps/indexer` oggi ci sono solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
+**Stato (2026-11-17): passi 1 e 2 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger e layer `chain/`, con unit test). `src/index.ts` per ora legge la configurazione, controlla il chain id e stampa l'head; repository, pipeline e runner arrivano dal passo 3. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
 
 Cosa sta dove:
 
 - questo file: come è fatto il processo (layer, ciclo dei blocchi, come si scrive un handler);
 - `packages/db/db.md`: cosa si scrive, cioè la mappa evento → tabella, le regole di abbinamento, i prezzi, le notifiche e il reorg. Vale quello che c'è scritto lì: qui non si ripete;
-- `localHelpers/roadmap.md`, Fase 4: l'ordine dei lavori.
+- `localHelpers/indexer-roadmap.md`: l'ordine dei lavori, passo per passo, con lo stato di ogni passo. I punti della Fase 4 di `localHelpers/roadmap.md` restano come riferimento.
 
 ## 1. Il principio: si lavora per blocco
 
@@ -44,6 +44,13 @@ Variabili in `apps/indexer/.env` (modello in `.env.example`), validate all'avvio
 | `BATCH_SIZE` | blocchi per chiamata `getLogs` nel backfill (default 2000) |
 | `POLL_INTERVAL_MS` | intervallo del polling HTTP dell'head nel live: di riserva con il WebSocket (default 30000), unico segnale senza `RPC_WS_URL` (in quel caso conviene 1000) |
 
+**Segreti negli URL** (2026-11-17). I provider RPC mettono la API key nell'URL (Alchemy e Infura nel percorso, altri nella query o come password), e `DATABASE_URL` contiene la password. Due difese, in `src/secrets.ts`:
+
+- `describeConfig` stampa degli URL RPC solo protocollo, host e porta (`https://eth-mainnet.g.alchemy.com/***`); dell'URL del DB maschera solo la password, perché il nome del database non è un segreto.
+- All'avvio `logger.redact(configSecrets(config))` registra le parti segrete (percorso e query degli URL RPC, segmenti lunghi almeno 16 caratteri, password), e il logger le sostituisce con `***` in **ogni** riga. Serve perché viem scrive l'URL completo nei messaggi di errore HTTP (`URL: https://…/v2/<KEY>`), che arrivano al log da `errorMessage`, non da `describeConfig`. I valori sotto 6 caratteri non si redigono in tutta la riga (la password locale `oam` cancellerebbe `@oam/abi`).
+
+Regola per il codice futuro: niente `console.log` diretti, tutto passa dal `logger`, altrimenti la redazione non si applica.
+
 ## 3. Layer
 
 Ogni layer conosce solo quello sotto. È l'unica regola ripresa dalla vecchia guida.
@@ -51,7 +58,13 @@ Ogni layer conosce solo quello sotto. È l'unica regola ripresa dalla vecchia gu
 ```
 src/
   config.ts         variabili d'ambiente validate
+  logger.ts         log in righe JSON, con redazione dei segreti
+  secrets.ts        maschera degli URL e parti segrete da redigere
   chain/            client viem e decodifica dei log: non conosce il DB
+    clients.ts        client HTTP e WebSocket, controllo del chain id
+    abi.ts            ABI unione dei soli eventi del protocollo
+    logs.ts           fetchLogs, decodeLog: log normalizzati, "decoded" o "unknown"
+    reads.ts          readContractAt, multicallAt (blockNumber obbligatorio)
   handlers/         un file per contratto, una funzione per evento
   repositories/     l'unico layer che usa Prisma: non conosce la chain
   pipeline.ts       processRange(from, to) e processBlock
@@ -59,7 +72,9 @@ src/
   index.ts          avvio e chiusura pulita su SIGINT / SIGTERM
 ```
 
-- `chain/` restituisce log già decodificati e normalizzati: `{ address, eventName, args, blockNumber, blockHash, txHash, logIndex }`, indirizzi in minuscolo.
+- `chain/` restituisce log già decodificati e normalizzati: `{ address, eventName, args, blockNumber, blockHash, txHash, logIndex }`, indirizzi in minuscolo (anche dentro `args`). Il tipo è un'unione discriminata su `eventName`, quindi un handler che legge un campo inesistente non compila. Un log che non corrisponde a nessun evento del protocollo torna con `kind: "unknown"` (con `reason` e `detail` dell'errore di decodifica) invece di lanciare. Gli indirizzi in `args` si mettono in minuscolo guardando il tipo dell'ABI, non la forma della stringa.
+- Le letture si fanno con `readContractAt` e `multicallAt` di `chain/reads.ts`, dove `blockNumber` è obbligatorio nei tipi. Il multicall è deployless: il codice dell'aggregatore viaggia dentro la `eth_call`, perché anvil puro non ha Multicall3.
+- I test unitari stanno accanto ai sorgenti (`src/**/*.test.ts`) e girano con `npm test --workspace @oam/indexer`, senza RPC né DB.
 - Un handler riceve la transazione Prisma del blocco, l'evento e il contesto del blocco (numero, hash, timestamp, gli altri log della stessa tx). Decide cosa scrivere e chiama i repository. Le letture RPC le fa attraverso `chain/`, sempre con `blockNumber` del blocco che sta processando, mai `latest`: così un blocco riprocessato dà lo stesso risultato.
 - I repository espongono operazioni di dominio (`insertTrade`, `applyShareTransfer`), non query generiche.
 - L'API (Fase 5) è un servizio separato: l'indexer non espone HTTP.
@@ -124,19 +139,9 @@ Il resto della mappa evento → tabella è in `db.md` e si aggiunge un handler a
 
 Le regole sono in `db.md`, sezione "Reorg". Nel ciclo il punto di ingresso è il controllo del `parentHash` in `processBlock`: se non coincide si risale all'ultimo blocco comune, si applicano quelle regole e si riparte da lì. Finché il punto 5 della Fase 4 non è scritto, un `parentHash` diverso scrive una riga in `IndexerError` e ferma il processo. Su anvil un reorg si provoca con `anvil_reorg` o con `evm_snapshot` / `evm_revert`.
 
-## 7. Stato dei punti della Fase 4
+## 7. Stato dei lavori
 
-| Punto | Cosa | Stato |
-|---|---|---|
-| 1 | Schema del DB | fatto (`packages/db`) |
-| 2 | Backfill + live, handler di `SharesMinted` e `Transfer` | da fare |
-| 3 | Index creati dinamicamente | da fare |
-| 4 | Idempotenza | la regola del §5 va rispettata dal primo handler |
-| 5 | Reorg | da fare |
-| 6 | Test: replay e reorg | da fare |
-| 7 | Metriche minime | da fare |
-| 8 | Allowance dopo `transferFrom` | da fare |
-| 9 | Prezzi per blocco | da fare |
+Lo stato di ogni passo (e dei punti della Fase 4 a cui corrisponde) sta in `localHelpers/indexer-roadmap.md`, non qui. Lo schema del DB (punto 1) è fatto; del codice ci sono i passi 1 e 2 (configurazione e layer `chain/`).
 
 ## 8. Verifica a mano
 
