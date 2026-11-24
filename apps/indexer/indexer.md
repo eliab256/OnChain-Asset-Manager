@@ -2,7 +2,7 @@
 
 Regole e struttura dell'indexer off-chain. Legge i blocchi della chain, decodifica gli eventi del protocollo e scrive le tabelle di `@oam/db`. Se cambi una convenzione descritta in questo file, aggiornalo nello stesso commit.
 
-**Stato (2026-11-17): passi 1 e 2 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger e layer `chain/`, con unit test). `src/index.ts` per ora legge la configurazione, controlla il chain id e stampa l'head; repository, pipeline e runner arrivano dal passo 3. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
+**Stato (2026-11-22): passi 1 e 2 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger e layer `chain/`, con unit test); **del passo 3 fatti l'harness dei test d'integrazione e i repository di base** (`checkpoint`, `errors`, `blocks`, `contracts`, `rawEvents`). `src/index.ts` per ora legge la configurazione, controlla il chain id e stampa l'head; pipeline e runner sono i prossimi pezzi del passo 3. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
 
 Cosa sta dove:
 
@@ -42,6 +42,7 @@ Variabili in `apps/indexer/.env` (modello in `.env.example`), validate all'avvio
 | `CHAIN_ID` | 31337 (anvil) o 31338 (fork). All'avvio si confronta con `eth_chainId`: se non coincidono il processo si ferma |
 | `DATABASE_URL` | Postgres di `docker-compose.yml`, lo stesso di `packages/db/.env` |
 | `BATCH_SIZE` | blocchi per chiamata `getLogs` nel backfill (default 2000) |
+| `TEST_DATABASE_URL` | solo per i test d'integrazione (§3): il database `oam_test` dello stesso Postgres. Il nome deve finire in `_test`. Non la legge il processo dell'indexer |
 | `POLL_INTERVAL_MS` | intervallo del polling HTTP dell'head nel live: di riserva con il WebSocket (default 30000), unico segnale senza `RPC_WS_URL` (in quel caso conviene 1000) |
 
 **Segreti negli URL** (2026-11-17). I provider RPC mettono la API key nell'URL (Alchemy e Infura nel percorso, altri nella query o come password), e `DATABASE_URL` contiene la password. Due difese, in `src/secrets.ts`:
@@ -53,7 +54,7 @@ Regola per il codice futuro: niente `console.log` diretti, tutto passa dal `logg
 
 ## 3. Layer
 
-Ogni layer conosce solo quello sotto. È l'unica regola ripresa dalla vecchia guida.
+Ogni layer usa solo quelli sotto di lui, mai quelli sopra. È l'unica regola ripresa dalla vecchia guida, precisata il 2026-11-22: le dipendenze formano un albero, non una scala. `index.ts` → `runner.ts` → `pipeline.ts` → `handlers/`; gli handler stanno sopra **due** layer, `chain/` per le letture e `repositories/` per le scritture, e anche la pipeline li usa tutti e due (log e blocchi da `chain/`, `Block`, `RawEvent` e `Checkpoint` da `repositories/`). `chain/` e `repositories/` invece non si conoscono: `chain/` non importa niente di Prisma, `repositories/` niente di viem o dei tipi di `chain/`. `config.ts`, `logger.ts` e `secrets.ts` sono trasversali, li può usare qualunque layer.
 
 ```
 src/
@@ -67,6 +68,13 @@ src/
     reads.ts          readContractAt, multicallAt (blockNumber obbligatorio)
   handlers/         un file per contratto, una funzione per evento
   repositories/     l'unico layer che usa Prisma: non conosce la chain
+    db.ts             tipo Db: client Prisma o client della transazione
+    json.ts           toJsonArgs: args decodificati → JSON (bigint in stringa)
+    checkpoint.ts     getCheckpoint, setCheckpoint
+    errors.ts         recordIndexerError
+    blocks.ts         insertBlock, getStoredBlock
+    contracts.ts      insertFixedContracts, insertIndexContract, loadContractKinds
+    rawEvents.ts      insertRawEvents
   pipeline.ts       processRange(from, to) e processBlock
   runner.ts         bootstrap, backfill, ciclo live
   index.ts          avvio e chiusura pulita su SIGINT / SIGTERM
@@ -75,28 +83,50 @@ src/
 - `chain/` restituisce log già decodificati e normalizzati: `{ address, eventName, args, blockNumber, blockHash, txHash, logIndex }`, indirizzi in minuscolo (anche dentro `args`). Il tipo è un'unione discriminata su `eventName`, quindi un handler che legge un campo inesistente non compila. Un log che non corrisponde a nessun evento del protocollo torna con `kind: "unknown"` (con `reason` e `detail` dell'errore di decodifica) invece di lanciare. Gli indirizzi in `args` si mettono in minuscolo guardando il tipo dell'ABI, non la forma della stringa.
 - Le letture si fanno con `readContractAt` e `multicallAt` di `chain/reads.ts`, dove `blockNumber` è obbligatorio nei tipi. Il multicall è deployless: il codice dell'aggregatore viaggia dentro la `eth_call`, perché anvil puro non ha Multicall3.
 - I test unitari stanno accanto ai sorgenti (`src/**/*.test.ts`) e girano con `npm test --workspace @oam/indexer`, senza RPC né DB.
+- **Test d'integrazione** (2026-11-20, dal passo 3 della roadmap). Stanno in `test/**/*.integration.test.ts` e girano con `npm run test:integration --workspace @oam/indexer`, con Postgres e anvil accesi. Lo schema è quello dell'SDK (`packages/sdk/vitest.config.ts`):
+  - due progetti vitest, `unit` e `integration`; `npm test` lancia solo `unit`, così resta valida la regola sopra;
+  - database `oam_test` sullo stesso Postgres di `docker-compose.yml`, separato da `oam` perché i test svuotano le tabelle. L'URL è in `TEST_DATABASE_URL` (in `apps/indexer/.env`). Il controllo è in `test/helpers/env.ts` (`assertTestDatabaseUrl`): il setup si rifiuta di partire se il nome del database non finisce in `_test` o se coincide con `DATABASE_URL`, così un errore di configurazione non svuota il DB di sviluppo;
+  - setup globale (`test/setup/globalSetup.ts`): `prisma migrate deploy` su `oam_test` (applica le migrazioni esistenti senza crearne). Se il database non esiste lo crea `migrate deploy` stesso, provato il 2026-11-22: non serve un `CREATE DATABASE` a mano. Basta `make db`;
+  - fra un test e l'altro `resetDatabase` di `test/helpers/db.ts`: un solo `TRUNCATE … RESTART IDENTITY CASCADE` di tutte le tabelle tranne `_prisma_migrations`. Il client sul DB dei test si crea con `createTestPrisma`. Un file d'integrazione chiama `useTestDatabase()` dentro il suo `describe`: registra client, reset prima di ogni test e chiusura, e restituisce la funzione che dà il client;
+  - anvil si accende da fuori (`make dev`, o anvil caricato dallo snapshot), il test non lo avvia. I test che mandano transazioni usano `evm_snapshot` / `evm_revert`. I file d'integrazione girano uno alla volta in un solo processo (`pool: "forks"` con `poolOptions.forks.singleFork`), perché condividono DB e anvil e si svuoterebbero le tabelle (o annullerebbero gli snapshot) a vicenda. `fileParallelism: false`, quello che suggerisce `packages/sdk/sdk.md`, in vitest 3 non è un'opzione del singolo progetto.
+  
+  Perché contro un Postgres vero e non con Prisma finto: `skipDuplicates` e il suo `count`, i tipi (`BigInt`, `Char(66)`, `Json`), l'annullamento della transazione e il suo timeout sono comportamenti del DB, e un mock confermerebbe solo quello che pensiamo faccia. Molti casi non hanno bisogno della chain: `processBlock` riceve blocco e log come argomenti (§4), quindi log `unknown`, emittente di tipo non atteso, `parentHash` sbagliato e blocco elaborato due volte si provano con dati costruiti nel test. Anvil serve per la prova d'insieme (backfill dello snapshot) e, dal passo 6, per le transazioni vere.
 - Un handler riceve la transazione Prisma del blocco, l'evento e il contesto del blocco (numero, hash, timestamp, gli altri log della stessa tx). Decide cosa scrivere e chiama i repository. Le letture RPC le fa attraverso `chain/`, sempre con `blockNumber` del blocco che sta processando, mai `latest`: così un blocco riprocessato dà lo stesso risultato.
-- I repository espongono operazioni di dominio (`insertTrade`, `applyShareTransfer`), non query generiche.
+- **Dispatch degli handler** (2026-11-20). La pipeline sceglie l'handler solo per `eventName`: basta, perché gli eventi con lo stesso nome in più contratti (`RoleGranted`/`RoleRevoked` di IndexManager e Timelock, `Upgraded` dei tre proxy) si scrivono allo stesso modo e l'emittente lo dà `address` del log (`RoleMember.contract`, `ProxyUpgrade.proxy`). Gli altri doppioni (`Initialized`, `OwnershipTransferred`, `RoleAdminChanged`, `EIP712DomainChanged`) vanno solo in `RawEvent`. Ogni handler dichiara però da quali `ContractKind` si aspetta l'evento (`SharesMinted` solo da `INDEX`, `RoleGranted` da `INDEX_MANAGER` o `TIMELOCK`). Se il tipo dell'emittente non è fra quelli, la pipeline non chiama l'handler e scrive una riga in `IndexerError`, mentre il log resta in `RawEvent` perché è decodificato. È una difesa contro un upgrade che dà a un proxy un evento con un nome già usato, o contro un indirizzo finito per errore in `Contract`: senza il controllo l'handler scriverebbe righe sbagliate, o violerebbe una foreign key e bloccherebbe il blocco a ogni tentativo.
+- I repository espongono operazioni di dominio (`insertTrade`, `applyShareTransfer`), non query generiche. Regole dei repository di base (2026-11-22):
+  - il primo argomento è sempre `db: Db` (`repositories/db.ts`, cioè `Prisma.TransactionClient`): la pipeline passa la transazione del blocco, un test o una lettura isolata il `PrismaClient`, che ha lo stesso tipo;
+  - gli input sono tipi del repository (`RawEventInput`, `StoredBlock`, `FixedContracts`), mai i tipi di `chain/`: i log decodificati hanno già quella forma e si passano così come sono, ma il layer resta senza import dalla chain;
+  - indirizzi e hash si mettono in minuscolo anche qui, prima di scrivere, oltre che in `chain/`: la convenzione di `db.md` non dipende da chi chiama;
+  - gli inserimenti di righe che nascono da un evento o da un blocco usano `createMany({ skipDuplicates: true })` e restituiscono quante righe sono entrate davvero (`count`, o un booleano per una riga sola). È la base degli incrementi solo su righe nuove (§5). Provato su Postgres: un secondo `insertRawEvents` sullo stesso blocco più un log nuovo restituisce 1;
+  - `insertFixedContracts` scrive i sei contratti con eventi (IndexManager, Router, PriceFeedManager, SwapManager, MultiSig, Timelock) e lascia fuori IndexFactory (nessun evento) e USDC (non è del protocollo, e il suo `Transfer` verrebbe preso per quello di un Index). Le righe già presenti restano com'erano, così il bootstrap gira a ogni avvio;
+  - `toJsonArgs` converte i `bigint` in stringhe decimali e lancia un errore su valori che viem non produce mai (`null`, funzioni, istanze di classe, `NaN`), invece di salvarli in silenzio.
 - L'API (Fase 5) è un servizio separato: l'indexer non espone HTTP.
 
 ## 4. Ciclo
 
-**Bootstrap.** Upsert in `Contract` dei contratti fissi di `protocolAddresses[chainId]` con il loro `startBlock`. Poi si legge `Checkpoint`: se manca si parte da `startBlock`, altrimenti da `lastBlockNumber + 1`.
+**Bootstrap.** Upsert in `Contract` dei contratti fissi di `protocolAddresses[chainId]` con il loro `startBlock`. Poi si legge `Checkpoint`: se manca si parte da `startBlock`, altrimenti da `lastBlockNumber + 1`. Il bootstrap viene prima di qualunque `processRange`, perché gli indirizzi da ascoltare si leggono da `Contract`: con la tabella vuota `getLogs` non avrebbe indirizzi e `RawEvent` resterebbe vuota (per questo nella roadmap sta nel passo 3, non in quello del live).
 
 **`processRange(from, to)`.**
 
-1. Indirizzi da ascoltare: tutte le righe di `Contract` della chain (i fissi e gli Index già scoperti).
+1. Indirizzi da ascoltare: tutte le righe di `Contract` della chain (i fissi e gli Index già scoperti), caricate una volta a inizio range in una mappa in memoria `address → ContractKind`. La stessa mappa serve al controllo del tipo nel dispatch (§3). Non si rilegge la tabella a ogni pezzo: `processBlock` restituisce `{ addedContracts }`, i contratti aggiunti a `Contract` nel blocco (oggi solo gli Index di `IndexCreated`), e `processRange` li aggiunge alla mappa. Il valore di ritorno esiste dal passo 3 della roadmap, anche quando è sempre vuoto, così il passo 4 (log dei nuovi Index nello stesso pezzo) non cambia la firma.
 2. `getLogs` su quegli indirizzi, a pezzi di `BATCH_SIZE` blocchi.
 3. Log raggruppati per blocco e ordinati per `logIndex`.
 4. Per ogni blocco del range, in ordine, `processBlock`.
 
-**`processBlock(n)`**, tutto in una `prisma.$transaction`:
+**`processBlock(n)`.** Prima della transazione, `getBlock(n)` via RPC (numero, hash, `parentHash`, timestamp). I log del blocco arrivano già da `processRange`. Poi, in una `prisma.$transaction`:
 
-1. `getBlock(n)` e controllo del `parentHash` contro la riga `Block` di `n − 1` (reorg, §6);
+1. controllo del `parentHash` contro la riga `Block` di `n − 1` (reorg, §6);
 2. riga `Block`;
-3. per ogni log: `RawEvent`, poi l'handler se esiste. Gli eventi senza handler restano solo in `RawEvent`;
+3. per ogni log decodificato: `RawEvent`, poi l'handler se esiste. Gli eventi senza handler restano solo in `RawEvent`. Un log `unknown` scrive invece una riga in `IndexerError` (§5, "Log non decodificabili");
 4. passi di fine blocco: prezzi dei feed e `NavSnapshot` (regole in `db.md`, "Prezzi");
 5. `Checkpoint` a `n`.
+
+**RPC e transazione** (2026-11-20). La transazione interattiva di Prisma tiene riservata una connessione del pool per tutta la sua durata e ha un timeout (default 5 secondi, `maxWait` 2 secondi per avere la connessione). Il tempo di una chiamata RPC non lo controlliamo (retry dopo un 429, il fork che inoltra la richiesta upstream, rete lenta): dentro la transazione si mangia il timeout, il blocco fallisce con un errore del DB anche se il DB non c'entra, e la connessione resta occupata ad aspettare. Regole:
+
+- `getBlock` e `getLogs` stanno sempre fuori dalla transazione. Non dipendono da niente di quello che si scrive, e con un `parentHash` diverso la transazione non serve nemmeno. Il confronto con `Block[n − 1]` si fa comunque dentro, con il blocco già letto.
+- Le letture RPC degli handler (`name()`, `symbol()`, `decimals`) per ora restano dentro: dipendono dall'evento, sono rare, e portarle fuori vorrebbe dire dividere ogni handler in una fase "prepara" (letture) e una "scrivi" (solo DB). Per coprirle, `timeout` e `maxWait` della transazione si alzano (ordine di 30 secondi) con due costanti definite in un solo punto di `pipeline.ts`.
+- Le letture che girano a **ogni** blocco, come `latestRoundData()` dei feed (passo 12 della roadmap), si fanno prima della transazione: sono una multicall che non dipende dai log, e dentro peserebbero su ogni blocco.
+- Se più avanti un handler ha bisogno di letture frequenti o lente, si passa alla divisione "prepara / scrivi" per quell'handler, non si alza ancora il timeout.
 
 **Live.** Finito il backfill l'indexer aspetta i blocchi nuovi con due segnali, e tutti e due fanno la stessa cosa: chiamano `catchUp()`, che legge l'head via HTTP e, se è oltre il checkpoint, lancia `processRange(checkpoint + 1, head)`.
 
@@ -123,7 +153,13 @@ Regole:
 - **Incrementi solo su righe nuove.** `Position`, `Index` e le altre tabelle di stato si aggiornano per incrementi (`balance += value`). L'incremento si applica solo se la riga dell'evento è stata davvero inserita (`createMany` con `skipDuplicates` e controllo del `count`, oppure `insert … on conflict do nothing returning`). Un `upsert` con `update: {}` sull'evento non basta: rielaborare il blocco raddoppierebbe i saldi.
 - **Tipi.** `uint256` e `int256` a Prisma come stringhe decimali (`Decimal(78, 0)`), numeri di blocco come `bigint`, indirizzi in minuscolo, `args` di `RawEvent` con i `bigint` convertiti in stringa.
 - **Tempo.** Solo il timestamp del blocco, mai l'orologio del server.
-- **Errori.** Una lettura RPC secondaria che fallisce (per esempio `latestRoundData`) scrive una riga in `IndexerError` e il blocco prosegue. Un errore su `getLogs`, `getBlock` o sul DB annulla la transazione del blocco e il blocco si riprova.
+- **Errori.** Una lettura RPC secondaria che fallisce (per esempio `latestRoundData`) scrive una riga in `IndexerError` e il blocco prosegue. Un errore su `getLogs` o `getBlock` (prima della transazione) o sul DB (dentro) fa fallire il blocco, che non lascia scritture a metà e si riprova.
+- **Log non decodificabili** (2026-11-20). Un log da un indirizzo del protocollo che `decodeLog` restituisce come `unknown` vuol dire che l'ABI dell'indexer non corrisponde più a quello che il contratto emette: un upgrade UUPS con un evento nuovo, lo stesso evento con `indexed` su parametri diversi, un deploy fatto senza rigenerare `@oam/abi`. Regole:
+  - non va in `RawEvent`: `eventName` è obbligatorio e `args` contiene solo argomenti decodificati per nome. Una riga con un nome finto (`UNKNOWN`) costringerebbe ogni lettore di `RawEvent` a filtrarla, compresa la ricostruzione di `TimelockOperation` dopo un reorg (`db.md`, "Reorg", punto 3);
+  - scrive una riga in `IndexerError`, nella stessa transazione del blocco: `blockNumber` del blocco, `context` con indirizzo e `txHash:logIndex`, `message` con `reason`, `detail`, `topics` e `data`. I dati grezzi servono per esaminare il log senza rileggere la chain;
+  - scrive anche una riga di log a livello `error`: qualcuno deve aggiornare l'ABI;
+  - il blocco prosegue e il checkpoint avanza. Fermare il processo bloccherebbe tutto il protocollo per un evento che magari nessun handler usa (scelta del passo 2 della roadmap). Il prezzo è che l'evento non arriva alle tabelle di dominio: per recuperarlo si aggiorna `@oam/abi` e si reindicizza da zero, che il criterio di replay (§8) rende sicuro;
+  - un blocco fallito e riprovato non lascia doppioni, perché la riga di `IndexerError` si annulla con il resto della transazione.
 
 Primi handler (punto 2 della Fase 4):
 
