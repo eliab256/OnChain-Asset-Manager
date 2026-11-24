@@ -38,6 +38,7 @@ Variabili in `apps/indexer/.env` (modello in `.env.example`), validate all'avvio
 | Variabile | Significato |
 |---|---|
 | `RPC_URL` | RPC HTTP della chain (anvil `http://127.0.0.1:8545`). Tutte le letture passano da qui |
+| `RPC_FALLBACK_URLS` | **dal passo 5, non ancora letta.** Uno o più RPC HTTP di riserva della stessa chain, separati da virgola, usati in ordine solo quando quelli prima non rispondono. Facoltativa. Regole sotto, "RPC di riserva" |
 | `RPC_WS_URL` | RPC WebSocket della stessa chain (anvil `ws://127.0.0.1:8545`, stessa porta). Serve solo ad avvisare dei blocchi nuovi. Facoltativa: senza, resta solo il polling |
 | `CHAIN_ID` | 31337 (anvil) o 31338 (fork). All'avvio si confronta con `eth_chainId`: se non coincidono il processo si ferma |
 | `DATABASE_URL` | Postgres di `docker-compose.yml`, lo stesso di `packages/db/.env` |
@@ -51,6 +52,16 @@ Variabili in `apps/indexer/.env` (modello in `.env.example`), validate all'avvio
 - All'avvio `logger.redact(configSecrets(config))` registra le parti segrete (percorso e query degli URL RPC, segmenti lunghi almeno 16 caratteri, password), e il logger le sostituisce con `***` in **ogni** riga. Serve perché viem scrive l'URL completo nei messaggi di errore HTTP (`URL: https://…/v2/<KEY>`), che arrivano al log da `errorMessage`, non da `describeConfig`. I valori sotto 6 caratteri non si redigono in tutta la riga (la password locale `oam` cancellerebbe `@oam/abi`).
 
 Regola per il codice futuro: niente `console.log` diretti, tutto passa dal `logger`, altrimenti la redazione non si applica.
+
+**RPC di riserva** (deciso il 2026-11-24, da scrivere nel passo 5 della roadmap). Con un solo RPC, se il provider cade l'indexer smette di avanzare. I dati restano corretti: alla ripresa riparte dal `Checkpoint` e recupera i blocchi persi, ma nel frattempo il DB resta indietro (l'API risponde con dati vecchi, il keeper della Fase 7 è il più esposto). Un secondo provider risolve la disponibilità, però due nodi non vedono sempre la stessa chain: possono essere a head diverse, vedere un reorg in momenti diversi, indicizzare i log con ritardo (un `getLogs` vuoto per un blocco che `getBlock` vede già) e avere limiti diversi (range di `eth_getLogs`, dimensione delle `eth_call`, letture a blocchi vecchi solo da un nodo archive). Regole:
+
+- transport `fallback` di viem con gli URL in ordine (`RPC_URL`, poi `RPC_FALLBACK_URLS`): si resta sul primo finché risponde e si passa al successivo solo su errore. Niente `rank`, che misura la latenza di tutti con richieste di prova e riordina i provider anche quando il primo funziona, creando proprio i salti fra nodi che si vogliono evitare;
+- i segreti degli URL di riserva si registrano nel logger come quelli di `RPC_URL`, e `describeConfig` li maschera allo stesso modo;
+- all'avvio ogni provider passa i controlli di `RPC_URL`, più due prove: una multicall deployless e una lettura allo `startBlock`. Un provider che non le passa si scopre all'avvio e non a metà backfill: il processo si ferma con un messaggio che lo nomina (URL mascherato);
+- il WebSocket resta uno solo: se cade c'è già il polling di riserva, che con il fallback passa anche lui al provider successivo;
+- le incoerenze fra nodi le coprono i controlli che ci sono già (numero di blocco obbligatorio nelle letture, `parentHash` contro `Block[n − 1]`, checkpoint: un provider indietro dà un head sotto il checkpoint e `catchUp()` non fa niente) più il controllo del `blockHash` dei log (§4, `processBlock`).
+
+Prova in locale: primo URL su una porta chiusa, secondo su anvil, e l'indexer deve passare al secondo e indicizzare normalmente.
 
 ## 3. Layer
 
@@ -66,6 +77,7 @@ src/
     abi.ts            ABI unione dei soli eventi del protocollo
     logs.ts           fetchLogs, decodeLog: log normalizzati, "decoded" o "unknown"
     reads.ts          readContractAt, multicallAt (blockNumber obbligatorio)
+    consistency.ts    assertLogsBelongToBlock: log e blocco della stessa versione della chain
   handlers/         un file per contratto, una funzione per evento
   repositories/     l'unico layer che usa Prisma: non conosce la chain
     db.ts             tipo Db: client Prisma o client della transazione
@@ -113,7 +125,11 @@ src/
 3. Log raggruppati per blocco e ordinati per `logIndex`.
 4. Per ogni blocco del range, in ordine, `processBlock`.
 
-**`processBlock(n)`.** Prima della transazione, `getBlock(n)` via RPC (numero, hash, `parentHash`, timestamp). I log del blocco arrivano già da `processRange`. Poi, in una `prisma.$transaction`:
+**`processBlock(n)`.** Prima della transazione, `getBlock(n)` via RPC (numero, hash, `parentHash`, timestamp). I log del blocco arrivano già da `processRange`.
+
+**Controllo del `blockHash` dei log** (2026-11-24, `assertLogsBelongToBlock` di `chain/consistency.ts`). Prima di aprire la transazione, ogni log del blocco deve avere `blockNumber` e `blockHash` uguali a numero e hash del blocco appena letto. I log di un pezzo arrivano da una `getLogs` fatta prima delle `getBlock` dei singoli blocchi: se in mezzo c'è un reorg vicino all'head, o se le due chiamate le serve un nodo diverso (RPC di riserva, §2), il blocco `n` avrebbe i log di un'altra versione della chain. Il `parentHash` non se ne accorge, perché confronta solo i blocchi fra loro. Per questo il controllo serve anche con un solo RPC. Se fallisce (`LogBlockMismatchError`): niente scritture, si rileggono blocco e log del solo blocco `n` (`getLogs` da `n` a `n`) e si riprova, fino a 3 volte; poi `IndexerError` scritto fuori dalla transazione e stop, come per un `parentHash` diverso. Un blocco senza log non ha niente da confrontare: un provider che indicizza i log in ritardo resta un limite noto, coperto solo dalla scelta di provider affidabili.
+
+Poi, in una `prisma.$transaction`:
 
 1. controllo del `parentHash` contro la riga `Block` di `n − 1` (reorg, §6);
 2. riga `Block`;
