@@ -51,7 +51,8 @@ make db / make db-down     # Postgres di docker-compose.yml
 npm run migrate --workspace @oam/db    # applica/crea migrazioni (serve packages/db/.env)
 npm run generate --workspace @oam/db   # rigenera il client Prisma (lo fa anche npm install)
 npm run lint / npm run typecheck   # oxlint (type-aware) e tsc 7 su tutti i workspace
-npm run dev --workspace @oam/indexer   # indexer (serve apps/indexer/.env, modello in .env.example); test: npm test --workspace @oam/indexer
+npm run dev --workspace @oam/indexer   # indexer (serve apps/indexer/.env, modello in .env.example); unit test: npm test --workspace @oam/indexer
+npm run test:integration --workspace @oam/indexer   # test su Postgres (DB oam_test da TEST_DATABASE_URL, creato e migrato dal setup) e anvil: serve make db
 npm run dev --workspace @oam/web   # front-end su http://localhost:5173 (build: npm run build --workspace @oam/web)
 ```
 

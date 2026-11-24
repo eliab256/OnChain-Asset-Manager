@@ -28,7 +28,7 @@ Dagli altri workspace: dipendenza `"@oam/db": "*"`, poi `createPrismaClient(proc
 
 ## Evento → tabella
 
-Tutti gli eventi decodificati finiscono anche in `RawEvent`.
+Tutti gli eventi decodificati finiscono anche in `RawEvent`. Un log di un contratto del protocollo che non si decodifica non entra in `RawEvent`: diventa una riga di `IndexerError` (`apps/indexer/indexer.md` §5, "Log non decodificabili").
 
 | Evento | Contratto | Tabelle |
 |---|---|---|
@@ -171,3 +171,4 @@ Ricalcolo da zero, per (index, gruppo di wallet), sulle righe di `Trade` e `Shar
 3. Le tabelle di stato corrente (`Index`, `Position`, `Allowance`, `RoleMember`, `PriceFeed`, `MultisigConfirmation`, `TimelockConfig`) si ricalcolano per le entità toccate a partire dalle tabelle di eventi rimaste. `TimelockOperation` si ricalcola allo stesso modo, perché un id cancellato e schedulato di nuovo riusa la riga e cancellarla per `scheduledBlock` perderebbe il ciclo precedente: per ogni id con eventi dopo il blocco comune si ricostruisce la riga (con le `TimelockCall`) rigiocando i `CallScheduled`, `CallSalt`, `CallExecuted` e `Cancelled` rimasti in `RawEvent`, e la si cancella solo se non resta nessun `CallScheduled`.
 4. `KeeperAttempt` non si cancella: i tentativi con `txHash` in un blocco annullato tornano `PENDING` e il keeper ricontrolla la ricevuta (spesso la tx rientra dalla mempool in un blocco nuovo). `MultisigSignature` non si cancella: le firme non sono dati della chain. Si ricalcola lo stato delle firme delle tx toccate: una firma `USED` o `INVALIDATED` torna `VALID` se al blocco comune `getConfirmNonce(txId, signer)` è di nuovo uguale al suo `nonce`, il firmatario non risulta confermato e la tx non è eseguita (`usedTxHash` torna null); una firma `ARCHIVED` torna `VALID` se il reorg ha annullato l'esecuzione e valgono le stesse condizioni. Lo stesso per `WalletGroup`, `WalletLink`, `TransferCostDeclaration`, `SiweNonce` e `Session` (le ultime due non hanno legami con la chain): la dichiarazione è legata a `(chainId, txHash, indexAddress, recipient)` e non a `logIndex`, quindi ritrova il suo trasferimento anche se la tx finisce in un altro blocco. `TransferCost` se ne va a cascata con la sua `ShareTransfer`; `TransferCost` e `PositionCost` si ricalcolano per i gruppi toccati come al punto 3.
 5. `Checkpoint` torna al blocco comune.
+6. `IndexerError` non si cancella, nemmeno per i blocchi annullati: è un diario degli errori, non uno stato derivato dalla chain, e resta fuori anche dal confronto del replay. Le righe di un blocco annullato restano con il loro `blockNumber`; se il blocco nuovo ripete l'errore ne nasce una riga nuova.
