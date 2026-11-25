@@ -1,6 +1,6 @@
 // A fake node for the pipeline tests: blocks and logs kept in memory, served through a viem custom
 // transport (eth_getBlockByNumber, eth_getLogs). Tests change it between calls to simulate reorgs.
-import { indexAbi } from "@oam/abi";
+import { indexAbi, indexManagerAbi } from "@oam/abi";
 import {
   createPublicClient,
   custom,
@@ -88,6 +88,35 @@ export function transferLog(address: Address, at: LogPosition, from: Address, to
     address,
     topics: encodeEventTopics({ abi: indexAbi, eventName: "Transfer", args: { from, to } }) as [Hex, ...Hex[]],
     data: encodeAbiParameters([{ type: "uint256" }], [value]),
+    blockNumber: at.blockNumber,
+    blockHash: at.blockHash,
+    transactionHash: at.txHash,
+    transactionIndex: 0,
+    logIndex: at.logIndex,
+    removed: false,
+  };
+}
+
+export type IndexCreatedArgs = {
+  indexAddress: Address;
+  asset0: Address;
+  asset1: Address;
+  asset0Weight: bigint;
+  asset1Weight: bigint;
+  feePercentage: bigint;
+  assetManager: Address;
+};
+
+/** A raw IndexCreated of the IndexManager: indexed parameters in the topics, the others ABI-encoded in data. */
+export function indexCreatedLog(indexManager: Address, at: LogPosition, args: IndexCreatedArgs): Log {
+  const event = indexManagerAbi.find((item) => item.type === "event" && item.name === "IndexCreated");
+  if (event === undefined || event.type !== "event") throw new Error("IndexCreated missing from indexManagerAbi");
+  const nonIndexed = event.inputs.filter((input) => !input.indexed);
+  const values = nonIndexed.map((input) => args[input.name as keyof IndexCreatedArgs]);
+  return {
+    address: indexManager,
+    topics: encodeEventTopics({ abi: indexManagerAbi, eventName: "IndexCreated", args }) as [Hex, ...Hex[]],
+    data: encodeAbiParameters(nonIndexed, values),
     blockNumber: at.blockNumber,
     blockHash: at.blockHash,
     transactionHash: at.txHash,

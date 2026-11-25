@@ -6,12 +6,9 @@ import { createPrismaClient } from "@oam/db";
 import { config as loadDotenv } from "dotenv";
 import { assertChainId, closeChainClients, createChainClients } from "./chain/clients.js";
 import { configSecrets, describeConfig, loadConfig } from "./config.js";
+import { handlers } from "./handlers/index.js";
 import { errorFields, logger } from "./logger.js";
-import type { HandlerMap } from "./pipeline.js";
 import { backfill } from "./runner.js";
-
-/** Handlers by event name: none yet, every event is only stored in RawEvent (the first ones come with step 4). */
-const handlers: HandlerMap = {};
 
 async function main(): Promise<void> {
   loadDotenv({ path: fileURLToPath(new URL("../.env", import.meta.url)), quiet: true });

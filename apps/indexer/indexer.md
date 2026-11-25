@@ -2,7 +2,7 @@
 
 Regole e struttura dell'indexer off-chain. Legge i blocchi della chain, decodifica gli eventi del protocollo e scrive le tabelle di `@oam/db`. Se cambi una convenzione descritta in questo file, aggiornalo nello stesso commit.
 
-**Stato (2026-11-25): passi 1, 2 e 3 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger, layer `chain/`, repository di base, `processBlock`, `processRange`, bootstrap e backfill, con unit test e test d'integrazione anche contro anvil). `npm start` fa il backfill dal checkpoint all'head ed esce; il live arriva al passo 5, gli Index creati a metà pezzo al passo 4. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
+**Stato (2026-11-25): passi 1-4 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger, layer `chain/`, repository di base, `processBlock`, `processRange`, bootstrap e backfill, Index scoperti durante il range con l'handler minimo di `IndexCreated`, con unit test e test d'integrazione anche contro anvil). `npm start` fa il backfill dal checkpoint all'head ed esce; il live arriva al passo 5. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
 
 Cosa sta dove:
 
@@ -80,6 +80,9 @@ src/
     consistency.ts    assertLogsBelongToBlock: log e blocco della stessa versione della chain
     blocks.ts         fetchBlockHeader: numero, hash in minuscolo, timestamp come Date
   handlers/         un file per contratto, una funzione per evento
+    types.ts          Handler, HandlerMap, HandlerContext, AddedContract (la pipeline li riesporta)
+    index.ts          handlers: la HandlerMap dell'indexer
+    indexManager.ts   indexCreated (minimo: riga Contract dell'Index)
   repositories/     l'unico layer che usa Prisma: non conosce la chain
     db.ts             tipo Db: client Prisma o client della transazione
     json.ts           toJsonArgs: args decodificati → JSON (bigint in stringa)
@@ -175,7 +178,16 @@ Regole:
 - se il WebSocket cade, viem si riconnette da solo; l'indexer scrive un log e continua con il polling;
 - senza `RPC_WS_URL` (un RPC che non offre WebSocket) il polling è l'unico segnale e l'intervallo va abbassato.
 
-**Index creati a metà range.** `IndexCreated` aggiunge l'Index a `Contract`, ma il filtro di `getLogs` del pezzo in corso era già fissato e i log del nuovo Index in quel pezzo non sono arrivati. Regola (punto 3 della Fase 4): dopo un `IndexCreated` al blocco `n` si richiedono i log del nuovo indirizzo da `n` alla fine del pezzo e si uniscono agli altri prima di proseguire. Finché non è scritta vale un limite noto: funziona solo se nessun evento dell'Index cade nello stesso pezzo della sua creazione dopo il blocco di creazione.
+**Index creati a metà range** (punto 3 della Fase 4, codice del 2026-11-25). `IndexCreated` aggiunge l'Index a `Contract`, ma il filtro di `getLogs` del pezzo in corso era già fissato e i log del nuovo Index in quel pezzo non sono arrivati. Regola: subito dopo la `getLogs` del pezzo, **prima di elaborarne i blocchi**, `withDiscoveredIndexLogs` di `pipeline.ts` cerca fra i log decodificati gli `IndexCreated` emessi da un contratto di kind `INDEX_MANAGER` con un `indexAddress` non ancora in `Contract`. Per quegli indirizzi fa una sola `getLogs` in più, dal blocco di creazione più basso alla fine del pezzo, tiene nel blocco di creazione solo i log con `logIndex` maggiore dell'`IndexCreated` e unisce tutto, ordinato per `(blockNumber, logIndex)`. Dai pezzi successivi l'Index è nel filtro normale, perché l'handler l'ha messo in `Contract` e `processRange` l'ha aggiunto alla mappa.
+
+Perché prima di elaborare il pezzo e non dopo il blocco di creazione (scelta del 2026-11-25, la roadmap diceva il contrario): dopo `processBlock(n)` il blocco `n` è già scritto, e i log dell'Index nello stesso blocco dopo l'`IndexCreated` (un `initializeIndex` incluso nello stesso blocco di `createIndex`, normale su una chain pubblica) andrebbero persi. Così tutte le chiamate RPC restano fuori dalle transazioni (§4, "RPC e transazione"). Il prezzo è che la pipeline conosce un evento per nome, `IndexCreated`, e legge il suo `indexAddress`; la riga di `Contract` la scrive comunque l'handler (`handlers/indexManager.ts`), che restituisce l'Index in `addedContracts`.
+
+Altre due regole nate scrivendolo:
+
+- dentro `processBlock` il dispatch usa una copia della mappa `address → kind` aggiornata dopo ogni handler: un evento dell'Index nello stesso blocco della creazione arriva al suo handler invece di finire in `IndexerError` come emittente non atteso;
+- la rilettura di un blocco dopo un `blockHash` sbagliato passa dalla stessa funzione (`getLogs` dei contratti noti più la scoperta), così il blocco di creazione riletto ha ancora i log del nuovo Index.
+
+Un `IndexCreated` da un emittente che non è l'IndexManager non fa scoprire niente e finisce in `IndexerError` dal dispatch. L'Index non emette eventi nel costruttore, quindi nel blocco di creazione non ci sono suoi log prima dell'`IndexCreated`: il filtro sul `logIndex` lo dice in modo esplicito.
 
 ## 5. Come si scrive un handler
 
@@ -207,7 +219,7 @@ Le regole sono in `db.md`, sezione "Reorg". Nel ciclo il punto di ingresso è il
 
 ## 7. Stato dei lavori
 
-Lo stato di ogni passo (e dei punti della Fase 4 a cui corrisponde) sta in `localHelpers/indexer-roadmap.md`, non qui. Lo schema del DB (punto 1) è fatto; del codice ci sono i passi 1, 2 e 3 (configurazione, layer `chain/`, pipeline e backfill).
+Lo stato di ogni passo (e dei punti della Fase 4 a cui corrisponde) sta in `localHelpers/indexer-roadmap.md`, non qui. Lo schema del DB (punto 1) è fatto; del codice ci sono i passi 1-4 (configurazione, layer `chain/`, pipeline, backfill e scoperta degli Index).
 
 ## 8. Verifica a mano
 

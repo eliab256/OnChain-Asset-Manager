@@ -1,14 +1,14 @@
 // Pipeline: how a block is processed (indexer.md §4). One block is written entirely in one database
 // transaction, or not at all. RPC reads of the block happen before the transaction opens.
-import type { ContractKind, PrismaClient } from "@oam/db";
+import { ContractKind, type PrismaClient } from "@oam/db";
 import type { Address, PublicClient } from "viem";
 import { fetchBlockHeader, type BlockHeader } from "./chain/blocks.js";
 import { LogBlockMismatchError, assertLogsBelongToBlock } from "./chain/consistency.js";
 import { fetchLogs, type ChainLog, type DecodedLog, type LogLocation, type UnknownLog } from "./chain/logs.js";
+import type { AddedContract, EventName, Handler, HandlerMap } from "./handlers/types.js";
 import { logger, type LogFields } from "./logger.js";
 import { getStoredBlock, insertBlock } from "./repositories/blocks.js";
 import { setCheckpoint } from "./repositories/checkpoint.js";
-import type { Db } from "./repositories/db.js";
 import { recordIndexerError } from "./repositories/errors.js";
 import { loadContractKinds } from "./repositories/contracts.js";
 import { insertRawEvents } from "./repositories/rawEvents.js";
@@ -25,43 +25,17 @@ export const BLOCK_READ_ATTEMPTS = 3;
 /** Pause between two reads of the same block after a blockHash mismatch. */
 export const DEFAULT_MISMATCH_RETRY_DELAY_MS = 1_000;
 
-type EventName = DecodedLog["eventName"];
-type LogOf<E extends EventName> = Extract<DecodedLog, { eventName: E }>;
-
-/** A contract a handler added to Contract while processing the block (today only an Index from IndexCreated). */
-export type AddedContract = { address: string; kind: ContractKind };
-
-/** What a handler receives: the block's transaction, the event and the context of the block. */
-export type HandlerContext<E extends EventName> = {
-  /** The transaction of the block: every write of the handler goes through it. */
-  db: Db;
-  chainId: number;
-  /** For reads of contract state, always at block.number (chain/reads.ts). */
-  client: PublicClient;
-  block: BlockHeader;
-  log: LogOf<E>;
-  /** Every log of the same transaction, in logIndex order, this one included. */
-  txLogs: readonly ChainLog[];
-};
-
-export type HandlerResult = { addedContracts?: readonly AddedContract[] } | undefined;
-
-/** The handler of one event (indexer.md §3, "Dispatch degli handler"). */
-export type Handler<E extends EventName> = {
-  /** Contract kinds the event is expected from. From any other emitter the handler is not called. */
-  kinds: readonly ContractKind[];
-  handle: (context: HandlerContext<E>) => Promise<HandlerResult>;
-};
-
-/** Handlers by event name. An event without a handler is only stored in RawEvent. */
-export type HandlerMap = { [E in EventName]?: Handler<E> };
+export type { AddedContract, Handler, HandlerContext, HandlerMap, HandlerResult } from "./handlers/types.js";
 
 export type PipelineDeps = {
   prisma: PrismaClient;
   client: PublicClient;
   chainId: number;
   handlers: HandlerMap;
-  /** Lowercase address → kind of every contract of the chain (loadContractKinds), also the getLogs filter. */
+  /**
+   * Lowercase address → kind of every contract of the chain (loadContractKinds), also the getLogs filter.
+   * processRange passes its own map and adds the contracts of each block to it, so it is always current.
+   */
   contractKinds: ReadonlyMap<string, ContractKind>;
   /** Pause between reads of the same block after a blockHash mismatch; tests pass 0. */
   mismatchRetryDelayMs?: number;
@@ -121,6 +95,45 @@ function where(log: LogLocation): string {
 }
 
 /**
+ * Adds to `logs` (one getLogs of the known contracts over a range ending at `to`) the logs of every Index created in them
+ * (indexer.md §4, "Index creati a metà range"). An IndexCreated from an INDEX_MANAGER names an address that
+ * the getLogs filter did not have yet: its logs from the creation block to `to` are requested in one more
+ * getLogs, and in the creation block only those after the IndexCreated (higher logIndex) are kept.
+ * Done before any block of the range is processed, so every RPC call stays outside the block transactions.
+ * @returns The logs sorted by (blockNumber, logIndex); `logs` itself when no new Index is created.
+ */
+export async function withDiscoveredIndexLogs(
+  client: PublicClient,
+  contractKinds: ReadonlyMap<string, ContractKind>,
+  logs: readonly ChainLog[],
+  to: bigint,
+): Promise<readonly ChainLog[]> {
+  const created = new Map<string, LogLocation>();
+  for (const log of logs) {
+    if (log.kind !== "decoded" || log.eventName !== "IndexCreated") continue;
+    if (contractKinds.get(log.address) !== ContractKind.INDEX_MANAGER) continue;
+    const index = log.args.indexAddress;
+    if (!contractKinds.has(index) && !created.has(index)) created.set(index, log);
+  }
+  if (created.size === 0) return logs;
+
+  let from = to;
+  for (const at of created.values()) if (at.blockNumber < from) from = at.blockNumber;
+  const indexLogs = await fetchLogs(client, [...created.keys()] as Address[], from, to);
+  const after = indexLogs.filter((log) => {
+    const at = created.get(log.address);
+    return at !== undefined && (log.blockNumber > at.blockNumber || (log.blockNumber === at.blockNumber && log.logIndex > at.logIndex));
+  });
+  return [...logs, ...after].sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1));
+}
+
+/** One getLogs of the known contracts over [from, to], plus the logs of the Index created there. */
+async function fetchRangeLogs(deps: PipelineDeps, from: bigint, to: bigint): Promise<readonly ChainLog[]> {
+  const logs = await fetchLogs(deps.client, [...deps.contractKinds.keys()] as Address[], from, to);
+  return withDiscoveredIndexLogs(deps.client, deps.contractKinds, logs, to);
+}
+
+/**
  * Reads the header of block n and checks that `logs` belong to it. On a mismatch it reads the header and
  * the logs of block n alone again, up to BLOCK_READ_ATTEMPTS reads in total.
  * @returns The header and the logs that belong to it (the re-read ones after a mismatch).
@@ -146,7 +159,7 @@ async function readConsistentBlock(
         error: error.message,
       });
       await sleep(deps.mismatchRetryDelayMs ?? DEFAULT_MISMATCH_RETRY_DELAY_MS);
-      current = await fetchLogs(deps.client, [...deps.contractKinds.keys()] as Address[], blockNumber, blockNumber);
+      current = await fetchRangeLogs(deps, blockNumber, blockNumber);
     }
   }
 }
@@ -215,10 +228,13 @@ export async function processBlock(deps: PipelineDeps, blockNumber: bigint, logs
       }
 
       const addedContracts: AddedContract[] = [];
+      // A contract added by a handler emits its next events of this same block (an Index initialized in the
+      // block of its creation): dispatch reads this copy, updated after every handler.
+      const kinds = new Map(deps.contractKinds);
       for (const log of decoded) {
         const handler = deps.handlers[log.eventName] as Handler<EventName> | undefined;
         if (handler === undefined) continue;
-        const kind = deps.contractKinds.get(log.address);
+        const kind = kinds.get(log.address);
         if (kind === undefined || !handler.kinds.includes(kind)) {
           const expected = handler.kinds.join("|");
           await recordIndexerError(tx, {
@@ -236,7 +252,10 @@ export async function processBlock(deps: PipelineDeps, blockNumber: bigint, logs
         }
         const txLogs = blockLogs.filter((other) => other.txHash === log.txHash);
         const outcome = await handler.handle({ db: tx, chainId, client: deps.client, block, log, txLogs });
-        if (outcome?.addedContracts !== undefined) addedContracts.push(...outcome.addedContracts);
+        for (const added of outcome?.addedContracts ?? []) {
+          addedContracts.push(added);
+          kinds.set(added.address.toLowerCase(), added.kind);
+        }
       }
 
       // End-of-block steps (prices, NavSnapshot, expired proposals) go here, before the checkpoint.
@@ -270,8 +289,8 @@ export type ProcessRangeResult = {
  * block of the chunk, empty ones included. Backfill and live use this same function.
  *
  * The addresses come from Contract, read once at the start of the range; contracts added by a block join
- * the filter of the next chunk. Known limit until step 4 of the roadmap: the logs of an Index created in a
- * chunk, emitted later in that same chunk, are not requested again and are missed.
+ * the filter of the next chunk. The logs of an Index created inside a chunk are requested before the chunk is
+ * processed (withDiscoveredIndexLogs), so none of them is missed.
  * @throws whatever processBlock throws: the blocks before the failing one are already written and the
  *   checkpoint points at the last of them, so the next call resumes from there.
  */
@@ -286,7 +305,7 @@ export async function processRange(deps: RangeDeps, from: bigint, to: bigint): P
 
   for (let chunkStart = from; chunkStart <= to; chunkStart += batch) {
     const chunkEnd = chunkStart + batch - 1n < to ? chunkStart + batch - 1n : to;
-    const logs = await fetchLogs(deps.client, [...contractKinds.keys()] as Address[], chunkStart, chunkEnd);
+    const logs = await fetchRangeLogs(blockDeps, chunkStart, chunkEnd);
     const byBlock = new Map<bigint, ChainLog[]>();
     for (const log of logs) {
       const group = byBlock.get(log.blockNumber);
