@@ -2,7 +2,7 @@
 
 Regole e struttura dell'indexer off-chain. Legge i blocchi della chain, decodifica gli eventi del protocollo e scrive le tabelle di `@oam/db`. Se cambi una convenzione descritta in questo file, aggiornalo nello stesso commit.
 
-**Stato (2026-11-22): passi 1 e 2 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger e layer `chain/`, con unit test); **del passo 3 fatti l'harness dei test d'integrazione e i repository di base** (`checkpoint`, `errors`, `blocks`, `contracts`, `rawEvents`). `src/index.ts` per ora legge la configurazione, controlla il chain id e stampa l'head; pipeline e runner sono i prossimi pezzi del passo 3. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
+**Stato (2026-11-24): passi 1 e 2 di `localHelpers/indexer-roadmap.md` fatti** (configurazione, logger e layer `chain/`, con unit test); **del passo 3 fatti l'harness dei test d'integrazione, i repository di base, il bootstrap, `processBlock` e `processRange`**. `src/index.ts` per ora legge la configurazione, controlla il chain id e stampa l'head; mancano l'avvio minimo e il test contro anvil. Al 2026-11-15 c'erano solo `package.json` e `tsconfig.json`. Questo file descrive come va scritto il codice della Fase 4 di `localHelpers/roadmap.md` e sostituisce `blockchain-indexer-roadmap.md`, una guida generica per un indexer di un solo evento `Transfer`, scritta prima dello schema del DB e tolta lo stesso giorno. Da lì resta solo la regola dei layer (§3).
 
 Cosa sta dove:
 
@@ -78,6 +78,7 @@ src/
     logs.ts           fetchLogs, decodeLog: log normalizzati, "decoded" o "unknown"
     reads.ts          readContractAt, multicallAt (blockNumber obbligatorio)
     consistency.ts    assertLogsBelongToBlock: log e blocco della stessa versione della chain
+    blocks.ts         fetchBlockHeader: numero, hash in minuscolo, timestamp come Date
   handlers/         un file per contratto, una funzione per evento
   repositories/     l'unico layer che usa Prisma: non conosce la chain
     db.ts             tipo Db: client Prisma o client della transazione
@@ -103,7 +104,7 @@ src/
   - anvil si accende da fuori (`make dev`, o anvil caricato dallo snapshot), il test non lo avvia. I test che mandano transazioni usano `evm_snapshot` / `evm_revert`. I file d'integrazione girano uno alla volta in un solo processo (`pool: "forks"` con `poolOptions.forks.singleFork`), perché condividono DB e anvil e si svuoterebbero le tabelle (o annullerebbero gli snapshot) a vicenda. `fileParallelism: false`, quello che suggerisce `packages/sdk/sdk.md`, in vitest 3 non è un'opzione del singolo progetto.
   
   Perché contro un Postgres vero e non con Prisma finto: `skipDuplicates` e il suo `count`, i tipi (`BigInt`, `Char(66)`, `Json`), l'annullamento della transazione e il suo timeout sono comportamenti del DB, e un mock confermerebbe solo quello che pensiamo faccia. Molti casi non hanno bisogno della chain: `processBlock` riceve blocco e log come argomenti (§4), quindi log `unknown`, emittente di tipo non atteso, `parentHash` sbagliato e blocco elaborato due volte si provano con dati costruiti nel test. Anvil serve per la prova d'insieme (backfill dello snapshot) e, dal passo 6, per le transazioni vere.
-- Un handler riceve la transazione Prisma del blocco, l'evento e il contesto del blocco (numero, hash, timestamp, gli altri log della stessa tx). Decide cosa scrivere e chiama i repository. Le letture RPC le fa attraverso `chain/`, sempre con `blockNumber` del blocco che sta processando, mai `latest`: così un blocco riprocessato dà lo stesso risultato.
+- Un handler riceve la transazione Prisma del blocco, l'evento e il contesto del blocco (numero, hash, timestamp, gli altri log della stessa tx). Decide cosa scrivere e chiama i repository. In codice (`pipeline.ts`, 2026-11-24) è un oggetto `{ kinds, handle }` registrato nella `HandlerMap` sotto il nome dell'evento; `handle` riceve `{ db, chainId, client, block, log, txLogs }`, con `log` già ristretto al tipo di quell'evento, e restituisce eventualmente `{ addedContracts }` (gli Index aggiunti a `Contract`, per il passo 4 della roadmap). Le letture RPC le fa attraverso `chain/`, sempre con `blockNumber` del blocco che sta processando, mai `latest`: così un blocco riprocessato dà lo stesso risultato.
 - **Dispatch degli handler** (2026-11-20). La pipeline sceglie l'handler solo per `eventName`: basta, perché gli eventi con lo stesso nome in più contratti (`RoleGranted`/`RoleRevoked` di IndexManager e Timelock, `Upgraded` dei tre proxy) si scrivono allo stesso modo e l'emittente lo dà `address` del log (`RoleMember.contract`, `ProxyUpgrade.proxy`). Gli altri doppioni (`Initialized`, `OwnershipTransferred`, `RoleAdminChanged`, `EIP712DomainChanged`) vanno solo in `RawEvent`. Ogni handler dichiara però da quali `ContractKind` si aspetta l'evento (`SharesMinted` solo da `INDEX`, `RoleGranted` da `INDEX_MANAGER` o `TIMELOCK`). Se il tipo dell'emittente non è fra quelli, la pipeline non chiama l'handler e scrive una riga in `IndexerError`, mentre il log resta in `RawEvent` perché è decodificato. È una difesa contro un upgrade che dà a un proxy un evento con un nome già usato, o contro un indirizzo finito per errore in `Contract`: senza il controllo l'handler scriverebbe righe sbagliate, o violerebbe una foreign key e bloccherebbe il blocco a ogni tentativo.
 - I repository espongono operazioni di dominio (`insertTrade`, `applyShareTransfer`), non query generiche. Regole dei repository di base (2026-11-22):
   - il primo argomento è sempre `db: Db` (`repositories/db.ts`, cioè `Prisma.TransactionClient`): la pipeline passa la transazione del blocco, un test o una lettura isolata il `PrismaClient`, che ha lo stesso tipo;
@@ -118,24 +119,35 @@ src/
 
 **Bootstrap.** Upsert in `Contract` dei contratti fissi di `protocolAddresses[chainId]` con il loro `startBlock`. Poi si legge `Checkpoint`: se manca si parte da `startBlock`, altrimenti da `lastBlockNumber + 1`. Il bootstrap viene prima di qualunque `processRange`, perché gli indirizzi da ascoltare si leggono da `Contract`: con la tabella vuota `getLogs` non avrebbe indirizzi e `RawEvent` resterebbe vuota (per questo nella roadmap sta nel passo 3, non in quello del live).
 
+Il codice è `bootstrap(db, chainId, fixed)` in `src/runner.ts` (2026-11-24), con `fixed = protocolAddresses[chainId]`. Restituisce `fromBlock` (il primo blocco da elaborare), il `checkpoint` letto (il suo hash è quello con cui va confrontato il `parentHash` di `fromBlock`: così si vede un reorg avvenuto mentre l'indexer era fermo) e quanti contratti ha inserito (6 al primo avvio, poi 0). Prima scrive i contratti e poi legge il checkpoint, senza transazione: le due operazioni sono indipendenti e tutte e due ripetibili. Un caso da sapere in locale: un anvil ripartito da zero (`make anvil` e un nuovo deploy) riusa il chain id 31337, ma i suoi blocchi hanno hash diversi da quelli salvati. Il bootstrap riparte comunque dal checkpoint vecchio, e il primo blocco nuovo si ferma sul controllo del `parentHash` (§6). Si risolve svuotando le righe di quella chain dal DB prima di riavviare l'indexer.
+
 **`processRange(from, to)`.**
 
 1. Indirizzi da ascoltare: tutte le righe di `Contract` della chain (i fissi e gli Index già scoperti), caricate una volta a inizio range in una mappa in memoria `address → ContractKind`. La stessa mappa serve al controllo del tipo nel dispatch (§3). Non si rilegge la tabella a ogni pezzo: `processBlock` restituisce `{ addedContracts }`, i contratti aggiunti a `Contract` nel blocco (oggi solo gli Index di `IndexCreated`), e `processRange` li aggiunge alla mappa. Il valore di ritorno esiste dal passo 3 della roadmap, anche quando è sempre vuoto, così il passo 4 (log dei nuovi Index nello stesso pezzo) non cambia la firma.
-2. `getLogs` su quegli indirizzi, a pezzi di `BATCH_SIZE` blocchi.
+2. `getLogs` su quegli indirizzi, a pezzi di `BATCH_SIZE` blocchi. Con `Contract` vuota non si chiama il nodo: i blocchi si elaborano comunque, senza log.
 3. Log raggruppati per blocco e ordinati per `logIndex`.
-4. Per ogni blocco del range, in ordine, `processBlock`.
+4. Per ogni blocco del range, in ordine, `processBlock`, anche per i blocchi senza log. I contratti di `addedContracts` entrano nel filtro dal pezzo successivo.
+
+Il codice è `processRange(deps, from, to)` in `pipeline.ts` (2026-11-24). Restituisce `{ lastBlock, blocksProcessed, addedContracts }`; con `from > to` non fa niente e non chiama il nodo, e un `batchSize` che non è un intero positivo è un errore. Se un blocco fallisce, l'errore risale così com'è: i blocchi prima sono già scritti e il checkpoint punta all'ultimo di loro, quindi la chiamata successiva riparte da lì. I retry e lo stop sono del runner (passo 5). Il limite noto del §4, "Index creati a metà range", vale finché il passo 4 della roadmap non è scritto.
 
 **`processBlock(n)`.** Prima della transazione, `getBlock(n)` via RPC (numero, hash, `parentHash`, timestamp). I log del blocco arrivano già da `processRange`.
 
 **Controllo del `blockHash` dei log** (2026-11-24, `assertLogsBelongToBlock` di `chain/consistency.ts`). Prima di aprire la transazione, ogni log del blocco deve avere `blockNumber` e `blockHash` uguali a numero e hash del blocco appena letto. I log di un pezzo arrivano da una `getLogs` fatta prima delle `getBlock` dei singoli blocchi: se in mezzo c'è un reorg vicino all'head, o se le due chiamate le serve un nodo diverso (RPC di riserva, §2), il blocco `n` avrebbe i log di un'altra versione della chain. Il `parentHash` non se ne accorge, perché confronta solo i blocchi fra loro. Per questo il controllo serve anche con un solo RPC. Se fallisce (`LogBlockMismatchError`): niente scritture, si rileggono blocco e log del solo blocco `n` (`getLogs` da `n` a `n`) e si riprova, fino a 3 volte; poi `IndexerError` scritto fuori dalla transazione e stop, come per un `parentHash` diverso. Un blocco senza log non ha niente da confrontare: un provider che indicizza i log in ritardo resta un limite noto, coperto solo dalla scelta di provider affidabili.
 
-Poi, in una `prisma.$transaction`:
+**Controllo del `parentHash`** (spostato fuori dalla transazione il 2026-11-24, scrivendo il codice). Si legge `Block[n − 1]` e lo si confronta con il `parentHash` del blocco appena letto **prima** di aprire la transazione. Se non coincidono, `IndexerError` si scrive da sola, fuori dalla transazione, e poi si lancia `ParentHashMismatchError`: scritta dentro, il rollback che segue l'errore la cancellerebbe. Se `Block[n − 1]` non c'è il controllo si salta: è il primo blocco della chain (`startBlock`). Un buco in mezzo non può esistere, perché `Block` e `Checkpoint` si scrivono nella stessa transazione e si riparte sempre da checkpoint + 1. L'indexer è l'unico processo che scrive `Block`, quindi fra la lettura e la transazione la riga non può cambiare.
 
-1. controllo del `parentHash` contro la riga `Block` di `n − 1` (reorg, §6);
-2. riga `Block`;
-3. per ogni log decodificato: `RawEvent`, poi l'handler se esiste. Gli eventi senza handler restano solo in `RawEvent`. Un log `unknown` scrive invece una riga in `IndexerError` (§5, "Log non decodificabili");
-4. passi di fine blocco: prezzi dei feed e `NavSnapshot` (regole in `db.md`, "Prezzi");
-5. `Checkpoint` a `n`.
+Nello stesso punto si controlla il blocco `n` stesso (2026-11-24, emerso dai test di `processRange`): se è già salvato con un hash diverso da quello letto, `IndexerError` fuori dalla transazione e `StoredBlockMismatchError`. Succede quando si rielabora un blocco già scritto e la chain nel frattempo è cambiata. Senza il controllo `insertBlock` terrebbe la riga vecchia (salta i doppioni), il checkpoint prenderebbe l'hash nuovo, e l'incoerenza verrebbe fuori solo al blocco dopo, come `parentHash` sbagliato.
+
+Poi, in una `prisma.$transaction` (`timeout` 30 s e `maxWait` 10 s, costanti `BLOCK_TX_TIMEOUT_MS` e `BLOCK_TX_MAX_WAIT_MS` di `pipeline.ts`):
+
+1. riga `Block`;
+2. `RawEvent` di tutti i log decodificati del blocco, in un solo `createMany`. Scriverli tutti prima degli handler invece che uno per volta non cambia niente: è la stessa transazione, e nessun handler legge `RawEvent`;
+3. per ogni log `unknown`, una riga in `IndexerError` (§5, "Log non decodificabili");
+4. per ogni log decodificato, in ordine di `logIndex`, l'handler se esiste e se il tipo dell'emittente è fra quelli attesi (§3, "Dispatch degli handler"). Gli eventi senza handler restano solo in `RawEvent`;
+5. passi di fine blocco: prezzi dei feed e `NavSnapshot` (regole in `db.md`, "Prezzi"). Oggi non ce ne sono: il posto è segnato in `pipeline.ts`, prima del checkpoint;
+6. `Checkpoint` a `n`.
+
+I log di avviso (log sconosciuto, emittente inatteso) si scrivono dopo il commit: un avviso su un blocco poi annullato descriverebbe righe che non esistono. `processBlock` restituisce `{ block, blockInserted, rawEventsInserted, addedContracts }`; `blockInserted` è `false` quando il blocco era già nel DB.
 
 **RPC e transazione** (2026-11-20). La transazione interattiva di Prisma tiene riservata una connessione del pool per tutta la sua durata e ha un timeout (default 5 secondi, `maxWait` 2 secondi per avere la connessione). Il tempo di una chiamata RPC non lo controlliamo (retry dopo un 429, il fork che inoltra la richiesta upstream, rete lenta): dentro la transazione si mangia il timeout, il blocco fallisce con un errore del DB anche se il DB non c'entra, e la connessione resta occupata ad aspettare. Regole:
 
@@ -189,7 +201,7 @@ Il resto della mappa evento → tabella è in `db.md` e si aggiunge un handler a
 
 ## 6. Reorg
 
-Le regole sono in `db.md`, sezione "Reorg". Nel ciclo il punto di ingresso è il controllo del `parentHash` in `processBlock`: se non coincide si risale all'ultimo blocco comune, si applicano quelle regole e si riparte da lì. Finché il punto 5 della Fase 4 non è scritto, un `parentHash` diverso scrive una riga in `IndexerError` e ferma il processo. Su anvil un reorg si provoca con `anvil_reorg` o con `evm_snapshot` / `evm_revert`.
+Le regole sono in `db.md`, sezione "Reorg". Nel ciclo il punto di ingresso è il controllo del `parentHash` in `processBlock`: se non coincide si risale all'ultimo blocco comune, si applicano quelle regole e si riparte da lì. Finché il punto 5 della Fase 4 non è scritto, un `parentHash` diverso (o un blocco già salvato con un altro hash) scrive una riga in `IndexerError` (fuori dalla transazione del blocco, §4) e ferma il processo con `ParentHashMismatchError` (o `StoredBlockMismatchError`). Su anvil un reorg si provoca con `anvil_reorg` o con `evm_snapshot` / `evm_revert`.
 
 ## 7. Stato dei lavori
 
