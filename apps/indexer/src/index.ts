@@ -1,10 +1,17 @@
-// Entry point of the indexer. For now (indexer-roadmap.md steps 1-2) it reads the configuration,
-// checks the RPC chain id and logs both; bootstrap, backfill and live loop arrive with steps 3-4.
+// Entry point of the indexer. Minimal start (indexer-roadmap.md step 3): configuration, chain id check,
+// backfill from the checkpoint to the head, then exit. The live loop and SIGINT / SIGTERM arrive with step 5.
 import { fileURLToPath } from "node:url";
+import { protocolAddresses } from "@oam/abi";
+import { createPrismaClient } from "@oam/db";
 import { config as loadDotenv } from "dotenv";
 import { assertChainId, closeChainClients, createChainClients } from "./chain/clients.js";
 import { configSecrets, describeConfig, loadConfig } from "./config.js";
 import { errorFields, logger } from "./logger.js";
+import type { HandlerMap } from "./pipeline.js";
+import { backfill } from "./runner.js";
+
+/** Handlers by event name: none yet, every event is only stored in RawEvent (the first ones come with step 4). */
+const handlers: HandlerMap = {};
 
 async function main(): Promise<void> {
   loadDotenv({ path: fileURLToPath(new URL("../.env", import.meta.url)), quiet: true });
@@ -13,11 +20,25 @@ async function main(): Promise<void> {
   logger.info("configuration loaded", describeConfig(config));
 
   const clients = createChainClients(config);
+  const prisma = createPrismaClient(config.databaseUrl);
   try {
     await assertChainId(clients.http, config.chainId);
-    const head = await clients.http.getBlockNumber();
-    logger.info("rpc connected", { chainId: config.chainId, head, websocket: clients.ws !== undefined });
+    const startedAt = Date.now();
+    const result = await backfill(
+      { prisma, client: clients.http, chainId: config.chainId, handlers, batchSize: config.batchSize },
+      protocolAddresses[config.chainId],
+    );
+    logger.info("backfill done", {
+      chainId: config.chainId,
+      fromBlock: result.bootstrap.fromBlock,
+      head: result.head,
+      blocksProcessed: result.range.blocksProcessed,
+      insertedContracts: result.bootstrap.insertedContracts,
+      elapsedMs: Date.now() - startedAt,
+    });
   } finally {
+    // A failure while closing must not hide the error that stopped the process.
+    await prisma.$disconnect().catch((error: unknown) => logger.warn("prisma disconnect failed", errorFields(error)));
     await closeChainClients(clients);
   }
 }
