@@ -25,6 +25,8 @@ export class FakeChain {
   readonly blocks = new Map<bigint, FakeBlock>();
   logs: Log[] = [];
   readonly calls: { method: string; params: unknown[] }[] = [];
+  /** What eth_blockNumber answers; undefined = the highest block added. A test lowers it to play a provider behind. */
+  head: bigint | undefined;
   /** Called before every request is answered: a test can act at a precise moment (e.g. abort during a getLogs). */
   onRequest: ((method: string, params: unknown[]) => void) | undefined;
 
@@ -44,6 +46,7 @@ export class FakeChain {
           this.onRequest?.(method, params);
           if (method === "eth_getBlockByNumber") return Promise.resolve(this.rpcBlock(hexToBigInt(params[0] as Hex)));
           if (method === "eth_getLogs") return Promise.resolve(this.rpcLogs(params[0] as LogFilter));
+          if (method === "eth_blockNumber") return Promise.resolve(numberToHex(this.head ?? [...this.blocks.keys()].reduce((a, b) => (a > b ? a : b), 0n)));
           return Promise.reject(new Error(`FakeChain: unexpected ${method}`));
         },
       }),
