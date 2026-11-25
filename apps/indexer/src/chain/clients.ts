@@ -12,6 +12,20 @@ import {
 } from "viem";
 import type { Config } from "../config.js";
 
+/**
+ * Retries of a single request inside viem, before the error reaches the indexer (indexer.md §4, "Live").
+ * viem waits `RPC_RETRY_DELAY_MS * 2^attempt` between them (150, 300, 600 ms): it absorbs a blip of the provider.
+ * A longer outage is the runner's job, which waits with a growing pause between two catch-ups. These are viem's
+ * defaults, written here so that a viem upgrade cannot change them unseen.
+ */
+export const RPC_RETRY_COUNT = 3;
+/** Base pause of viem's retries, doubled at every attempt. */
+export const RPC_RETRY_DELAY_MS = 150;
+/** Time limit of one request; past it viem throws TimeoutError, which counts as transient (chain/errors.ts). */
+export const RPC_TIMEOUT_MS = 10_000;
+
+const retry = { retryCount: RPC_RETRY_COUNT, retryDelay: RPC_RETRY_DELAY_MS, timeout: RPC_TIMEOUT_MS } as const;
+
 export type ChainClients = {
   http: PublicClient<HttpTransport, Chain>;
   /** Present only when RPC_WS_URL is set. */
@@ -46,10 +60,10 @@ function indexedChain(chainId: number, rpcUrl: string, rpcWsUrl: string | undefi
 /** Creates the clients without touching the network. */
 export function createChainClients(config: Pick<Config, "chainId" | "rpcUrl" | "rpcWsUrl">): ChainClients {
   const chain = indexedChain(config.chainId, config.rpcUrl, config.rpcWsUrl);
-  const httpClient = createPublicClient({ chain, transport: http(config.rpcUrl) });
+  const httpClient = createPublicClient({ chain, transport: http(config.rpcUrl, retry) });
   const wsClient =
     config.rpcWsUrl !== undefined
-      ? createPublicClient({ chain, transport: webSocket(config.rpcWsUrl, { reconnect: true }) })
+      ? createPublicClient({ chain, transport: webSocket(config.rpcWsUrl, { reconnect: true, ...retry }) })
       : undefined;
   return { http: httpClient, ws: wsClient };
 }

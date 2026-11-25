@@ -1,6 +1,6 @@
 import { createPublicClient, custom } from "viem";
 import { describe, expect, it } from "vitest";
-import { assertChainId, ChainIdMismatchError, createChainClients } from "./clients.js";
+import { assertChainId, ChainIdMismatchError, createChainClients, RPC_RETRY_COUNT, RPC_RETRY_DELAY_MS, RPC_TIMEOUT_MS } from "./clients.js";
 
 function clientWithChainId(chainId: number) {
   return createPublicClient({
@@ -29,5 +29,13 @@ describe("createChainClients", () => {
     const clients = createChainClients({ ...base, rpcWsUrl: "ws://127.0.0.1:8545" });
     expect(clients.ws).toBeDefined();
     expect(clients.http.chain.id).toBe(31337);
+  });
+
+  it("sets viem's retries and timeout explicitly, the same on HTTP and WebSocket", () => {
+    const clients = createChainClients({ chainId: 31337, rpcUrl: "http://127.0.0.1:8545", rpcWsUrl: "ws://127.0.0.1:8545" });
+    const expected = { retryCount: RPC_RETRY_COUNT, retryDelay: RPC_RETRY_DELAY_MS, timeout: RPC_TIMEOUT_MS };
+
+    expect(clients.http.transport).toMatchObject(expected);
+    expect(clients.ws?.transport).toMatchObject(expected);
   });
 });
