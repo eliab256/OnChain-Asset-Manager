@@ -51,7 +51,7 @@ describe("processRange", () => {
     await insertIndexContract(db(), CHAIN, INDEX, 1n);
     const result = await processRange(deps(fake, 2), 1n, 5n);
 
-    expect(result).toEqual({ lastBlock: 5n, blocksProcessed: 5, addedContracts: [] });
+    expect(result).toEqual({ lastBlock: 5n, blocksProcessed: 5, addedContracts: [], stopped: false });
     expect(getLogsRanges(fake).map(([from, to]) => [from, to])).toEqual([
       [1n, 2n],
       [3n, 4n],
@@ -107,7 +107,7 @@ describe("processRange", () => {
 
   it("does nothing on an empty range", async () => {
     const fake = chain();
-    expect(await processRange(deps(fake, 2), 4n, 3n)).toEqual({ lastBlock: null, blocksProcessed: 0, addedContracts: [] });
+    expect(await processRange(deps(fake, 2), 4n, 3n)).toEqual({ lastBlock: null, blocksProcessed: 0, addedContracts: [], stopped: false });
     expect(fake.calls).toEqual([]);
   });
 

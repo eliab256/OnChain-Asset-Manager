@@ -25,6 +25,8 @@ export class FakeChain {
   readonly blocks = new Map<bigint, FakeBlock>();
   logs: Log[] = [];
   readonly calls: { method: string; params: unknown[] }[] = [];
+  /** Called before every request is answered: a test can act at a precise moment (e.g. abort during a getLogs). */
+  onRequest: ((method: string, params: unknown[]) => void) | undefined;
 
   /** Adds block n with the given hash byte; its parent is block n − 1 if present, else a fixed hash. */
   addBlock(number: bigint, hashByte: string, timestamp = 1_700_000_000n + number * 12n): FakeBlock {
@@ -39,6 +41,7 @@ export class FakeChain {
       transport: custom({
         request: ({ method, params }: { method: string; params: unknown[] }) => {
           this.calls.push({ method, params });
+          this.onRequest?.(method, params);
           if (method === "eth_getBlockByNumber") return Promise.resolve(this.rpcBlock(hexToBigInt(params[0] as Hex)));
           if (method === "eth_getLogs") return Promise.resolve(this.rpcLogs(params[0] as LogFilter));
           return Promise.reject(new Error(`FakeChain: unexpected ${method}`));

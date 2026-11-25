@@ -273,6 +273,11 @@ export async function processBlock(deps: PipelineDeps, blockNumber: bigint, logs
 export type RangeDeps = Omit<PipelineDeps, "contractKinds"> & {
   /** Blocks per eth_getLogs call (BATCH_SIZE). */
   batchSize: number;
+  /**
+   * Asks the range to stop (SIGINT / SIGTERM, indexer.md §4 "Chiusura"). Checked only between two blocks and
+   * before the getLogs of a chunk, never inside a block: the block being written always ends, committed or failed.
+   */
+  signal?: AbortSignal;
 };
 
 export type ProcessRangeResult = {
@@ -281,6 +286,8 @@ export type ProcessRangeResult = {
   blocksProcessed: number;
   /** Every contract added to Contract while processing the range. */
   addedContracts: AddedContract[];
+  /** True when the range ended early because `signal` was aborted; the next call resumes from the checkpoint. */
+  stopped: boolean;
 };
 
 /**
@@ -291,13 +298,20 @@ export type ProcessRangeResult = {
  * The addresses come from Contract, read once at the start of the range; contracts added by a block join
  * the filter of the next chunk. The logs of an Index created inside a chunk are requested before the chunk is
  * processed (withDiscoveredIndexLogs), so none of them is missed.
+ * With `signal` aborted the range stops before the next block (or the next chunk's getLogs) and returns with
+ * `stopped: true`; a stop is not an error. The block in progress when the signal arrives is finished first.
  * @throws whatever processBlock throws: the blocks before the failing one are already written and the
  *   checkpoint points at the last of them, so the next call resumes from there.
  */
 export async function processRange(deps: RangeDeps, from: bigint, to: bigint): Promise<ProcessRangeResult> {
   if (!Number.isInteger(deps.batchSize) || deps.batchSize < 1) throw new RangeError(`batchSize must be a positive integer, got ${deps.batchSize}`);
-  const result: ProcessRangeResult = { lastBlock: null, blocksProcessed: 0, addedContracts: [] };
+  const result: ProcessRangeResult = { lastBlock: null, blocksProcessed: 0, addedContracts: [], stopped: false };
   if (from > to) return result;
+  const stopRequested = (): boolean => {
+    if (deps.signal?.aborted !== true) return false;
+    result.stopped = true;
+    return true;
+  };
 
   const contractKinds = await loadContractKinds(deps.prisma, deps.chainId);
   const blockDeps: PipelineDeps = { ...deps, contractKinds };
@@ -305,6 +319,7 @@ export async function processRange(deps: RangeDeps, from: bigint, to: bigint): P
 
   for (let chunkStart = from; chunkStart <= to; chunkStart += batch) {
     const chunkEnd = chunkStart + batch - 1n < to ? chunkStart + batch - 1n : to;
+    if (stopRequested()) return result;
     const logs = await fetchRangeLogs(blockDeps, chunkStart, chunkEnd);
     const byBlock = new Map<bigint, ChainLog[]>();
     for (const log of logs) {
@@ -314,6 +329,7 @@ export async function processRange(deps: RangeDeps, from: bigint, to: bigint): P
     }
 
     for (let blockNumber = chunkStart; blockNumber <= chunkEnd; blockNumber++) {
+      if (stopRequested()) return result;
       const processed = await processBlock(blockDeps, blockNumber, byBlock.get(blockNumber) ?? []);
       for (const added of processed.addedContracts) contractKinds.set(added.address.toLowerCase(), added.kind);
       result.addedContracts.push(...processed.addedContracts);

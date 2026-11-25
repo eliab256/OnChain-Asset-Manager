@@ -65,6 +65,7 @@ describe.skipIf(probe.client === undefined)(`backfill of the anvil snapshot${pro
       lastBlock: head,
       blocksProcessed: Number(head - fixed.startBlock + 1n),
       addedContracts: deployedIndexes.map((address) => ({ address, kind: ContractKind.INDEX })),
+      stopped: false,
     });
 
     const blocks = await db().block.findMany({ where: { chainId: ANVIL_CHAIN_ID }, orderBy: { number: "asc" } });
@@ -113,7 +114,7 @@ describe.skipIf(probe.client === undefined)(`backfill of the anvil snapshot${pro
 
     const second = await backfill(deps(), fixed);
     expect(second.bootstrap).toEqual({ fromBlock: first.head + 1n, checkpoint: { blockNumber: first.head, blockHash: before.checkpoint?.lastBlockHash }, insertedContracts: 0 });
-    expect(second.range).toEqual({ lastBlock: null, blocksProcessed: 0, addedContracts: [] });
+    expect(second.range).toEqual({ lastBlock: null, blocksProcessed: 0, addedContracts: [], stopped: false });
     expect(await dump(db())).toEqual(before);
   });
 
