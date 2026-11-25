@@ -31,6 +31,7 @@ describe("loadConfig", () => {
   it("reads a complete environment", () => {
     expect(loadConfig(valid)).toEqual({
       rpcUrl: "http://127.0.0.1:8545",
+      rpcFallbackUrls: [],
       rpcWsUrl: "ws://127.0.0.1:8545",
       chainId: 31337,
       databaseUrl: "postgresql://oam:secret@localhost:5434/oam",
@@ -73,6 +74,29 @@ describe("loadConfig", () => {
     ]);
   });
 
+  it("reads RPC_FALLBACK_URLS in order, trimmed, skipping empty items", () => {
+    const config = loadConfig({ ...valid, RPC_FALLBACK_URLS: " https://a.example/v2/k1 , http://127.0.0.1:8546,," });
+    expect(config.rpcFallbackUrls).toEqual(["https://a.example/v2/k1", "http://127.0.0.1:8546"]);
+  });
+
+  it("treats an empty RPC_FALLBACK_URLS as no backup provider", () => {
+    expect(loadConfig({ ...valid, RPC_FALLBACK_URLS: " " }).rpcFallbackUrls).toEqual([]);
+  });
+
+  it("names the position of a bad backup URL", () => {
+    expect(problemsOf({ ...valid, RPC_FALLBACK_URLS: "http://127.0.0.1:8546,ws://127.0.0.1:8547,nope" })).toEqual([
+      "RPC_FALLBACK_URLS[1] must start with http:// or https://",
+      "RPC_FALLBACK_URLS[2] is not a valid URL",
+    ]);
+  });
+
+  it("rejects a backup URL repeated, or equal to RPC_URL", () => {
+    expect(problemsOf({ ...valid, RPC_FALLBACK_URLS: "http://127.0.0.1:8546,http://127.0.0.1:8546" })).toEqual([
+      "RPC_FALLBACK_URLS[1] repeats an earlier URL of the list",
+    ]);
+    expect(problemsOf({ ...valid, RPC_FALLBACK_URLS: valid.RPC_URL })).toEqual(["RPC_FALLBACK_URLS repeats RPC_URL"]);
+  });
+
   it("rejects something that is not a URL", () => {
     expect(problemsOf({ ...valid, DATABASE_URL: "localhost" })).toEqual(["DATABASE_URL is not a valid URL"]);
   });
@@ -96,6 +120,12 @@ describe("describeConfig", () => {
     expect(describeConfig(config).rpcWsUrl).toBe("wss://eth-mainnet.g.alchemy.com/***");
   });
 
+  it("masks the API key of every backup provider and prints null without them", () => {
+    const config = loadConfig({ ...valid, RPC_FALLBACK_URLS: "https://eth.llamarpc.com/rpc/KeyKeyKey0123456789,http://127.0.0.1:8546" });
+    expect(describeConfig(config).rpcFallbackUrls).toBe("https://eth.llamarpc.com/***, http://127.0.0.1:8546");
+    expect(describeConfig(loadConfig(valid)).rpcFallbackUrls).toBeNull();
+  });
+
   it("leaves a local URL readable", () => {
     expect(describeConfig(loadConfig(valid)).rpcUrl).toBe("http://127.0.0.1:8545");
   });
@@ -109,6 +139,9 @@ describe("configSecrets", () => {
 
     expect(secrets).toContain("0123456789abcdef0123456789abcdef");
     expect(secrets).toContain("secret");
+    expect(configSecrets(loadConfig({ ...valid, RPC_FALLBACK_URLS: "https://x.example/v3/fedcba9876543210fedcba9876543210" }))).toContain(
+      "fedcba9876543210fedcba9876543210",
+    );
     // The database name is not a secret: redacting "/oam" would mangle unrelated lines.
     expect(secrets).not.toContain("/oam");
   });

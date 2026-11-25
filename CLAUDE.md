@@ -45,7 +45,7 @@ make anvil && make deploy-anvil      # in due terminali: anvil pulito con mock
 make anvil-fork && make deploy-fork  # fork di mainnet al blocco 26.178.000, chain id 31338
 make deploy-index INDEX_ASSET_A=LINK INDEX_ASSET_B=COMP   # un index in più (variabili INDEX_*)
 make fund                  # WETH/WBTC/USDC agli account 0-9 di anvil e 10 ETH di gas a rebalancer e fee collector (anvil o fork), solo ricarica
-make snapshot              # anvil pulito + deploy + fund, stato in .anvil/31337.json
+make snapshot              # anvil pulito + deploy + fund, stato in .anvil/31337.json (con --preserve-historical-states: senza, dopo --load-state le letture ai blocchi passati falliscono)
 make dev                   # Postgres + chain + contratti + account finanziati (DEV_PROFILE=fork per il fork)
 make db / make db-down     # Postgres di docker-compose.yml
 npm run migrate --workspace @oam/db    # applica/crea migrazioni (serve packages/db/.env)

@@ -11,7 +11,10 @@ STATE_FILE="$STATE_DIR/31337.json"
 rm -f "$STATE_FILE"
 trap stop_anvil EXIT
 
-start_anvil --dump-state "$STATE_FILE"
+# --preserve-historical-states: without it the loaded snapshot has only the state of its last block, and every
+# read at an older block (the indexer's backfill reads name() at the block of IndexCreated) fails with
+# BlockOutOfRangeError.
+start_anvil --dump-state "$STATE_FILE" --preserve-historical-states
 wait_rpc
 make deploy-anvil
 stop_anvil

@@ -1,11 +1,14 @@
-// viem clients of the indexer. Every read goes through the HTTP client; the WebSocket client only
-// announces new blocks (apps/indexer/indexer.md §4, "Live").
+// viem clients of the indexer. Every read goes through the HTTP client, which tries RPC_URL first and the
+// backup providers after it (indexer.md §2, "RPC di riserva"); the WebSocket client only announces new blocks
+// (indexer.md §4, "Live"). Nothing here touches the network: the startup checks are in providers.ts.
 import {
   createPublicClient,
   defineChain,
+  fallback,
   http,
   webSocket,
   type Chain,
+  type FallbackTransport,
   type HttpTransport,
   type PublicClient,
   type WebSocketTransport,
@@ -26,8 +29,14 @@ export const RPC_TIMEOUT_MS = 10_000;
 
 const retry = { retryCount: RPC_RETRY_COUNT, retryDelay: RPC_RETRY_DELAY_MS, timeout: RPC_TIMEOUT_MS } as const;
 
+/** One HTTP provider on its own, without fallback: what the startup checks talk to. */
+export type ProviderClient = { url: string; client: PublicClient<HttpTransport, Chain> };
+
 export type ChainClients = {
-  http: PublicClient<HttpTransport, Chain>;
+  /** RPC_URL, then RPC_FALLBACK_URLS in order: the client every read of the indexer goes through. */
+  http: PublicClient<FallbackTransport<readonly HttpTransport[]>, Chain>;
+  /** The same providers one by one, in the same order, for checkProviders. */
+  providers: readonly ProviderClient[];
   /** Present only when RPC_WS_URL is set. */
   ws: PublicClient<WebSocketTransport, Chain> | undefined;
 };
@@ -48,24 +57,42 @@ export class ChainIdMismatchError extends Error {
  * definition works for the fork or for a public network. No multicall3 address on purpose: reads use
  * deployless multicall (see reads.ts), so pure anvil, which has no Multicall3, behaves like any other chain.
  */
-function indexedChain(chainId: number, rpcUrl: string, rpcWsUrl: string | undefined): Chain {
+function indexedChain(chainId: number, rpcUrls: readonly string[], rpcWsUrl: string | undefined): Chain {
   return defineChain({
     id: chainId,
     name: `chain-${chainId}`,
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-    rpcUrls: { default: { http: [rpcUrl], ...(rpcWsUrl !== undefined ? { webSocket: [rpcWsUrl] } : {}) } },
+    rpcUrls: { default: { http: [...rpcUrls], ...(rpcWsUrl !== undefined ? { webSocket: [rpcWsUrl] } : {}) } },
   });
 }
 
-/** Creates the clients without touching the network. */
-export function createChainClients(config: Pick<Config, "chainId" | "rpcUrl" | "rpcWsUrl">): ChainClients {
-  const chain = indexedChain(config.chainId, config.rpcUrl, config.rpcWsUrl);
-  const httpClient = createPublicClient({ chain, transport: http(config.rpcUrl, retry) });
+/**
+ * Creates the clients without touching the network.
+ *
+ * The HTTP client uses viem's fallback transport over RPC_URL and RPC_FALLBACK_URLS, in that order and without
+ * `rank`: every request goes to the first provider and moves to the next only when it fails, so the indexer
+ * changes node only when it has to (two nodes can disagree on head and reorgs). viem's fallback starts again from
+ * the first provider at every request: while RPC_URL is down, each request first waits for its error (immediate
+ * for a refused connection, up to RPC_TIMEOUT_MS for a provider that does not answer). The retries are the
+ * fallback's: it calls each provider once per attempt and repeats the whole list RPC_RETRY_COUNT times.
+ * With no RPC_FALLBACK_URLS the list has one provider and behaves like a plain http transport.
+ */
+export function createChainClients(config: Pick<Config, "chainId" | "rpcUrl" | "rpcFallbackUrls" | "rpcWsUrl">): ChainClients {
+  const urls = [config.rpcUrl, ...config.rpcFallbackUrls];
+  const chain = indexedChain(config.chainId, urls, config.rpcWsUrl);
+  const httpClient = createPublicClient({
+    chain,
+    transport: fallback(
+      urls.map((url) => http(url, { timeout: RPC_TIMEOUT_MS })),
+      { retryCount: RPC_RETRY_COUNT, retryDelay: RPC_RETRY_DELAY_MS },
+    ),
+  });
+  const providers = urls.map((url) => ({ url, client: createPublicClient({ chain, transport: http(url, retry) }) }));
   const wsClient =
     config.rpcWsUrl !== undefined
       ? createPublicClient({ chain, transport: webSocket(config.rpcWsUrl, { reconnect: true, ...retry }) })
       : undefined;
-  return { http: httpClient, ws: wsClient };
+  return { http: httpClient, providers, ws: wsClient };
 }
 
 /**
