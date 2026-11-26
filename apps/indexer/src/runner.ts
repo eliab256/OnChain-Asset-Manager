@@ -1,6 +1,6 @@
 // Runner: decides when the indexer works (indexer.md §3 and §4). Bootstrap and backfill up to the head, then
-// catch-up rounds run one at a time (createCatchUp). The signals that trigger them (WebSocket, polling) and
-// SIGINT / SIGTERM arrive with part 5 of step 5 of localHelpers/indexer-roadmap.md.
+// catch-up rounds run one at a time (createCatchUp). The signals that trigger them (WebSocket, guard timer) are in
+// live.ts, the wiring and SIGINT / SIGTERM in index.ts.
 import { isTransientRpcError } from "./chain/errors.js";
 import { errorFields, logger } from "./logger.js";
 import { processRange, type ProcessRangeResult, type RangeDeps } from "./pipeline.js";
@@ -136,7 +136,7 @@ export type CatchUpOptions = {
 
 export type CatchUp = {
   /**
-   * Asks for a round (a new block was announced, or the poll fired). With no round running one starts; with one
+   * Asks for a round (a new block was announced, or the guard timer fired). With no round running one starts; with one
    * running, one more is scheduled after it, however many triggers arrive meanwhile. Ignored after stop or a fatal error.
    */
   trigger: () => void;
@@ -160,7 +160,7 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Runs catch-up rounds one at a time (indexer.md §4, "Live"). The WebSocket and the poll both call trigger(), and
+ * Runs catch-up rounds one at a time (indexer.md §4, "Live"). The WebSocket and the guard timer both call trigger(), and
  * nothing guarantees they do not fire together: two processRange at once would write the same blocks in parallel.
  * Here a trigger during a round only sets a flag, and one more round runs after the current one.
  *

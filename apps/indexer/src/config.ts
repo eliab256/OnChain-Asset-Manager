@@ -10,7 +10,7 @@ export type Config = {
    * Empty when RPC_FALLBACK_URLS is not set.
    */
   rpcFallbackUrls: readonly string[];
-  /** WebSocket RPC of the same chain, used only to be told about new blocks. Undefined = polling only. */
+  /** WebSocket RPC of the same chain, used only to be told about new blocks. Undefined = guard timer only. */
   rpcWsUrl: string | undefined;
   /** 31337 (anvil) or 31338 (mainnet fork). Checked against eth_chainId at startup. */
   chainId: SupportedChainId;
@@ -18,7 +18,10 @@ export type Config = {
   databaseUrl: string;
   /** Blocks per getLogs call during the backfill. */
   batchSize: number;
-  /** Interval of the HTTP head polling in milliseconds. */
+  /**
+   * Guard timer in milliseconds (indexer.md §4, "Live"): with no WebSocket announcement for this long, a catch-up
+   * round runs via HTTP. Without RPC_WS_URL it fires at every interval, as a plain polling.
+   */
   pollIntervalMs: number;
 };
 
